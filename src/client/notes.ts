@@ -1,55 +1,24 @@
 import { BOLD_STAR, ITALIC_STAR, QUOTE, type Transformer } from "@lexical/markdown";
-import * as Effect from "effect/Effect";
 import type { Highlight } from "./highlights.ts";
 
 // A Note is the single self-contained unit of annotation. It absorbs the
 // standalone Step 1 Highlight entity: an empty-body note is a plain highlight,
 // a note with a body is an annotation, and a note with a parent is a reply.
+//
+// Notes are authored by the NoteAgent durable object (see src/server): the
+// server stamps id, sourceId, createdAt, and version; clients only send the
+// content of a change.
 export interface Note {
-  id: string; // local uuid now; server ULID in Step 4+
+  id: string; // server ULID (sortable, monotonic per book)
   sourceId: string; // the Source (book) hash this note belongs to
   author: string; // "local" until Step 7
   parent: string | null; // another note id for replies; null for top-level notes
   body: string; // markdown serialized from Lexical (may be empty)
   highlights: Highlight[]; // embedded anchors; empty for replies
-  createdAt: string; // local clock; ordering only until seq exists
+  createdAt: string; // server clock; display + ordering fallback
   editedAt: string | null;
-  version: number; // bumped on edit; groundwork for Step 4 baseVersion
+  version: number; // bumped on edit; groundwork for baseVersion conflicts
 }
-
-// Build a top-level Note from its embedded highlights and a body. The id is a
-// local placeholder; the server will assign the canonical ulid in a later step.
-export const createNote = (
-  sourceId: string,
-  body: string,
-  highlights: Highlight[],
-): Effect.Effect<Note> =>
-  Effect.sync(() => ({
-    id: crypto.randomUUID(),
-    sourceId,
-    author: "local",
-    parent: null,
-    body,
-    highlights,
-    createdAt: new Date().toISOString(),
-    editedAt: null,
-    version: 1,
-  }));
-
-// Build a reply: a Note that points at another note (parent) rather than the
-// book, so it carries no embedded highlights.
-export const createReply = (sourceId: string, parent: string, body: string): Effect.Effect<Note> =>
-  Effect.sync(() => ({
-    id: crypto.randomUUID(),
-    sourceId,
-    author: "local",
-    parent,
-    body,
-    highlights: [],
-    createdAt: new Date().toISOString(),
-    editedAt: null,
-    version: 1,
-  }));
 
 // The single source of truth for the note body dialect. Both the Lexical editor
 // (serialize/parse) and the hand-rolled renderer key off this restricted set:

@@ -7,6 +7,14 @@ export { NoteAgent } from "./NoteAgent.ts";
 // back to the Vite-built client assets for everything else.
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    return (await routeAgentRequest(request, env)) ?? env.ASSETS.fetch(request);
+    const agentResponse = await routeAgentRequest(request, env);
+    if (agentResponse) return agentResponse;
+    // In `wrangler dev` there is no ASSETS binding: the client is served by the
+    // vite dev server on :5173, which proxies /agents here. Only the deployed
+    // worker serves the built client.
+    if (!env.ASSETS) {
+      return new Response("Run the client via the vite dev server (npm run dev).", { status: 404 });
+    }
+    return env.ASSETS.fetch(request);
   },
 };

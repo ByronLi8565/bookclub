@@ -2,20 +2,21 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { captureHighlight, locateHighlight, type Highlight } from "./highlights.ts";
-import { createNote, createReply, type Note } from "./notes.ts";
-import { useRun } from "./runtime.tsx";
+import type { Note } from "./notes.ts";
 import { hashFile } from "./storage/hashFile.ts";
-import { NoteStore } from "./storage/NoteStore.ts";
 import { NotePanel } from "./ui/NotePanel.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
+import { useNoteAgent } from "./useNoteAgent.ts";
 
 export default function App() {
-  const run = useRun();
   const [file, setFile] = useState<File | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
+  // Notes are owned by the durable object; this is its live broadcast state.
+  const agent = useNoteAgent(sourceId);
+  const notes = agent.notes;
+
   // The armed highlight being composed into a new note (painted, awaiting save).
   const [composing, setComposing] = useState<Highlight | null>(null);
   const composingRef = useRef<Highlight | null>(null);
@@ -34,141 +35,115 @@ export default function App() {
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
 
+  // Which embedded highlights are currently painted on the rendition, mapped to
+  // the cfi they were drawn at, so the sync effect can diff against live state.
+  const drawnRef = useRef<Map<string, string>>(new Map());
+
   // Add Note: capture the highlight synchronously (never retain the live range),
   // paint it, and arm the compose slot. The note is created only on save.
   onSelectRef.current = (cfi, range) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
-    run(
-      Effect.gen(function* () {
-        const highlight = yield* captureHighlight(sid, cfi, range);
-        // Replace any in-flight compose: erase its orphaned paint first.
-        const prev = composingRef.current;
-        if (prev) view.eraseHighlight(prev.cfi.value);
-        view.drawHighlight(highlight.id, highlight.cfi.value, () => view.goTo(highlight.cfi.value));
-        setComposing(highlight);
-      }),
-    );
+    Effect.runPromise(captureHighlight(sid, cfi, range)).then((highlight) => {
+      // Replace any in-flight compose: erase its orphaned paint first.
+      const prev = composingRef.current;
+      if (prev) {
+        view.eraseHighlight(prev.cfi.value);
+        drawnRef.current.delete(prev.id);
+      }
+      view.drawHighlight(highlight.id, highlight.cfi.value, () => view.goTo(highlight.cfi.value));
+      drawnRef.current.set(highlight.id, highlight.cfi.value);
+      setComposing(highlight);
+    });
   };
 
   function onComposeSave(body: string) {
-    const sid = sourceIdRef.current;
     const highlight = composingRef.current;
-    if (!sid || !highlight) return;
-    run(
-      Effect.gen(function* () {
-        const store = yield* NoteStore;
-        const note = yield* createNote(sid, body, [highlight]);
-        yield* store.save(note);
-        setNotes((prev) => [...prev, note]);
-        setComposing(null);
-      }),
-    );
+    if (!sourceIdRef.current || !highlight) return;
+    agent.addNote(body, [highlight]);
+    setComposing(null);
   }
 
   function onComposeCancel() {
     const highlight = composingRef.current;
-    if (highlight) view.eraseHighlight(highlight.cfi.value);
+    if (highlight) {
+      view.eraseHighlight(highlight.cfi.value);
+      drawnRef.current.delete(highlight.id);
+    }
     setComposing(null);
   }
 
   function onEditSave(note: Note, body: string) {
-    run(
-      Effect.gen(function* () {
-        const store = yield* NoteStore;
-        const updated: Note = {
-          ...note,
-          body,
-          editedAt: new Date().toISOString(),
-          version: note.version + 1,
-        };
-        yield* store.save(updated);
-        setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
-        setEditingId(null);
-      }),
-    );
+    agent.editNote(note.id, body);
+    setEditingId(null);
   }
 
   function onReplySave(parentId: string, body: string) {
-    const sid = sourceIdRef.current;
     // An empty reply has nothing to show (no highlight, no body); discard it.
-    if (!sid || body === "") {
+    if (body === "") {
       setReplyingTo(null);
       return;
     }
-    run(
-      Effect.gen(function* () {
-        const store = yield* NoteStore;
-        const reply = yield* createReply(sid, parentId, body);
-        yield* store.save(reply);
-        setNotes((prev) => [...prev, reply]);
-        setReplyingTo(null);
-      }),
-    );
+    agent.addReply(parentId, body);
+    setReplyingTo(null);
   }
 
+  // Keep the rendition's painted highlights in sync with the live note state:
+  // draw (and rebind drifted cfis for) highlights that appear, erase those that
+  // leave. Runs on every state change, so a peer's note shows up here too.
   useEffect(() => {
-    if (!view.ready || !sourceId) return;
+    if (!view.ready) return;
     let cancelled = false;
-    run(
-      Effect.gen(function* () {
-        const store = yield* NoteStore;
-        const saved = yield* store.list(sourceId);
-        if (cancelled) return;
-        setNotes(saved);
-        // Re-locate every embedded highlight, rebinding cfis that drifted.
-        const rebinds = new Map<string, Map<string, string>>();
-        for (const note of saved) {
-          for (const h of note.highlights) {
-            if (cancelled) return;
-            const located = yield* locateHighlight(h, view.reader);
-            if (!located) continue;
-            if (located.cfi !== h.cfi.value) {
-              yield* store.updateHighlightCfi(note.id, h.id, located.cfi);
-              const perNote = rebinds.get(note.id) ?? new Map<string, string>();
-              perNote.set(h.id, located.cfi);
-              rebinds.set(note.id, perNote);
-            }
-            const cfi = located.cfi;
-            view.drawHighlight(h.id, cfi, () => view.goTo(cfi));
-          }
+
+    // The composing highlight is painted but not yet in state; keep it alive.
+    const live = new Set<string>();
+    for (const note of notes) for (const h of note.highlights) live.add(h.id);
+    const comp = composingRef.current;
+    if (comp) live.add(comp.id);
+    for (const [hid, cfi] of drawnRef.current) {
+      if (!live.has(hid)) {
+        view.eraseHighlight(cfi);
+        drawnRef.current.delete(hid);
+      }
+    }
+
+    void (async () => {
+      for (const note of notes) {
+        for (const h of note.highlights) {
+          if (cancelled) return;
+          if (drawnRef.current.has(h.id)) continue;
+          const located = await Effect.runPromise(locateHighlight(h, view.reader));
+          if (cancelled || !located) continue;
+          // A drifted cfi is rebound back into shared state for everyone.
+          if (located.cfi !== h.cfi.value) agent.rebindHighlight(note.id, h.id, located.cfi);
+          const cfi = located.cfi;
+          view.drawHighlight(h.id, cfi, () => view.goTo(cfi));
+          drawnRef.current.set(h.id, cfi);
         }
-        if (!cancelled && rebinds.size > 0) {
-          setNotes((prev) =>
-            prev.map((note) => {
-              const perNote = rebinds.get(note.id);
-              if (!perNote) return note;
-              return {
-                ...note,
-                highlights: note.highlights.map((h) => {
-                  const cfi = perNote.get(h.id);
-                  return cfi ? { ...h, cfi: { ...h.cfi, value: cfi } } : h;
-                }),
-              };
-            }),
-          );
-        }
-      }),
-    );
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
-    // Intentionally re-run only when the source becomes ready, not on every view identity change.
+    // Re-run on state changes and when the book becomes ready, not on every view identity change.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.ready, sourceId]);
+  }, [notes, view.ready]);
 
-  const onPick = useCallback(
-    (f: File) => {
-      const pickId = ++filePickRef.current;
-      setNotes([]);
-      setSourceId(null);
-      setFile(f);
-      run(hashFile(f)).then((id) => {
-        if (filePickRef.current === pickId) setSourceId(id);
-      });
-    },
-    [run],
-  );
+  // A new book means a new rendition with no annotations; forget what we drew.
+  useEffect(() => {
+    drawnRef.current.clear();
+  }, [sourceId]);
+
+  const onPick = useCallback((f: File) => {
+    const pickId = ++filePickRef.current;
+    setSourceId(null);
+    setComposing(null);
+    setFile(f);
+    Effect.runPromise(hashFile(f)).then((id) => {
+      if (filePickRef.current === pickId) setSourceId(id);
+    });
+  }, []);
 
   // TEMP: accept ?book=<url> to auto-load a fixture (used by the bombadil test).
   useEffect(() => {
@@ -180,16 +155,10 @@ export default function App() {
   }, [onPick]);
 
   function onDelete(note: Note) {
-    run(
-      Effect.gen(function* () {
-        const store = yield* NoteStore;
-        yield* store.remove(note.id);
-        for (const h of note.highlights) view.eraseHighlight(h.cfi.value);
-        setNotes((prev) => prev.filter((x) => x.id !== note.id));
-        setEditingId((id) => (id === note.id ? null : id));
-        setReplyingTo((id) => (id === note.id ? null : id));
-      }),
-    );
+    // Erasing the paint is handled by the sync effect once the note leaves state.
+    agent.removeNote(note.id);
+    setEditingId((id) => (id === note.id ? null : id));
+    setReplyingTo((id) => (id === note.id ? null : id));
   }
 
   function onJump(note: Note) {
