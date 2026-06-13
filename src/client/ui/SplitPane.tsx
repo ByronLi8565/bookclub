@@ -1,11 +1,15 @@
 import { useRef, useState, type ReactNode } from "react";
 
 // Two panes with a draggable vertical divider. left width is a percentage.
+// A transparent overlay covers the panes while dragging so the epub iframe
+// Doesn't swallow pointer events mid-drag.
 export function SplitPane({ left, right }: { left: ReactNode; right: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pct, setPct] = useState(62);
+  const [dragging, setDragging] = useState(false);
 
   function startDrag() {
+    setDragging(true);
     const move = (e: PointerEvent) => {
       const rect = ref.current?.getBoundingClientRect();
       if (!rect) return;
@@ -13,6 +17,7 @@ export function SplitPane({ left, right }: { left: ReactNode; right: ReactNode }
       setPct(Math.min(80, Math.max(25, next)));
     };
     const stop = () => {
+      setDragging(false);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
     };
@@ -27,6 +32,7 @@ export function SplitPane({ left, right }: { left: ReactNode; right: ReactNode }
       </div>
       <div className="split-divider" onPointerDown={startDrag} />
       <div className="split-pane split-pane--grow">{right}</div>
+      {dragging && <div className="split-overlay" />}
     </div>
   );
 }

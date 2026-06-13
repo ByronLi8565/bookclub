@@ -1,7 +1,8 @@
-import * as Effect from "effect/Effect";
+import type * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { createContext, useCallback, useContext, type ReactNode } from "react";
-import { HighlightStore, HighlightStoreLive } from "./storage/HighlightStore.ts";
+import type { HighlightStore } from "./storage/HighlightStore.ts";
+import { HighlightStoreLive } from "./storage/HighlightStore.ts";
 
 const runtime = ManagedRuntime.make(HighlightStoreLive);
 
