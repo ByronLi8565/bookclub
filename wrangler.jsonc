@@ -1,0 +1,13 @@
+{
+  // Local-dev only. Alchemy (alchemy.run.ts) owns deploy; this file exists
+  // because `alchemy dev` cannot emulate the durable object locally, while
+  // `wrangler dev` fully emulates the NoteAgent DO + its websockets. Keep the
+  // bindings/migrations/compat here in sync with alchemy.run.ts.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bookclub",
+  "main": "src/server/worker.ts",
+  "compatibility_date": "2026-03-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": { "bindings": [{ "name": "NoteAgent", "class_name": "NoteAgent" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NoteAgent"] }],
+}

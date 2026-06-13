@@ -2,5 +2,8 @@
 .alchemy
 node_modules
 
+# wrangler local dev state
+.wrangler
+
 # bombadil
 .bombadil
