@@ -1,0 +1,188 @@
+:root {
+  --line: 3px solid #000;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #fff;
+  color: #000;
+}
+
+button {
+  font: inherit;
+  background: #fff;
+  color: #000;
+  border: var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #000;
+  color: #fff;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: var(--line);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.picker {
+  border: var(--line);
+  padding: 6px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.picker input {
+  display: none;
+}
+
+.source-id {
+  margin-left: auto;
+  opacity: 0.6;
+}
+
+.split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.split-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.split-pane--grow {
+  flex: 1;
+}
+
+.split-divider {
+  width: 0;
+  border-left: var(--line);
+  cursor: col-resize;
+  flex: 0 0 auto;
+  touch-action: none;
+}
+
+.split-divider:hover {
+  border-left-color: #000;
+  box-shadow: 0 0 0 2px #000;
+}
+
+.reader {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.reader-empty {
+  margin: auto;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.reader-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: var(--line);
+}
+
+.reader-bar .spacer {
+  flex: 1;
+}
+
+.reader-bar .font-size {
+  min-width: 48px;
+  text-align: center;
+}
+
+.reader-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.highlight-list {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.highlight-list h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.highlight-list .empty {
+  opacity: 0.6;
+}
+
+.highlight-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.highlight-list li {
+  display: flex;
+  gap: 6px;
+  border: var(--line);
+}
+
+.highlight-list .quote {
+  flex: 1;
+  border: none;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.highlight-list .delete {
+  border: none;
+  border-left: var(--line);
+}
+
+.bc-highlight {
+  fill: #000;
+  fill-opacity: 0.25;
+}

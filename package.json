@@ -1,0 +1,39 @@
+{
+  "name": "bookclub",
+  "type": "module",
+  "scripts": {
+    "dev": "alchemy dev",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "check": "oxfmt --check && oxlint && tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "4.0.0-beta.83",
+    "epubjs": "^0.3.93",
+    "idb": "^8.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250805.0",
+    "@effect/platform-node": "4.0.0-beta.83",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "alchemy": "next",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
+    "typescript": "^5.6.0",
+    "vite": "^8.0.7"
+  },
+  "trustedDependencies": [
+    "core-js",
+    "es5-ext"
+  ]
+}
