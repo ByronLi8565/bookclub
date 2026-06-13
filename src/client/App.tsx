@@ -1,14 +1,15 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createCard } from "./cards/createCard.ts";
-import type { Card } from "./cards/types.ts";
 import { captureHighlight } from "./highlights/captureHighlight.ts";
 import { locateHighlight } from "./highlights/locateHighlight.ts";
+import type { Highlight } from "./highlights/types.ts";
+import { createNote } from "./notes/createNote.ts";
+import type { Note } from "./notes/types.ts";
 import { useRun } from "./runtime.tsx";
 import { hashFile } from "./sources/hashFile.ts";
-import { CardStore } from "./storage/CardStore.ts";
-import { CardPanel } from "./ui/CardPanel.tsx";
+import { NoteStore } from "./storage/NoteStore.ts";
+import { NotePanel } from "./ui/NotePanel.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
@@ -17,7 +18,12 @@ export default function App() {
   const run = useRun();
   const [file, setFile] = useState<File | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
-  const [cards, setCards] = useState<Card[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  // The armed highlight being composed into a new note (painted, awaiting save).
+  const [composing, setComposing] = useState<Highlight | null>(null);
+  const composingRef = useRef<Highlight | null>(null);
+  composingRef.current = composing;
+  const [editingId, setEditingId] = useState<string | null>(null);
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
   const filePickRef = useRef(0);
@@ -31,57 +37,95 @@ export default function App() {
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
 
   // Add Note: capture the highlight synchronously (never retain the live range),
-  // paint it, and create an empty-body card. The editor arrives in Step 2.
+  // paint it, and arm the compose slot. The note is created only on save.
   onSelectRef.current = (cfi, range) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
     run(
       Effect.gen(function* () {
-        const store = yield* CardStore;
         const highlight = yield* captureHighlight(sid, cfi, range);
-        const card = yield* createCard(sid, "", [highlight]);
-        yield* store.save(card);
-        setCards((prev) => [...prev, card]);
+        // Replace any in-flight compose: erase its orphaned paint first.
+        const prev = composingRef.current;
+        if (prev) view.eraseHighlight(prev.cfi.value);
         view.drawHighlight(highlight.id, highlight.cfi.value, () => view.goTo(highlight.cfi.value));
+        setComposing(highlight);
       }),
     );
   };
+
+  function onComposeSave(body: string) {
+    const sid = sourceIdRef.current;
+    const highlight = composingRef.current;
+    if (!sid || !highlight) return;
+    run(
+      Effect.gen(function* () {
+        const store = yield* NoteStore;
+        const note = yield* createNote(sid, body, [highlight]);
+        yield* store.save(note);
+        setNotes((prev) => [...prev, note]);
+        setComposing(null);
+      }),
+    );
+  }
+
+  function onComposeCancel() {
+    const highlight = composingRef.current;
+    if (highlight) view.eraseHighlight(highlight.cfi.value);
+    setComposing(null);
+  }
+
+  function onEditSave(note: Note, body: string) {
+    run(
+      Effect.gen(function* () {
+        const store = yield* NoteStore;
+        const updated: Note = {
+          ...note,
+          body,
+          editedAt: new Date().toISOString(),
+          version: note.version + 1,
+        };
+        yield* store.save(updated);
+        setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
+        setEditingId(null);
+      }),
+    );
+  }
 
   useEffect(() => {
     if (!view.ready || !sourceId) return;
     let cancelled = false;
     run(
       Effect.gen(function* () {
-        const store = yield* CardStore;
+        const store = yield* NoteStore;
         const saved = yield* store.list(sourceId);
         if (cancelled) return;
-        setCards(saved);
+        setNotes(saved);
         // Re-locate every embedded highlight, rebinding cfis that drifted.
         const rebinds = new Map<string, Map<string, string>>();
-        for (const card of saved) {
-          for (const h of card.highlights) {
+        for (const note of saved) {
+          for (const h of note.highlights) {
             if (cancelled) return;
             const located = yield* locateHighlight(h, view.reader);
             if (!located) continue;
             if (located.cfi !== h.cfi.value) {
-              yield* store.updateHighlightCfi(card.id, h.id, located.cfi);
-              const perCard = rebinds.get(card.id) ?? new Map<string, string>();
-              perCard.set(h.id, located.cfi);
-              rebinds.set(card.id, perCard);
+              yield* store.updateHighlightCfi(note.id, h.id, located.cfi);
+              const perNote = rebinds.get(note.id) ?? new Map<string, string>();
+              perNote.set(h.id, located.cfi);
+              rebinds.set(note.id, perNote);
             }
             const cfi = located.cfi;
             view.drawHighlight(h.id, cfi, () => view.goTo(cfi));
           }
         }
         if (!cancelled && rebinds.size > 0) {
-          setCards((prev) =>
-            prev.map((card) => {
-              const perCard = rebinds.get(card.id);
-              if (!perCard) return card;
+          setNotes((prev) =>
+            prev.map((note) => {
+              const perNote = rebinds.get(note.id);
+              if (!perNote) return note;
               return {
-                ...card,
-                highlights: card.highlights.map((h) => {
-                  const cfi = perCard.get(h.id);
+                ...note,
+                highlights: note.highlights.map((h) => {
+                  const cfi = perNote.get(h.id);
                   return cfi ? { ...h, cfi: { ...h.cfi, value: cfi } } : h;
                 }),
               };
@@ -100,7 +144,7 @@ export default function App() {
   const onPick = useCallback(
     (f: File) => {
       const pickId = ++filePickRef.current;
-      setCards([]);
+      setNotes([]);
       setSourceId(null);
       setFile(f);
       run(hashFile(f)).then((id) => {
@@ -119,21 +163,28 @@ export default function App() {
       .then((b) => onPick(new File([b], url.split("/").pop() ?? "book.epub")));
   }, [onPick]);
 
-  function onDelete(card: Card) {
+  function onDelete(note: Note) {
     run(
       Effect.gen(function* () {
-        const store = yield* CardStore;
-        yield* store.remove(card.id);
-        for (const h of card.highlights) view.eraseHighlight(h.cfi.value);
-        setCards((prev) => prev.filter((x) => x.id !== card.id));
+        const store = yield* NoteStore;
+        yield* store.remove(note.id);
+        for (const h of note.highlights) view.eraseHighlight(h.cfi.value);
+        setNotes((prev) => prev.filter((x) => x.id !== note.id));
+        setEditingId((id) => (id === note.id ? null : id));
       }),
     );
   }
 
-  function onJump(card: Card) {
-    const cfi = card.highlights[0]?.cfi.value;
+  function onJump(note: Note) {
+    const cfi = note.highlights[0]?.cfi.value;
     if (cfi) view.goTo(cfi);
   }
+
+  // Seed a new note's body with the highlighted passage as a blockquote, then a
+  // blank paragraph for the note text.
+  const composeInitialBody = composing
+    ? `> ${composing.quote.exact.replaceAll(/\s+/gu, " ").trim()}\n\n`
+    : "";
 
   return (
     <div className="app">
@@ -155,7 +206,21 @@ export default function App() {
       </header>
       <SplitPane
         left={<Reader view={view} hasFile={!!file} />}
-        right={<CardPanel cards={cards} onJump={onJump} onDelete={onDelete} />}
+        right={
+          <NotePanel
+            notes={notes}
+            composing={composing !== null}
+            composeInitialBody={composeInitialBody}
+            editingId={editingId}
+            onComposeSave={onComposeSave}
+            onComposeCancel={onComposeCancel}
+            onEdit={(note) => setEditingId(note.id)}
+            onEditSave={onEditSave}
+            onEditCancel={() => setEditingId(null)}
+            onJump={onJump}
+            onDelete={onDelete}
+          />
+        }
       />
     </div>
   );

@@ -40,21 +40,17 @@ export function Reader({ view, hasFile }: { view: SourceView; hasFile: boolean }
         </div>
         {ready && !view.location?.atStart && (
           <button
-            className="reader-arrow reader-arrow--prev"
+            className="reader-page-turn reader-page-turn--prev"
             onClick={view.prev}
             aria-label="Previous page"
-          >
-            ‹
-          </button>
+          />
         )}
         {ready && !view.location?.atEnd && (
           <button
-            className="reader-arrow reader-arrow--next"
+            className="reader-page-turn reader-page-turn--next"
             onClick={view.next}
             aria-label="Next page"
-          >
-            ›
-          </button>
+          />
         )}
       </div>
       {selection && (

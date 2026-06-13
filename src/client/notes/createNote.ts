@@ -1,14 +1,14 @@
 import * as Effect from "effect/Effect";
 import type { Highlight } from "../highlights/types.ts";
-import type { Card } from "./types.ts";
+import type { Note } from "./types.ts";
 
-// Build a top-level Card from its embedded highlights and a body. The id is a
+// Build a top-level Note from its embedded highlights and a body. The id is a
 // local placeholder; the server will assign the canonical ulid in a later step.
-export const createCard = (
+export const createNote = (
   sourceId: string,
   body: string,
   highlights: Highlight[],
-): Effect.Effect<Card> =>
+): Effect.Effect<Note> =>
   Effect.sync(() => ({
     id: crypto.randomUUID(),
     sourceId,

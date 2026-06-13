@@ -14,10 +14,15 @@
     "check": "oxfmt --check && oxlint && tsc --noEmit"
   },
   "dependencies": {
+    "@lexical/markdown": "^0.45.0",
+    "@lexical/react": "^0.45.0",
+    "@lexical/rich-text": "^0.45.0",
+    "@lexical/utils": "^0.45.0",
     "@tanstack/react-hotkeys": "^0.10.0",
     "effect": "4.0.0-beta.83",
     "epubjs": "^0.3.93",
     "idb": "^8.0.0",
+    "lexical": "^0.45.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

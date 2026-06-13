@@ -1,26 +1,26 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { Card } from "../cards/types.ts";
+import type { Note } from "../notes/types.ts";
 import { StorageError } from "../errors.ts";
 import { getDb } from "./db.ts";
 
-interface CardStoreShape {
-  list(sourceId: string): Effect.Effect<Card[], StorageError>;
-  save(card: Card): Effect.Effect<void, StorageError>;
+interface NoteStoreShape {
+  list(sourceId: string): Effect.Effect<Note[], StorageError>;
+  save(note: Note): Effect.Effect<void, StorageError>;
   remove(id: string): Effect.Effect<void, StorageError>;
   // Rebind a single embedded highlight's cfi after a locate.
   updateHighlightCfi(
-    cardId: string,
+    noteId: string,
     highlightId: string,
     value: string,
   ): Effect.Effect<void, StorageError>;
 }
 
-export class CardStore extends Context.Service<CardStore, CardStoreShape>()("CardStore") {}
+export class NoteStore extends Context.Service<NoteStore, NoteStoreShape>()("NoteStore") {}
 
-export const CardStoreLive = Layer.effect(
-  CardStore,
+export const NoteStoreLive = Layer.effect(
+  NoteStore,
   Effect.gen(function* () {
     const db = yield* Effect.promise(() => getDb());
     const run = <A>(thunk: () => Promise<A>) =>
@@ -28,19 +28,19 @@ export const CardStoreLive = Layer.effect(
 
     return {
       list: (sourceId) =>
-        run(() => db.getAllFromIndex("cards", "by-source", sourceId)).pipe(
+        run(() => db.getAllFromIndex("notes", "by-source", sourceId)).pipe(
           Effect.map((all) => all.sort((a, b) => a.createdAt.localeCompare(b.createdAt))),
         ),
-      save: (card) => run(() => db.put("cards", card)).pipe(Effect.asVoid),
-      remove: (id) => run(() => db.delete("cards", id)).pipe(Effect.asVoid),
-      updateHighlightCfi: (cardId, highlightId, value) =>
+      save: (note) => run(() => db.put("notes", note)).pipe(Effect.asVoid),
+      remove: (id) => run(() => db.delete("notes", id)).pipe(Effect.asVoid),
+      updateHighlightCfi: (noteId, highlightId, value) =>
         run(async () => {
-          const card = await db.get("cards", cardId);
-          if (!card) return;
-          const highlights = card.highlights.map((h) =>
+          const note = await db.get("notes", noteId);
+          if (!note) return;
+          const highlights = note.highlights.map((h) =>
             h.id === highlightId ? { ...h, cfi: { ...h.cfi, value } } : h,
           );
-          await db.put("cards", { ...card, highlights });
+          await db.put("notes", { ...note, highlights });
         }).pipe(Effect.asVoid),
     };
   }),

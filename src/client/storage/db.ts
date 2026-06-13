@@ -1,24 +1,25 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { Card } from "../cards/types.ts";
+import type { Note } from "../notes/types.ts";
 
 interface BookclubDB extends DBSchema {
-  cards: { key: string; value: Card; indexes: { "by-source": string } };
+  notes: { key: string; value: Note; indexes: { "by-source": string } };
 }
 
 let dbPromise: Promise<IDBPDatabase<BookclubDB>> | null = null;
 
 export function getDb(): Promise<IDBPDatabase<BookclubDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<BookclubDB>("bookclub", 2, {
+    dbPromise = openDB<BookclubDB>("bookclub", 3, {
       upgrade(db) {
-        // Hard cutover from Step 1: the standalone highlights store is gone,
-        // absorbed into cards. Local Step 1 data is discarded. The old store
-        // isn't in the current schema, so reach past the typed handle to drop it.
+        // Hard cutover: the standalone Step 1 highlights store and the interim
+        // cards store are gone, absorbed into notes. Local data is discarded.
+        // Those stores aren't in the current schema, so reach past the typed
+        // handle to drop them.
         const raw = db as unknown as IDBDatabase;
-        if (raw.objectStoreNames.contains("highlights")) {
-          raw.deleteObjectStore("highlights");
+        for (const stale of ["highlights", "cards"]) {
+          if (raw.objectStoreNames.contains(stale)) raw.deleteObjectStore(stale);
         }
-        const store = db.createObjectStore("cards", { keyPath: "id" });
+        const store = db.createObjectStore("notes", { keyPath: "id" });
         store.createIndex("by-source", "sourceId");
       },
     });

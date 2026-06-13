@@ -1,12 +1,12 @@
 import type * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { createContext, useCallback, useContext, type ReactNode } from "react";
-import type { CardStore } from "./storage/CardStore.ts";
-import { CardStoreLive } from "./storage/CardStore.ts";
+import type { NoteStore } from "./storage/NoteStore.ts";
+import { NoteStoreLive } from "./storage/NoteStore.ts";
 
-const runtime = ManagedRuntime.make(CardStoreLive);
+const runtime = ManagedRuntime.make(NoteStoreLive);
 
-type AppServices = CardStore;
+type AppServices = NoteStore;
 
 const RuntimeContext = createContext(runtime);
 

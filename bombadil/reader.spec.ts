@@ -11,17 +11,17 @@ const page = extract((state) => {
   return m ? { page: Number(m[1]), total: Number(m[2]) } : null;
 });
 
-// Center point of a reader overlay arrow.
-const arrowPoint = (direction: "next" | "prev") =>
+// Center point of an invisible reader edge hit zone.
+const pageTurnPoint = (direction: "next" | "prev") =>
   extract((state) => {
-    const el = state.document.querySelector<HTMLButtonElement>(`.reader-arrow--${direction}`);
+    const el = state.document.querySelector<HTMLButtonElement>(`.reader-page-turn--${direction}`);
     if (!el || el.disabled) return null;
     const r = el.getBoundingClientRect();
     return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
   });
 
-const nextPoint = arrowPoint("next");
-const prevPoint = arrowPoint("prev");
+const nextPoint = pageTurnPoint("next");
+const prevPoint = pageTurnPoint("prev");
 
 const pageNext = actions(() => {
   const p = nextPoint.current;
