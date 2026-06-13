@@ -1,7 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { Note } from "../notes/types.ts";
+import type { Note } from "../notes.ts";
 import { StorageError } from "../errors.ts";
 import { getDb } from "./db.ts";
 

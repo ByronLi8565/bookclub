@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { renderNoteBody } from "../../notes/renderNoteBody.ts";
+import { renderNoteBody } from "../../notes.ts";
 
 // Read-only note body. renderNoteBody escapes all text before formatting, so
 // the produced HTML is safe to inject.

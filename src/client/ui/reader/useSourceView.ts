@@ -5,8 +5,7 @@ import * as Ref from "effect/Ref";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
 import type Section from "epubjs/types/section";
-import type { SourceReader } from "../../highlights/locateHighlight.ts";
-import { expandToWordBoundaries } from "../../highlights/wordBoundary.ts";
+import { expandToWordBoundaries, type SourceReader } from "../../highlights.ts";
 import type Navigation from "epubjs/types/navigation";
 
 function firstChapterHref(nav: Navigation): string | undefined {

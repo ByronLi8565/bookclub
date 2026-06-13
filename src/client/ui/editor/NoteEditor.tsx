@@ -9,7 +9,7 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { $isQuoteNode, QuoteNode } from "@lexical/rich-text";
 import { $createParagraphNode, $getRoot, FORMAT_TEXT_COMMAND } from "lexical";
 import { useCallback, useRef } from "react";
-import { NOTE_TRANSFORMERS } from "../../notes/noteBody.ts";
+import { NOTE_TRANSFORMERS } from "../../notes.ts";
 
 // The restricted node set: paragraphs and text are built in; QuoteNode is the
 // only structural node we allow. No headings, lists, links, code, or images.

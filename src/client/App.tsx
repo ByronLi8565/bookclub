@@ -1,13 +1,10 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { captureHighlight } from "./highlights/captureHighlight.ts";
-import { locateHighlight } from "./highlights/locateHighlight.ts";
-import type { Highlight } from "./highlights/types.ts";
-import { createNote } from "./notes/createNote.ts";
-import type { Note } from "./notes/types.ts";
+import { captureHighlight, locateHighlight, type Highlight } from "./highlights.ts";
+import { createNote, createReply, type Note } from "./notes.ts";
 import { useRun } from "./runtime.tsx";
-import { hashFile } from "./sources/hashFile.ts";
+import { hashFile } from "./storage/hashFile.ts";
 import { NoteStore } from "./storage/NoteStore.ts";
 import { NotePanel } from "./ui/NotePanel.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
@@ -24,6 +21,7 @@ export default function App() {
   const composingRef = useRef<Highlight | null>(null);
   composingRef.current = composing;
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
   const filePickRef = useRef(0);
@@ -87,6 +85,24 @@ export default function App() {
         yield* store.save(updated);
         setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)));
         setEditingId(null);
+      }),
+    );
+  }
+
+  function onReplySave(parentId: string, body: string) {
+    const sid = sourceIdRef.current;
+    // An empty reply has nothing to show (no highlight, no body); discard it.
+    if (!sid || body === "") {
+      setReplyingTo(null);
+      return;
+    }
+    run(
+      Effect.gen(function* () {
+        const store = yield* NoteStore;
+        const reply = yield* createReply(sid, parentId, body);
+        yield* store.save(reply);
+        setNotes((prev) => [...prev, reply]);
+        setReplyingTo(null);
       }),
     );
   }
@@ -171,6 +187,7 @@ export default function App() {
         for (const h of note.highlights) view.eraseHighlight(h.cfi.value);
         setNotes((prev) => prev.filter((x) => x.id !== note.id));
         setEditingId((id) => (id === note.id ? null : id));
+        setReplyingTo((id) => (id === note.id ? null : id));
       }),
     );
   }
@@ -211,14 +228,20 @@ export default function App() {
             notes={notes}
             composing={composing !== null}
             composeInitialBody={composeInitialBody}
-            editingId={editingId}
             onComposeSave={onComposeSave}
             onComposeCancel={onComposeCancel}
-            onEdit={(note) => setEditingId(note.id)}
-            onEditSave={onEditSave}
-            onEditCancel={() => setEditingId(null)}
-            onJump={onJump}
-            onDelete={onDelete}
+            actions={{
+              editingId,
+              replyingTo,
+              onJump,
+              onDelete,
+              onEdit: (note) => setEditingId(note.id),
+              onEditSave,
+              onEditCancel: () => setEditingId(null),
+              onReply: (note) => setReplyingTo(note.id),
+              onReplySave,
+              onReplyCancel: () => setReplyingTo(null),
+            }}
           />
         }
       />
