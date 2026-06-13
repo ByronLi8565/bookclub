@@ -1,4 +1,4 @@
-import { actions, always, eventually, extract, weighted } from "@antithesishq/bombadil";
+import { actions, always, extract, weighted } from "@antithesishq/bombadil";
 // All default properties (bug-catchers), but only single-page actions — no
 // Reload/back/forward, which just blank this SPA and dead-end exploration.
 export * from "@antithesishq/bombadil/defaults/properties";
@@ -7,23 +7,21 @@ export { clicks, scroll, waitOnce } from "@antithesishq/bombadil/defaults/action
 // Current page / total, parsed from the reader bar's .page-count.
 const page = extract((state) => {
   const text = state.document.querySelector(".page-count")?.textContent ?? "";
-  const m = text.match(/(\d+)\s*\/\s*(\d+)/);
+  const m = text.match(/(\d+)\s*\/\s*(\d+)/u);
   return m ? { page: Number(m[1]), total: Number(m[2]) } : null;
 });
 
-// Center point of a reader-bar button whose label contains `label`.
-const buttonPoint = (label: string) =>
+// Center point of a reader overlay arrow.
+const arrowPoint = (direction: "next" | "prev") =>
   extract((state) => {
-    const el = Array.from(
-      state.document.querySelectorAll<HTMLButtonElement>(".reader-bar button"),
-    ).find((b) => b.textContent?.toLowerCase().includes(label));
+    const el = state.document.querySelector<HTMLButtonElement>(`.reader-arrow--${direction}`);
     if (!el || el.disabled) return null;
     const r = el.getBoundingClientRect();
     return r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
   });
 
-const nextPoint = buttonPoint("next");
-const prevPoint = buttonPoint("prev");
+const nextPoint = arrowPoint("next");
+const prevPoint = arrowPoint("prev");
 
 const pageNext = actions(() => {
   const p = nextPoint.current;
@@ -46,7 +44,3 @@ export const pageInBounds = always(() => {
   const p = page.current;
   return p === null || (p.page >= 1 && p.page <= p.total);
 });
-
-// The bug: paging stops after the second page. if next ever works past page 2
-// This holds; if the reader gets stuck, it never holds and bombadil reports it.
-export const canPagePastSecond = eventually(() => (page.current?.page ?? 0) > 2);

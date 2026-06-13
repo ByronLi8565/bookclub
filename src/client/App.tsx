@@ -1,13 +1,14 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createCard } from "./cards/createCard.ts";
+import type { Card } from "./cards/types.ts";
 import { captureHighlight } from "./highlights/captureHighlight.ts";
 import { locateHighlight } from "./highlights/locateHighlight.ts";
-import type { Highlight } from "./highlights/types.ts";
 import { useRun } from "./runtime.tsx";
 import { hashFile } from "./sources/hashFile.ts";
-import { HighlightStore } from "./storage/HighlightStore.ts";
-import { HighlightList } from "./ui/HighlightList.tsx";
+import { CardStore } from "./storage/CardStore.ts";
+import { CardPanel } from "./ui/CardPanel.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
@@ -16,9 +17,10 @@ export default function App() {
   const run = useRun();
   const [file, setFile] = useState<File | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
-  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [cards, setCards] = useState<Card[]>([]);
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
+  const filePickRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const onSelectRef = useRef<(cfi: string, range: Range) => void>(() => {});
@@ -28,16 +30,19 @@ export default function App() {
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
 
+  // Add Note: capture the highlight synchronously (never retain the live range),
+  // paint it, and create an empty-body card. The editor arrives in Step 2.
   onSelectRef.current = (cfi, range) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
     run(
       Effect.gen(function* () {
-        const store = yield* HighlightStore;
-        const h = yield* captureHighlight(sid, cfi, range);
-        yield* store.save(h);
-        setHighlights((prev) => [...prev, h]);
-        view.drawHighlight(h.id, h.cfi.value, () => view.goTo(h.cfi.value));
+        const store = yield* CardStore;
+        const highlight = yield* captureHighlight(sid, cfi, range);
+        const card = yield* createCard(sid, "", [highlight]);
+        yield* store.save(card);
+        setCards((prev) => [...prev, card]);
+        view.drawHighlight(highlight.id, highlight.cfi.value, () => view.goTo(highlight.cfi.value));
       }),
     );
   };
@@ -47,18 +52,41 @@ export default function App() {
     let cancelled = false;
     run(
       Effect.gen(function* () {
-        const store = yield* HighlightStore;
+        const store = yield* CardStore;
         const saved = yield* store.list(sourceId);
         if (cancelled) return;
-        setHighlights(saved);
-        for (const h of saved) {
-          const located = yield* locateHighlight(h, view.reader);
-          if (!located) continue;
-          if (located.rebound) {
-            yield* store.updateCfi(h.id, located.cfi);
-            h.cfi.value = located.cfi;
+        setCards(saved);
+        // Re-locate every embedded highlight, rebinding cfis that drifted.
+        const rebinds = new Map<string, Map<string, string>>();
+        for (const card of saved) {
+          for (const h of card.highlights) {
+            if (cancelled) return;
+            const located = yield* locateHighlight(h, view.reader);
+            if (!located) continue;
+            if (located.cfi !== h.cfi.value) {
+              yield* store.updateHighlightCfi(card.id, h.id, located.cfi);
+              const perCard = rebinds.get(card.id) ?? new Map<string, string>();
+              perCard.set(h.id, located.cfi);
+              rebinds.set(card.id, perCard);
+            }
+            const cfi = located.cfi;
+            view.drawHighlight(h.id, cfi, () => view.goTo(cfi));
           }
-          view.drawHighlight(h.id, located.cfi, () => view.goTo(located.cfi));
+        }
+        if (!cancelled && rebinds.size > 0) {
+          setCards((prev) =>
+            prev.map((card) => {
+              const perCard = rebinds.get(card.id);
+              if (!perCard) return card;
+              return {
+                ...card,
+                highlights: card.highlights.map((h) => {
+                  const cfi = perCard.get(h.id);
+                  return cfi ? { ...h, cfi: { ...h.cfi, value: cfi } } : h;
+                }),
+              };
+            }),
+          );
         }
       }),
     );
@@ -69,11 +97,18 @@ export default function App() {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [view.ready, sourceId]);
 
-  function onPick(f: File) {
-    setHighlights([]);
-    setFile(f);
-    run(hashFile(f)).then(setSourceId);
-  }
+  const onPick = useCallback(
+    (f: File) => {
+      const pickId = ++filePickRef.current;
+      setCards([]);
+      setSourceId(null);
+      setFile(f);
+      run(hashFile(f)).then((id) => {
+        if (filePickRef.current === pickId) setSourceId(id);
+      });
+    },
+    [run],
+  );
 
   // TEMP: accept ?book=<url> to auto-load a fixture (used by the bombadil test).
   useEffect(() => {
@@ -82,16 +117,22 @@ export default function App() {
     fetch(url)
       .then((r) => r.blob())
       .then((b) => onPick(new File([b], url.split("/").pop() ?? "book.epub")));
-  }, []);
+  }, [onPick]);
 
-  function onDelete(h: Highlight) {
+  function onDelete(card: Card) {
     run(
       Effect.gen(function* () {
-        const store = yield* HighlightStore;
-        yield* store.remove(h.id);
-        setHighlights((prev) => prev.filter((x) => x.id !== h.id));
+        const store = yield* CardStore;
+        yield* store.remove(card.id);
+        for (const h of card.highlights) view.eraseHighlight(h.cfi.value);
+        setCards((prev) => prev.filter((x) => x.id !== card.id));
       }),
     );
+  }
+
+  function onJump(card: Card) {
+    const cfi = card.highlights[0]?.cfi.value;
+    if (cfi) view.goTo(cfi);
   }
 
   return (
@@ -114,13 +155,7 @@ export default function App() {
       </header>
       <SplitPane
         left={<Reader view={view} hasFile={!!file} />}
-        right={
-          <HighlightList
-            highlights={highlights}
-            onJump={(h) => view.goTo(h.cfi.value)}
-            onDelete={onDelete}
-          />
-        }
+        right={<CardPanel cards={cards} onJump={onJump} onDelete={onDelete} />}
       />
     </div>
   );

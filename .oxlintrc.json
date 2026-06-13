@@ -1,11 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "plugins": ["react", "react-hooks", "typescript", "import", "unicorn", "oxc"],
-  "categories": {
-    "correctness": "error",
-    "suspicious": "warn",
-    "pedantic": "warn"
-  },
+  "categories": { "correctness": "error", "suspicious": "warn", "pedantic": "warn" },
   "rules": {
     "react-hooks/exhaustive-deps": "warn",
     "typescript/consistent-type-imports": "error",

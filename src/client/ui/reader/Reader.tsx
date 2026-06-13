@@ -1,18 +1,24 @@
+import { useEffect } from "react";
 import type { SourceView } from "./useSourceView.ts";
 
-// Presentational shell: the painting surface, navigation, and the font-size
-// Control that triggers reflow.
+// Reader shell around the SourceView iframe
 export function Reader({ view, hasFile }: { view: SourceView; hasFile: boolean }) {
-  const { fontSize, setFontSize, ready } = view;
+  const { fontSize, setFontSize, ready, selection } = view;
+
+  // Dismiss the Add Note popup on any click outside it
+  const { dismissSelection } = view;
+  useEffect(() => {
+    if (!selection) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest(".add-note")) dismissSelection();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [selection, dismissSelection]);
   return (
     <div className="reader">
       <div className="reader-bar">
-        <button onClick={view.prev} disabled={!ready}>
-          ← prev
-        </button>
-        <button onClick={view.next} disabled={!ready}>
-          next →
-        </button>
         {view.location && (
           <span className="page-count">
             {view.location.page} / {view.location.total}
@@ -20,17 +26,46 @@ export function Reader({ view, hasFile }: { view: SourceView; hasFile: boolean }
           </span>
         )}
         <span className="spacer" />
-        <button onClick={() => setFontSize(Math.max(50, fontSize - 25))} disabled={!ready}>
-          A−
+        <button onClick={() => setFontSize(Math.max(80, fontSize - 10))} disabled={!ready}>
+          −
         </button>
         <span className="font-size">{fontSize}%</span>
-        <button onClick={() => setFontSize(fontSize + 25)} disabled={!ready}>
-          A+
+        <button onClick={() => setFontSize(fontSize + 10)} disabled={!ready}>
+          +
         </button>
       </div>
-      <div className="reader-surface" ref={view.containerRef}>
-        {!hasFile && <p className="reader-empty">Open an EPUB to begin.</p>}
+      <div className="reader-stage">
+        <div className="reader-surface" ref={view.containerRef}>
+          {!hasFile && <p className="reader-empty">Open an EPUB to begin.</p>}
+        </div>
+        {ready && !view.location?.atStart && (
+          <button
+            className="reader-arrow reader-arrow--prev"
+            onClick={view.prev}
+            aria-label="Previous page"
+          >
+            ‹
+          </button>
+        )}
+        {ready && !view.location?.atEnd && (
+          <button
+            className="reader-arrow reader-arrow--next"
+            onClick={view.next}
+            aria-label="Next page"
+          >
+            ›
+          </button>
+        )}
       </div>
+      {selection && (
+        <button
+          className="add-note"
+          style={{ left: selection.x, top: selection.y }}
+          onClick={view.commitSelection}
+        >
+          Add Note
+        </button>
+      )}
     </div>
   );
 }
