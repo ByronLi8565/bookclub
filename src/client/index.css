@@ -513,6 +513,17 @@ button:disabled:hover {
   box-shadow: 8px 8px 0 #000;
 }
 
+/* The center spine: makes the card read like an open book. */
+.home-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: var(--line);
+  transform: translateX(-50%);
+}
+
 .home-corner {
   position: absolute;
 }
