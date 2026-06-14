@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cachedBookSize, refreshGroupBook } from "../../groups/bookAccess.ts";
+import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
 // Identifies the book a settings dialog can manage: its content-hash sourceId
@@ -82,7 +83,7 @@ export function SettingsModal({
           <section className="settings-item">
             <h2 className="settings-item-head">Local book copy</h2>
             {loading ? (
-              <p className="settings-detail-status">checking…</p>
+              <Loading className="loading--settings-detail" />
             ) : cachedSize === null ? (
               <p className="settings-detail-status">
                 Not stored on this device — it's fetched from the cloud (R2) each time.

@@ -1,4 +1,5 @@
 import type { Conversation } from "../../notes/conversation.ts";
+import { Loading } from "../shared/Loading.tsx";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteThread, type NoteActions, type NoteRefs, type NoteViewer } from "./NoteThread.tsx";
 
@@ -7,6 +8,7 @@ export function NotePanel({
   conversation,
   canWrite,
   composing,
+  loading,
   composeInitialBody,
   onComposeSave,
   onComposeCancel,
@@ -18,6 +20,7 @@ export function NotePanel({
   conversation: Conversation;
   canWrite: boolean;
   composing: boolean;
+  loading: boolean;
   composeInitialBody: string;
   onComposeSave: (body: string) => void;
   onComposeCancel: () => void;
@@ -33,19 +36,23 @@ export function NotePanel({
     <aside className="note-panel">
       {context}
       <h2>Notes</h2>
-      {roots.length === 0 && !composing && <p className="empty">Select text to add a note.</p>}
+      {loading && !composing && <Loading className="loading--note-panel" />}
+      {!loading && roots.length === 0 && !composing && (
+        <p className="empty">Select text to add a note.</p>
+      )}
       <ul>
-        {roots.map((root) => (
-          <NoteThread
-            key={root.id}
-            root={root}
-            childrenOf={conversation.childrenOf}
-            actions={actions}
-            refs={refs}
-            canWrite={canWrite}
-            viewer={viewer}
-          />
-        ))}
+        {!loading &&
+          roots.map((root) => (
+            <NoteThread
+              key={root.id}
+              root={root}
+              childrenOf={conversation.childrenOf}
+              actions={actions}
+              refs={refs}
+              canWrite={canWrite}
+              viewer={viewer}
+            />
+          ))}
         {composing && (
           <li className="note compose">
             <NoteEditor

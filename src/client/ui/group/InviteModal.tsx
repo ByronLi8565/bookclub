@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchGroup, getInviteLink, inviteToGroup, type RosterEntry } from "../../groups/api.ts";
+import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
 // Owner-only invite dialog: send an email invite and/or share the reusable open
@@ -15,18 +16,28 @@ export function InviteModal({
   onClose: () => void;
 }): React.ReactElement {
   const [link, setLink] = useState<string | null>(null);
+  const [linkLoading, setLinkLoading] = useState(true);
   const [members, setMembers] = useState<RosterEntry[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setLink(null);
+    setLinkLoading(true);
+    setMembers([]);
+    setMembersLoading(true);
     void getInviteLink(name).then((r) => {
-      if (!cancelled && r.ok) setLink(r.value.link);
+      if (cancelled) return;
+      if (r.ok) setLink(r.value.link);
+      setLinkLoading(false);
     });
     void fetchGroup(name).then((g) => {
-      if (!cancelled && g) setMembers(g.members);
+      if (cancelled) return;
+      if (g) setMembers(g.members);
+      setMembersLoading(false);
     });
     return () => {
       cancelled = true;
@@ -62,7 +73,7 @@ export function InviteModal({
   }
 
   // Show the link without its protocol prefix (it stays full in the clipboard).
-  const shownLink = link ? link.replace(/^https?:\/\//u, "") : "generating…";
+  const shownLink = link ? link.replace(/^https?:\/\//u, "") : "";
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -94,42 +105,50 @@ export function InviteModal({
 
           <div className="invite-people">
             <p className="invite-people-head">People with access</p>
-            <ul className="invite-people-list">
-              {members.map((m) => (
-                <li key={m.id}>
-                  <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="invite-person-name">{m.name}</span>
-                  <span className="invite-person-role">{m.role}</span>
-                </li>
-              ))}
-            </ul>
+            {membersLoading ? (
+              <Loading className="loading--invite-people" />
+            ) : (
+              <ul className="invite-people-list">
+                {members.map((m) => (
+                  <li key={m.id}>
+                    <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
+                    <span className="invite-person-name">{m.name}</span>
+                    <span className="invite-person-role">{m.role}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="invite-share">
             <p className="modal-note">Or share a link anyone can use to join:</p>
-            <div className="invite-link">
-              <input type="text" readOnly value={shownLink} aria-label="invite link" />
-              <button
-                type="button"
-                className="invite-icon"
-                onClick={() => void onCopy()}
-                disabled={!link}
-                aria-label="copy link"
-                title={copied ? "Copied" : "Copy link"}
-              >
-                {copied ? <CheckIcon /> : <CopyIcon />}
-              </button>
-              <button
-                type="button"
-                className="invite-icon"
-                onClick={() => void onRotate()}
-                disabled={busy}
-                aria-label="regenerate link"
-                title="Regenerate link"
-              >
-                <RotateIcon />
-              </button>
-            </div>
+            {linkLoading ? (
+              <Loading className="loading--invite-link" />
+            ) : (
+              <div className="invite-link">
+                <input type="text" readOnly value={shownLink} aria-label="invite link" />
+                <button
+                  type="button"
+                  className="invite-icon"
+                  onClick={() => void onCopy()}
+                  disabled={!link}
+                  aria-label="copy link"
+                  title={copied ? "Copied" : "Copy link"}
+                >
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                </button>
+                <button
+                  type="button"
+                  className="invite-icon"
+                  onClick={() => void onRotate()}
+                  disabled={busy}
+                  aria-label="regenerate link"
+                  title="Regenerate link"
+                >
+                  <RotateIcon />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

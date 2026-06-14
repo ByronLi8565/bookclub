@@ -12,6 +12,7 @@ export type { OnlinePeer } from "../../server/agents/NoteAgent.ts";
 // which arrives as a fresh `notes` value on the next render.
 export interface NoteSync {
   notes: Note[];
+  notesReady: boolean;
   syncStatus: "syncing" | "online" | "offline";
   online: OnlinePeer[];
   addNote: (sourceId: string, body: string, highlights: Highlight[]) => boolean;
@@ -65,6 +66,7 @@ export function useNoteAgent(groupId: string | null): NoteSync {
 
   return {
     notes: groupId ? (agent.state?.notes ?? []) : [],
+    notesReady: groupId ? agent.state !== undefined : true,
     online: groupId ? online : [],
     syncStatus: syncStatus(
       groupId,

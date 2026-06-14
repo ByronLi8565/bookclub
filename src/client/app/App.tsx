@@ -2,6 +2,7 @@ import { Route, Switch } from "wouter";
 import { useSession } from "../auth/useSession.ts";
 import { GroupView } from "../ui/group/GroupView.tsx";
 import { Home } from "../ui/home/Home.tsx";
+import { Loading } from "../ui/shared/Loading.tsx";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 
 // Phase B root: `/` is the group home; `/:name` is a group's reader workspace
@@ -11,7 +12,7 @@ export default function App() {
   return (
     <>
       {session.status === "loading" ? (
-        <div className="home-loading">loading…</div>
+        <Loading className="loading--app" />
       ) : (
         <Switch>
           <Route path="/">{() => <Home session={session} />}</Route>

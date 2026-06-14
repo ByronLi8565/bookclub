@@ -34,7 +34,7 @@ export interface WorkspaceProps {
   groupName: string; // the group's display name
   groupId: string;
   sourceId: string;
-  file: File;
+  file: File | null;
   // A member-set book title override, if any (else the epub metadata title).
   bookTitleOverride: string | null;
   members: RosterEntry[];
@@ -269,12 +269,20 @@ export function Workspace({
         book={{ sourceId, name }}
       />
       {(() => {
-        const reader = <Reader view={view} hasFile floatingNote={!isMobile} />;
+        const reader = (
+          <Reader
+            view={view}
+            hasFile={file !== null}
+            loading={file === null || !view.ready}
+            floatingNote={!isMobile}
+          />
+        );
         const notePanel = (
           <NotePanel
             conversation={conversation}
             canWrite={canWriteNotes}
             composing={composing !== null}
+            loading={!agent.notesReady}
             composeInitialBody={composeInitialBody}
             onComposeSave={onComposeSave}
             onComposeCancel={onComposeCancel}

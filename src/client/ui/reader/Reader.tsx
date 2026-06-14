@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Loading } from "../shared/Loading.tsx";
 import type { SourceView } from "./useSourceView.ts";
 
 // Reader shell around the SourceView iframe. `floatingNote` renders the desktop
@@ -7,10 +8,12 @@ import type { SourceView } from "./useSourceView.ts";
 export function Reader({
   view,
   hasFile,
+  loading = false,
   floatingNote = true,
 }: {
   view: SourceView;
   hasFile: boolean;
+  loading?: boolean;
   floatingNote?: boolean;
 }) {
   const { fontSize, setFontSize, ready, selection, search } = view;
@@ -105,7 +108,11 @@ export function Reader({
       )}
       <div className="reader-stage">
         <div className="reader-surface" ref={view.containerRef}>
-          {!hasFile && <p className="reader-empty">Open an EPUB to begin.</p>}
+          {loading ? (
+            <Loading className="loading--reader" />
+          ) : (
+            !hasFile && <p className="reader-empty">Open an EPUB to begin.</p>
+          )}
         </div>
         {ready && !view.location?.atStart && (
           <button

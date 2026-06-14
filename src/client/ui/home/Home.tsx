@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import type { Session } from "../../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
+import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
@@ -23,6 +24,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   const authed = session.status === "authed";
   const [loginOpen, setLoginOpen] = useState(false);
   const [groups, setGroups] = useState<GroupSummary[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,11 +34,15 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   useEffect(() => {
     if (!authed) {
       setGroups([]);
+      setGroupsLoading(false);
       return;
     }
     let cancelled = false;
+    setGroupsLoading(true);
     void listMyGroups().then((g) => {
-      if (!cancelled) setGroups(g);
+      if (cancelled) return;
+      setGroups(g);
+      setGroupsLoading(false);
     });
     return () => {
       cancelled = true;
@@ -112,7 +118,9 @@ export function Home({ session }: { session: Session }): React.ReactElement {
 
           <div className="home-clubs">
             {authed ? (
-              groups.length === 0 ? (
+              groupsLoading ? (
+                <Loading className="loading--home-clubs" />
+              ) : groups.length === 0 ? (
                 <span className="home-existing-label">no clubs yet — create one above</span>
               ) : (
                 <ul className="home-club-list">

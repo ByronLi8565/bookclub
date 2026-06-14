@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
 import { fetchGroup, redeemInvite, type GroupSummary, type RosterEntry } from "../../groups/api.ts";
 import {
+  currentBookRef,
   loadCurrentGroupBook,
   uploadCurrentGroupBook,
   type LoadedGroupBook,
 } from "../../groups/bookAccess.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
-import { Spinner } from "../shared/Spinner.tsx";
+import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
 // The resolved state of a group route. Each variant maps to a distinct render.
@@ -21,7 +22,8 @@ type View =
   | {
       k: "ready";
       group: GroupSummary;
-      book: LoadedGroupBook;
+      sourceId: string;
+      book: LoadedGroupBook | null;
       isOwner: boolean;
       members: RosterEntry[];
     };
@@ -82,10 +84,31 @@ export function GroupView({
       }
 
       const isOwner = resolved.group.ownerId === userId;
+      const ref = currentBookRef(resolved.group);
+      if (!ref) {
+        setView({ k: "nobook", group: resolved.group, isOwner });
+        return;
+      }
+
+      setView({
+        k: "ready",
+        group: resolved.group,
+        sourceId: ref.sourceId,
+        book: null,
+        isOwner,
+        members: resolved.members,
+      });
       const book = await loadCurrentGroupBook(resolved.group);
       if (cancelled) return;
       if (book)
-        setView({ k: "ready", group: resolved.group, book, isOwner, members: resolved.members });
+        setView({
+          k: "ready",
+          group: resolved.group,
+          sourceId: book.sourceId,
+          book,
+          isOwner,
+          members: resolved.members,
+        });
       else setView({ k: "nobook", group: resolved.group, isOwner });
     })();
 
@@ -99,7 +122,7 @@ export function GroupView({
       <div className="home">
         <div className="home-card">
           <div className="home-main">
-            <Spinner label="loading…" />
+            <Loading />
           </div>
         </div>
       </div>
@@ -127,9 +150,9 @@ export function GroupView({
       name={view.group.name}
       groupName={view.group.displayName}
       groupId={view.group.groupId}
-      sourceId={view.book.sourceId}
-      file={view.book.file}
-      bookTitleOverride={view.group.bookTitles[view.book.sourceId] ?? null}
+      sourceId={view.book?.sourceId ?? view.sourceId}
+      file={view.book?.file ?? null}
+      bookTitleOverride={view.group.bookTitles[view.book?.sourceId ?? view.sourceId] ?? null}
       members={view.members}
       viewer={{ userId: userId ?? "", isOwner: view.isOwner }}
     />
@@ -213,7 +236,7 @@ function NoBook({
           <h1 className="home-title">{group.displayName}</h1>
           {isOwner ? (
             <label className="home-upload-link">
-              {busy ? <Spinner label="uploading…" /> : "upload the club's book (epub)"}
+              {busy ? <Loading className="loading--inline" /> : "upload the club's book (epub)"}
               <input
                 type="file"
                 accept=".epub,application/epub+zip"

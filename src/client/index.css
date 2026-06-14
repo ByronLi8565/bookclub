@@ -694,40 +694,90 @@ button:disabled:hover {
   touch-action: manipulation;
 }
 
-.home-loading {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.6;
-}
-
-.spinner-wrap {
-  display: inline-flex;
+.loading {
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-}
-
-.spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 3px solid var(--black);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
-.spinner-label {
+  min-height: 44px;
   text-transform: uppercase;
   letter-spacing: 1px;
+  font-weight: 700;
   opacity: 0.6;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+.loading-text {
+  display: inline-flex;
+}
+
+.loading-dots span {
+  animation: loading-dot 1.2s steps(2, end) infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.loading-progress {
+  display: block;
+  width: min(180px, 100%);
+  height: 8px;
+  border: var(--line);
+  background: var(--white);
+}
+
+.loading-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--black);
+}
+
+.loading--app {
+  height: 100%;
+}
+
+.loading--home-clubs {
+  align-items: flex-start;
+}
+
+.loading--note-panel {
+  min-height: 140px;
+}
+
+.loading--reader {
+  position: absolute;
+  inset: 0;
+}
+
+.loading--invite-people {
+  min-height: 64px;
+}
+
+.loading--invite-link,
+.loading--settings-detail {
+  min-height: 34px;
+}
+
+.loading--inline {
+  display: inline-flex;
+  min-height: 0;
+  align-items: flex-start;
+  opacity: 1;
+}
+
+@keyframes loading-dot {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  40%,
+  100% {
+    opacity: 1;
   }
 }
 
