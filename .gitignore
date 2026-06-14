@@ -5,5 +5,8 @@ node_modules
 # wrangler local dev state
 .wrangler
 
+# agents dump
+var/
+
 # bombadil
 .bombadil

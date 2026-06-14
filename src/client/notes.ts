@@ -1,5 +1,6 @@
 import { BOLD_STAR, ITALIC_STAR, QUOTE, type Transformer } from "@lexical/markdown";
 import type { Highlight } from "./highlights.ts";
+import { REFERENCE_PATTERN } from "./references.ts";
 
 // A Note is the single self-contained unit of annotation. It absorbs the
 // standalone Step 1 Highlight entity: an empty-body note is a plain highlight,
@@ -10,6 +11,7 @@ import type { Highlight } from "./highlights.ts";
 // content of a change.
 export interface Note {
   id: string; // server ULID (sortable, monotonic per book)
+  seq: number; // human-readable per-book number; the `[[n]]` reference target
   sourceId: string; // the Source (book) hash this note belongs to
   author: string; // "local" until Step 7
   parent: string | null; // another note id for replies; null for top-level notes
