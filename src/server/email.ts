@@ -18,8 +18,14 @@ export async function sendLoginCode(env: Env, email: string, code: string): Prom
       to: email,
       subject: "Your bookclub login code",
       text:
-        `Your bookclub login code is ${code}.\n\n` +
+        `Your bookclub login code is\n${code}\n\n` +
         `It expires in 10 minutes. If you didn't request it, ignore this email.`,
+      html:
+        `<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#000;font-size:14px;line-height:1.5;">` +
+        `<p style="margin:0;">Your bookclub login code is</p>` +
+        `<p style="margin:8px 0;font-size:24px;font-weight:700;letter-spacing:3px;">${code}</p>` +
+        `<p style="margin:0;">It expires in 10 minutes. If you didn't request it, ignore this email.</p>` +
+        `</div>`,
     });
     return;
   }
