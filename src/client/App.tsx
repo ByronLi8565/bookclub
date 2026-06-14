@@ -235,16 +235,13 @@ export default function App() {
           />
         </label>
         {sourceId && (
-          <span className={`sync-badge sync-badge--${agent.syncStatus}`}>{agent.syncStatus}</span>
-        )}
-        {sourceId && (
           <button
             type="button"
-            className="source-id"
-            onClick={() => spawnToast("Book hash", sourceId, { type: "info" })}
-            aria-label="show full book hash"
+            className={`sync-badge sync-badge--${agent.syncStatus}`}
+            onClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
+            aria-label="show sync status"
           >
-            {sourceId.slice(0, 12)}...
+            {agent.syncStatus}
           </button>
         )}
       </header>
@@ -278,4 +275,16 @@ export default function App() {
       <ToastViewport />
     </div>
   );
+}
+
+function showSyncStatusToast(status: "syncing" | "online" | "offline", sourceId: string): void {
+  if (status === "online") {
+    spawnToast("Status: Online", `Synced to book with hash ${sourceId}.`, { type: "info" });
+    return;
+  }
+  if (status === "syncing") {
+    spawnToast("Status: Syncing", `Connecting to book with hash ${sourceId}.`, { type: "info" });
+    return;
+  }
+  spawnToast("Status: Offline", `Offline for book with hash ${sourceId}.`, { type: "error" });
 }

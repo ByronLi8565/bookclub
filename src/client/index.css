@@ -75,18 +75,8 @@ button:disabled:hover {
   display: none;
 }
 
-.source-id {
-  margin-left: auto;
-  font-size: 12px;
-  opacity: 0.6;
-  padding: 4px 8px;
-}
-
-.source-id:hover {
-  opacity: 1;
-}
-
 .sync-badge {
+  margin-left: auto;
   border: var(--line);
   padding: 4px 8px;
   font-size: 12px;
