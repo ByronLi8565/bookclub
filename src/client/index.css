@@ -1330,7 +1330,7 @@ button:disabled:hover {
 
     .home-card {
         box-shadow: 8px 8px 0 var(--black);
-        transform: translateX(-8px);
+        margin-right: 48px;
     }
 
     .home-card::before {
