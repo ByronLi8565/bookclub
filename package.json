@@ -8,7 +8,7 @@
     "destroy": "alchemy destroy",
     "typecheck": "tsc --noEmit",
     "serve": "vite --port 5173",
-    "test:reader": "bombadil test \"http://localhost:5173/?book=/fixtures/dorian.epub\" bombadil/reader.spec.ts --headless --time-limit 90s --exit-on-violation --output-path .bombadil/reader",
+    "test:reader": "bombadil test \"http://localhost:5173/src/tests/harness/index.html?book=/fixtures/dorian.epub\" src/tests/reader.spec.ts --headless --time-limit 90s --exit-on-violation --output-path .bombadil/reader",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "oxlint",

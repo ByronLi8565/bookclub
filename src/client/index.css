@@ -339,8 +339,6 @@ button:disabled:hover {
   flex: 1;
   min-width: 0;
   font: inherit;
-  text-transform: uppercase;
-  letter-spacing: 1px;
   padding: 4px 8px;
   background: var(--white);
   color: var(--black);
@@ -349,7 +347,6 @@ button:disabled:hover {
 
 .reader-search-input:focus {
   outline: none;
-  background: var(--highlight);
 }
 
 .reader-search-count {

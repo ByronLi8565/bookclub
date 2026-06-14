@@ -316,18 +316,23 @@ export function useSourceView(
             const items = (book.spine as unknown as { spineItems: { index: number }[] }).spineItems;
             const results: A[] = [];
             for (const { index } of items) {
+              // Isolate each section: a spine item that fails to load (cover, nav,
+              // a malformed doc) is skipped rather than aborting the whole scan.
               const found = yield* Effect.acquireUseRelease(
-                Effect.promise(async () => {
+                Effect.tryPromise(async () => {
                   const section: Section = book.spine.get(index);
-                  const document = await section.load(book.load.bind(book));
-                  return { section, document };
+                  // `load` resolves with `contents` (the <html> element), but sets
+                  // `section.document` to the parsed Document as a side effect —
+                  // that's what we need so `doc.body` (and its text) is reachable.
+                  await section.load(book.load.bind(book));
+                  return { section, document: section.document };
                 }),
                 ({ section, document }) =>
                   Effect.sync(() =>
                     pick({ document, cfiFromRange: (r) => section.cfiFromRange(r) ?? null }),
                   ),
                 ({ section }) => Effect.sync(() => section.unload()),
-              );
+              ).pipe(Effect.orElseSucceed((): A[] => []));
               results.push(...found);
             }
             return results;

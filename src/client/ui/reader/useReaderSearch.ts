@@ -95,16 +95,14 @@ export function useReaderSearch({
       }
       setSearching(true);
       debounceRef.current = window.setTimeout(() => {
-        const run = searchSource(reader, q).pipe(
-          Effect.tap((found) =>
-            Effect.sync(() => {
-              setMatches(found);
-              setSearching(false);
-              showMatch(found, 0);
-            }),
-          ),
-          Effect.asVoid,
-          Effect.ignore,
+        const run = Effect.gen(function* () {
+          const found = yield* searchSource(reader, q);
+          setMatches(found);
+          setSearching(false);
+          showMatch(found, 0);
+        }).pipe(
+          // Never leave the bar spinning: treat any failure/defect as no matches.
+          Effect.catchCause(() => Effect.sync(() => setSearching(false))),
         );
         fiberRef.current = Effect.runFork(run);
       }, DEBOUNCE_MS);

@@ -1,5 +1,6 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { fixtureServer } from "./src/tests/harness/testServer.ts";
 
 // workerd cannot parse TC39 decorators, which the agents SDK uses via @callable.
 // Vite 8 transforms with oxc, and oxc only lowers *legacy* decorators — it leaves
@@ -19,7 +20,11 @@ function lowerDecorators(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [lowerDecorators(), react()],
+  plugins: [
+    lowerDecorators(),
+    react(),
+    fixtureServer(new URL("./assets", import.meta.url).pathname),
+  ],
   resolve: {
     alias: {
       "@": new URL("./src", import.meta.url).pathname,

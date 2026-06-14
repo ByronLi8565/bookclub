@@ -64,7 +64,7 @@ export function Reader({
             ref={searchInputRef}
             className="reader-search-input"
             type="text"
-            placeholder="FIND IN BOOK"
+            placeholder="Find in book"
             value={search.query}
             onChange={(e) => search.setQuery(e.target.value)}
             onKeyDown={(e) => {
