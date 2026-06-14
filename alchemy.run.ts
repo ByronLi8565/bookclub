@@ -13,7 +13,9 @@ export default Alchemy.Stack(
       url: true,
       compatibility: { flags: ["nodejs_compat"] },
       assets: { htmlHandling: "auto-trailing-slash", notFoundHandling: "single-page-application" },
-      bindings: {
+      // `env` is alchemy's binding map for the worker (the build only reads
+      // props.env; a `bindings` key is silently ignored).
+      env: {
         NoteAgent: Cloudflare.DurableObjectNamespace<NoteAgent>("NoteAgent"),
         AuthAgent: Cloudflare.DurableObjectNamespace<AuthAgent>("AuthAgent"),
         // Resolved from the deploy environment; never committed in plaintext.
