@@ -1,6 +1,7 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildConversation } from "./conversation.ts";
 import { captureHighlight, type Highlight } from "./highlights.ts";
 import { effectiveHighlight, noteSnippet, type Note } from "./notes.ts";
 import { hashFile } from "./storage/hashFile.ts";
@@ -159,10 +160,11 @@ export default function App() {
     setReplyingTo((id) => (id === note.id ? null : id));
   }
 
-  // Lookups for references: id -> note (anchor inheritance), seq -> note (jump
-  // target), and seq -> snippet (chip hover). Built once per note-state change.
-  const byId = useMemo(() => new Map(notes.map((n) => [n.id, n] as const)), [notes]);
-  const bySeq = useMemo(() => new Map(notes.map((n) => [n.seq, n] as const)), [notes]);
+  // The threaded view of the flat note list: roots, replies, and the id/seq
+  // lookups used for anchor inheritance, jump targets, and chip hovers. Built
+  // once per note-state change.
+  const conversation = useMemo(() => buildConversation(notes), [notes]);
+  const { byId, bySeq } = conversation;
   const noteRefs = useMemo<NoteRefs>(
     () => ({
       validSeqs: new Set(bySeq.keys()),
@@ -247,7 +249,7 @@ export default function App() {
         left={<Reader view={view} hasFile={!!file} />}
         right={
           <NotePanel
-            notes={notes}
+            conversation={conversation}
             canWrite={canWriteNotes}
             composing={composing !== null}
             composeInitialBody={composeInitialBody}

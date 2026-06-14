@@ -1,10 +1,10 @@
-import type { Note } from "../notes.ts";
+import type { Conversation } from "../conversation.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteThread, type NoteActions, type NoteRefs } from "./NoteThread.tsx";
 
 // Right-pane list of note threads.
 export function NotePanel({
-  notes,
+  conversation,
   canWrite,
   composing,
   composeInitialBody,
@@ -13,7 +13,7 @@ export function NotePanel({
   actions,
   refs,
 }: {
-  notes: Note[];
+  conversation: Conversation;
   canWrite: boolean;
   composing: boolean;
   composeInitialBody: string;
@@ -22,29 +22,18 @@ export function NotePanel({
   actions: NoteActions;
   refs: NoteRefs;
 }) {
-  const ids = new Set(notes.map((n) => n.id));
-  const childrenMap = new Map<string, Note[]>();
-  for (const note of notes) {
-    if (note.parent !== null && ids.has(note.parent)) {
-      const siblings = childrenMap.get(note.parent) ?? [];
-      siblings.push(note);
-      childrenMap.set(note.parent, siblings);
-    }
-  }
-  const roots = notes
-    .filter((n) => n.parent === null || !ids.has(n.parent))
-    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const { roots } = conversation;
 
   return (
     <aside className="note-panel">
       <h2>Notes</h2>
-      {notes.length === 0 && !composing && <p className="empty">Select text to add a note.</p>}
+      {roots.length === 0 && !composing && <p className="empty">Select text to add a note.</p>}
       <ul>
         {roots.map((root) => (
           <NoteThread
             key={root.id}
             root={root}
-            childrenMap={childrenMap}
+            childrenOf={conversation.childrenOf}
             actions={actions}
             refs={refs}
             canWrite={canWrite}

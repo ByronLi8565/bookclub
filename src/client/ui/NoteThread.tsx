@@ -193,22 +193,20 @@ function NoteRow({
 // of this group; past MAX_INDENT we stop nesting and render flat at that level.
 function Replies({
   parent,
-  childrenMap,
+  childrenOf,
   actions,
   refs,
   canWrite,
   depth,
 }: {
   parent: Note;
-  childrenMap: Map<string, Note[]>;
+  childrenOf: (id: string) => Note[];
   actions: NoteActions;
   refs: NoteRefs;
   canWrite: boolean;
   depth: number;
 }) {
-  const children = (childrenMap.get(parent.id) ?? []).toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  const children = childrenOf(parent.id);
   if (children.length === 0) return null;
 
   const content = children.map((child) => (
@@ -216,7 +214,7 @@ function Replies({
       <NoteRow note={child} actions={actions} refs={refs} canWrite={canWrite} />
       <Replies
         parent={child}
-        childrenMap={childrenMap}
+        childrenOf={childrenOf}
         actions={actions}
         refs={refs}
         canWrite={canWrite}
@@ -231,13 +229,13 @@ function Replies({
 // A top-level note plus its nested reply tree.
 export function NoteThread({
   root,
-  childrenMap,
+  childrenOf,
   actions,
   refs,
   canWrite,
 }: {
   root: Note;
-  childrenMap: Map<string, Note[]>;
+  childrenOf: (id: string) => Note[];
   actions: NoteActions;
   refs: NoteRefs;
   canWrite: boolean;
@@ -247,7 +245,7 @@ export function NoteThread({
       <NoteRow note={root} actions={actions} refs={refs} canWrite={canWrite} />
       <Replies
         parent={root}
-        childrenMap={childrenMap}
+        childrenOf={childrenOf}
         actions={actions}
         refs={refs}
         canWrite={canWrite}
