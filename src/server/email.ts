@@ -2,13 +2,26 @@ import type { Env } from "./env.ts";
 
 // Deliver a login code to the user's inbox.
 //
-// For now this only logs the code to the worker output: the maintainer reads it
-// from the `wrangler dev` log to sign in. Real delivery via the Cloudflare Email
-// Service (`env.EMAIL.send`) is wired once the sender domain is onboarded
-// (SPF/DKIM/DMARC) — see step-6-plan decision 10 and risk 3. Logging keeps local
-// dev unblocked and "user enumeration is not a vuln" (decision 1) so the code is
-// safe to surface in dev logs.
-export function sendLoginCode(_env: Env, email: string, code: string): Promise<void> {
+// When the Cloudflare send_email binding and a verified sender are configured
+// (production), send a real email. Otherwise (local dev) log the code to the
+// worker output so the maintainer can sign in — safe because "user enumeration
+// is not a vuln" (step-6-plan decision 1).
+//
+// Note: the send_email binding can only deliver to **verified destination
+// addresses** on the account (Cloudflare Email Routing limitation). For
+// arbitrary public signups a third-party email API is required — see the
+// onboarding notes in the handoff.
+export async function sendLoginCode(env: Env, email: string, code: string): Promise<void> {
+  if (env.EMAIL && env.EMAIL_FROM) {
+    await env.EMAIL.send({
+      from: env.EMAIL_FROM,
+      to: email,
+      subject: "Your bookclub login code",
+      text:
+        `Your bookclub login code is ${code}.\n\n` +
+        `It expires in 10 minutes. If you didn't request it, ignore this email.`,
+    });
+    return;
+  }
   console.log(`[auth] login code for ${email}: ${code}`);
-  return Promise.resolve();
 }

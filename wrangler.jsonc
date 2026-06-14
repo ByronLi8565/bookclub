@@ -19,5 +19,8 @@
     { "tag": "v2", "new_sqlite_classes": ["AuthAgent"] },
   ],
   // Dev-only secret; the deployed worker gets SESSION_HMAC_SECRET from alchemy.
+  // No EMAIL/EMAIL_FROM binding in dev on purpose: with the send_email binding
+  // absent, login codes are logged to this terminal (see email.ts). Real sending
+  // is configured only in alchemy.run.ts for the deployed worker.
   "vars": { "SESSION_HMAC_SECRET": "dev-insecure-session-secret-change-me" },
 }

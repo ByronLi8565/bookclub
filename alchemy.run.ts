@@ -18,6 +18,10 @@ export default Alchemy.Stack(
         AuthAgent: Cloudflare.DurableObjectNamespace<AuthAgent>("AuthAgent"),
         // Resolved from the deploy environment; never committed in plaintext.
         SESSION_HMAC_SECRET: Config.redacted("SESSION_HMAC_SECRET"),
+        // Login-code delivery. EMAIL_FROM must be a verified Email Routing
+        // sender on a zone you control (see the onboarding notes in the handoff).
+        EMAIL: Cloudflare.SendEmail("EMAIL"),
+        EMAIL_FROM: Config.string("EMAIL_FROM"),
       },
     });
 

@@ -9,5 +9,9 @@ export interface Env {
   NoteAgent: DurableObjectNamespace<NoteAgent>;
   AuthAgent: DurableObjectNamespace<AuthAgent>;
   SESSION_HMAC_SECRET: string;
+  // Email sending. `EMAIL` is the Cloudflare send_email binding; `EMAIL_FROM` is
+  // the verified sender address. Both are absent in local dev (codes are logged).
+  EMAIL?: SendEmail;
+  EMAIL_FROM?: string;
   ASSETS?: Fetcher;
 }
