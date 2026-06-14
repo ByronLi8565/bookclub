@@ -4,7 +4,7 @@ import type { Session } from "../../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
 import { infoCards } from "../../info/infoCards.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
-import { NoteBodyView } from "../notes/editor/NoteBodyView.tsx";
+import { NoteCardView, noteHeading } from "../notes/NoteThread.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
@@ -193,21 +193,23 @@ function InfoScreen({ onClose }: { onClose: () => void }): React.ReactElement {
           </button>
         </div>
 
-        <div className="home-info-cards">
+        <div className="note-panel home-info-cards">
           {infoCards.length === 0 ? (
             <p className="home-info-empty">no info cards yet</p>
           ) : (
-            infoCards.map((card) => (
-              <article className="home-info-card" key={card.path}>
-                <header className="home-info-card-head">
-                  <h3>{card.title}</h3>
-                  <div>
-                    {card.author} - {card.date}
-                  </div>
-                </header>
-                <NoteBodyView body={card.body} refs={EMPTY_REFS} onReference={() => {}} />
-              </article>
-            ))
+            <ul>
+              {infoCards.map((card, index) => (
+                <li key={card.path} title={card.title}>
+                  <NoteCardView
+                    seq={card.seq ?? index + 1}
+                    title={noteHeading(card.author, "posted", card.date)}
+                    body={card.body}
+                    refs={EMPTY_REFS}
+                    onReference={() => {}}
+                  />
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>

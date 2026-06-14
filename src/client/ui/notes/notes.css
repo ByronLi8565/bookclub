@@ -55,6 +55,7 @@
 .note-panel .quote {
   flex: 1;
   border: none;
+  padding: 4px 10px;
   text-align: left;
 }
 

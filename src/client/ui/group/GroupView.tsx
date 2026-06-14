@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
-import { fetchGroup, redeemInvite, type GroupSummary, type RosterEntry } from "../../groups/api.ts";
+import {
+  fetchGroup,
+  redeemInvite,
+  resolveBookTitle,
+  type GroupSummary,
+  type RosterEntry,
+} from "../../groups/api.ts";
 import { books, loadSource } from "../../groups/sourceAccess.ts";
 import { useBookUpload, type BookUpload } from "../../groups/useBookUpload.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
@@ -72,6 +78,25 @@ export function GroupView({
   }
 
   const upload = useBookUpload(group, (id) => void onUploaded(id));
+
+  // Read-repair: the reader decoded a metadata title for a book the club has no
+  // label for. Record it locally (so the switcher updates and the effect won't
+  // refire) and back it up to the server, which set-if-absent ignores duplicates.
+  function onTitleParsed(sourceId: string, title: string): void {
+    setResolved((prev) => {
+      if (prev.k !== "member") return prev;
+      const meta = prev.group.sourceMeta[sourceId];
+      if (!meta || (meta.title ?? "") !== "") return prev;
+      return {
+        ...prev,
+        group: {
+          ...prev.group,
+          sourceMeta: { ...prev.group.sourceMeta, [sourceId]: { ...meta, title } },
+        },
+      };
+    });
+    void resolveBookTitle(name, sourceId, title);
+  }
 
   // Resolve membership (and redeem a pending invite). Re-runs only on identity /
   // route changes, never on a book switch.
@@ -169,7 +194,8 @@ export function GroupView({
       groupId={group.groupId}
       source={source}
       file={loaded?.sourceId === source.id ? loaded.file : null}
-      bookTitleOverride={group.bookTitles[source.id] ?? null}
+      storedBookTitle={source.title}
+      onTitleParsed={onTitleParsed}
       books={books(group)}
       selectedSourceId={source.id}
       onSelectBook={setSelectedId}

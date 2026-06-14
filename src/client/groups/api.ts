@@ -186,6 +186,24 @@ export async function renameBook(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
+// Any member: backfill a book's default label from the reader's parsed metadata
+// title (PUT .../book/parsed-title). Read-repair: the server only writes it if
+// no default is stored yet, so this is safe to fire from any reader.
+export async function resolveBookTitle(
+  name: string,
+  sourceId: string,
+  title: string,
+): Promise<ApiResult<GroupSummary>> {
+  const r = await fetch(`/groups/${name}/book/parsed-title`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceId, title }),
+  });
+  if (!r.ok) return { ok: false, error: await readError(r) };
+  const body = await parseJson(r, GroupResponse);
+  return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
+}
+
 // Owner-only: upload the group's source — EPUB or PDF (PUT /groups/:name/book).
 // The pre-upload health report rides along in a header (Option A): the client
 // gates on it; the server validates the file's magic bytes independently.

@@ -9,6 +9,7 @@ import {
   redeemInvite,
   renameBookTitle,
   renameGroupTitle,
+  resolveBookTitle,
   resolveGroupView,
   uploadSource,
   type WorkflowFailure,
@@ -64,6 +65,20 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
   app.put("/groups/:name/book/title", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await renameBookTitle(
+      c.env,
+      c.req.raw,
+      c.req.param("name"),
+      body?.sourceId,
+      body?.title,
+    );
+    return result.ok ? c.json(result.value) : workflowError(result);
+  });
+
+  // Any member: backfill a book's default label from a client-parsed metadata
+  // title (read-repair; set-if-absent on the server, so it's a no-op once set).
+  app.put("/groups/:name/book/parsed-title", async (c) => {
+    const body = await readJson(c.req.raw);
+    const result = await resolveBookTitle(
       c.env,
       c.req.raw,
       c.req.param("name"),

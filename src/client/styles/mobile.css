@@ -63,8 +63,4 @@
   .home-info-panel {
     max-height: 88dvh;
   }
-
-  .home-info-cards {
-    grid-template-columns: 1fr;
-  }
 }

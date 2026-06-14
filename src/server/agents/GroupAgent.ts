@@ -224,6 +224,27 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
+  // Read-repair: record a parsed metadata title as a book's default label, but
+  // only if no default is stored yet.
+  resolveBookTitle(callerId: string, sourceId: string, rawTitle: string): RenameResult {
+    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    if (!this.state.sources.includes(sourceId)) return { ok: false, reason: "bad_source" };
+    const title = rawTitle.trim();
+    if (title === "") return { ok: false, reason: "empty" };
+    const meta = this.state.sourceMeta[sourceId];
+    // A stored default means there is nothing to repair.
+    if (!meta || (meta.title ?? "") !== "") return { ok: true, summary: this.summary() };
+    this.setState({
+      ...this.state,
+      sourceMeta: {
+        ...this.state.sourceMeta,
+        [sourceId]: { ...meta, title: title.slice(0, MAX_TITLE_LENGTH) },
+      },
+    });
+    return { ok: true, summary: this.summary() };
+  }
+
   // Add the caller to the members map (with the given invites map) and index the
   // group under their account. Shared by the open and email-bound redeem paths.
   private async join(user: Identity, invites: Record<string, Invite>): Promise<void> {

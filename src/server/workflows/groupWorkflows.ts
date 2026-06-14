@@ -69,6 +69,17 @@ type Group = {
         | { ok: true; summary: GroupSummary }
         | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
       >;
+  resolveBookTitle(
+    callerId: string,
+    sourceId: string,
+    title: string,
+  ):
+    | { ok: true; summary: GroupSummary }
+    | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
+    | Promise<
+        | { ok: true; summary: GroupSummary }
+        | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
+      >;
   invite(
     callerId: string,
     email: string,
@@ -262,6 +273,30 @@ export async function renameBookTitle(
       }
       const { group } = yield* requireGroup(env, rawName);
       const result = yield* tryPromise(async () => group.renameBook(me.id, sourceId, title));
+      if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
+      return { group: result.summary };
+    }),
+  );
+}
+
+// Read-repair the parsed metadata title for a book: any member whose reader has
+// decoded a title can backfill the club's default label, but only if none is
+// stored yet (the agent enforces set-if-absent). Idempotent and member-driven.
+export async function resolveBookTitle(
+  env: Env,
+  request: Request,
+  rawName: string,
+  sourceId: unknown,
+  title: unknown,
+): Promise<WorkflowResult<{ group: GroupSummary }>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      if (typeof sourceId !== "string" || typeof title !== "string") {
+        return yield* Effect.fail(fail(400, "invalid_request"));
+      }
+      const { group } = yield* requireGroup(env, rawName);
+      const result = yield* tryPromise(async () => group.resolveBookTitle(me.id, sourceId, title));
       if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
       return { group: result.summary };
     }),

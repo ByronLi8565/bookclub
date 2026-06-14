@@ -262,34 +262,15 @@
 }
 
 .home-info-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  padding: 16px;
+  flex: 1;
   overflow-y: auto;
+}
+
+.home-info-cards.note-panel {
+  padding: 16px;
 }
 
 .home-info-empty {
   margin: 0;
   opacity: var(--muted-opacity);
-}
-
-.home-info-card {
-  border: var(--line);
-  background: var(--white);
-}
-
-.home-info-card-head {
-  padding: 10px;
-  border-bottom: var(--line);
-}
-
-.home-info-card-head h3 {
-  margin: 0 0 4px;
-  font-size: 18px;
-}
-
-.home-info-card-head div {
-  font-size: var(--font-xs);
-  opacity: var(--subtle-opacity);
 }

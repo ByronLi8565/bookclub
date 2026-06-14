@@ -37,8 +37,12 @@ export interface WorkspaceProps {
   groupId: string;
   source: SourceRef; // the active source (content hash + kind + content type)
   file: File | null;
-  // A member-set source title override, if any (else the source metadata title).
-  bookTitleOverride: string | null;
+  // The active book's stored label (member override, else parsed default), or
+  // null when none is recorded yet — which arms the read-repair below.
+  storedBookTitle: string | null;
+  // Called when the reader decodes a metadata title for a book that has no
+  // stored label, so the parsed title can be backfilled as the default.
+  onTitleParsed: (sourceId: string, title: string) => void;
   // The club's library and which book is active, for the reader's book switcher.
   books: SourceSummary[];
   selectedSourceId: string;
@@ -56,6 +60,8 @@ export function Workspace({
   groupId,
   source,
   file,
+  storedBookTitle,
+  onTitleParsed,
   books,
   selectedSourceId,
   onSelectBook,
@@ -196,6 +202,20 @@ export function Workspace({
   useEffect(() => {
     drawnRef.current.clear();
   }, [sourceId]);
+
+  // Read-repair the book's label: once the reader has decoded a metadata title
+  // and the club has no stored label for this book, backfill the parsed title as
+  // its default. Gated on having a title (no title -> nothing to send -> no
+  // retry loop) and on the absence of a stored label (set-if-absent on the
+  // server makes a concurrent double-fire harmless). The ref guards against
+  // refiring for the same book within a session.
+  const titleRepairedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!view.title || storedBookTitle) return;
+    if (titleRepairedRef.current === sourceId) return;
+    titleRepairedRef.current = sourceId;
+    onTitleParsed(sourceId, view.title);
+  }, [view.title, storedBookTitle, sourceId, onTitleParsed]);
 
   function onDelete(note: Note) {
     // Erasing the paint is handled by the sync effect once the note leaves state.

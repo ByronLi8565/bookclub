@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import editIcon from "@assets/edit.svg";
 import { effectiveHighlight, type Note } from "../../notes/render.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
@@ -9,14 +9,25 @@ import { NoteBodyView } from "./editor/NoteBodyView.tsx";
 const MAX_INDENT = 4;
 
 export function noteTitle(note: Note): string {
-  const when = new Date(note.createdAt).toLocaleString(undefined, {
+  const verb = note.parent === null ? "posted" : "replied";
+  return noteHeading(note.author.name, verb, note.createdAt);
+}
+
+export function noteHeading(
+  authorName: string,
+  verb: "posted" | "replied",
+  createdAt: string,
+): string {
+  return `${authorName} ${verb} ${formatNoteTimestamp(createdAt)}`;
+}
+
+export function formatNoteTimestamp(createdAt: string): string {
+  return new Date(createdAt).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
-  const verb = note.parent === null ? "posted" : "replied";
-  return `${note.author.name} ${verb} ${when}`;
 }
 
 // Read-view data shared by every row: which seqs resolve (for editor chips),
@@ -50,6 +61,50 @@ export interface NoteActions {
   onReply: (note: Note) => void;
   onReplySave: (parentId: string, body: string) => void;
   onReplyCancel: () => void;
+}
+
+export function NoteCardView({
+  seq,
+  title,
+  body,
+  refs,
+  onReference,
+  id,
+  deleted = false,
+  jump,
+  actions,
+}: {
+  seq: number;
+  title: string;
+  body: string;
+  refs: Map<number, string>;
+  onReference: (seq: number) => void;
+  id?: string;
+  deleted?: boolean;
+  jump?: { onClick: () => void; disabled: boolean; title?: string };
+  actions?: ReactNode;
+}): React.ReactElement {
+  return (
+    <div className={deleted ? "note note--deleted" : "note"} id={id}>
+      <div className="note-head">
+        <span className="note-seq">{seq}</span>
+        {jump ? (
+          <button
+            className="quote truncate"
+            onClick={jump.onClick}
+            disabled={jump.disabled}
+            title={jump.title}
+          >
+            {title}
+          </button>
+        ) : (
+          <div className="quote truncate">{title}</div>
+        )}
+        {actions}
+      </div>
+      {body && <NoteBodyView body={body} refs={refs} onReference={onReference} />}
+    </div>
+  );
 }
 
 // One note: its head and body (or an inline edit editor), followed by an inline
@@ -112,82 +167,84 @@ function NoteRow({
 
   return (
     <>
-      <div className={deleted ? "note note--deleted" : "note"} id={`note-${note.seq}`}>
-        <div className="note-head">
-          <span className="note-seq">{note.seq}</span>
-          <button
-            className="quote truncate"
-            onClick={() => actions.onJump(note)}
-            disabled={!anchored}
-            title={anchored ? "Jump to highlight" : undefined}
-          >
-            {noteTitle(note)}
-          </button>
-          {!deleted && (
-            <button
-              className="reply"
-              onClick={() => actions.onReply(note)}
-              aria-label="reply"
-              title="Reply"
-            >
-              ↩
-            </button>
-          )}
-          {!deleted && canEdit && (
-            <button
-              className="edit"
-              onClick={() => actions.onEdit(note)}
-              aria-label="edit"
-              title="Edit"
-            >
-              <img src={editIcon} alt="" aria-hidden="true" />
-            </button>
-          )}
-          {!deleted && canDelete && (
-            <div className="delete-wrap" ref={confirmRef}>
+      <NoteCardView
+        seq={note.seq}
+        title={noteTitle(note)}
+        body={note.body}
+        refs={refs.refs}
+        onReference={actions.onReference}
+        id={`note-${note.seq}`}
+        deleted={deleted}
+        jump={{
+          onClick: () => actions.onJump(note),
+          disabled: !anchored,
+          title: anchored ? "Jump to highlight" : undefined,
+        }}
+        actions={
+          <>
+            {!deleted && (
               <button
-                className="delete"
-                onClick={() => setConfirmingDelete(true)}
-                aria-label="delete"
-                title="Delete"
-                aria-expanded={confirmingDelete}
-                disabled={!canWrite}
+                className="reply"
+                onClick={() => actions.onReply(note)}
+                aria-label="reply"
+                title="Reply"
               >
-                ✕
+                ↩
               </button>
-              {confirmingDelete && (
-                <div className="delete-confirm" role="dialog" aria-label="Confirm delete">
-                  <p>really delete?</p>
-                  <div className="delete-confirm-actions">
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingDelete(false)}
-                      aria-label="cancel delete"
-                    >
-                      ✕
-                    </button>
-                    <span>|</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setConfirmingDelete(false);
-                        actions.onDelete(note);
-                      }}
-                      aria-label="confirm delete"
-                      disabled={!canWrite}
-                    >
-                      ✓
-                    </button>
+            )}
+            {!deleted && canEdit && (
+              <button
+                className="edit"
+                onClick={() => actions.onEdit(note)}
+                aria-label="edit"
+                title="Edit"
+              >
+                <img src={editIcon} alt="" aria-hidden="true" />
+              </button>
+            )}
+            {!deleted && canDelete && (
+              <div className="delete-wrap" ref={confirmRef}>
+                <button
+                  className="delete"
+                  onClick={() => setConfirmingDelete(true)}
+                  aria-label="delete"
+                  title="Delete"
+                  aria-expanded={confirmingDelete}
+                  disabled={!canWrite}
+                >
+                  ✕
+                </button>
+                {confirmingDelete && (
+                  <div className="delete-confirm" role="dialog" aria-label="Confirm delete">
+                    <p>really delete?</p>
+                    <div className="delete-confirm-actions">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDelete(false)}
+                        aria-label="cancel delete"
+                      >
+                        ✕
+                      </button>
+                      <span>|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmingDelete(false);
+                          actions.onDelete(note);
+                        }}
+                        aria-label="confirm delete"
+                        disabled={!canWrite}
+                      >
+                        ✓
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        {note.body && (
-          <NoteBodyView body={note.body} refs={refs.refs} onReference={actions.onReference} />
-        )}
-      </div>
+                )}
+              </div>
+            )}
+          </>
+        }
+      />
       {!deleted && actions.replyingTo === note.id && (
         <div className="note reply-compose">
           <NoteEditor

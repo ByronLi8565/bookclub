@@ -5,6 +5,7 @@ interface RawInfoCard {
 
 export interface InfoCard {
   path: string;
+  seq: number | null;
   title: string;
   author: string;
   date: string;
@@ -31,11 +32,17 @@ function parseInfoCard({ path, raw }: RawInfoCard): InfoCard {
 
   return {
     path,
+    seq: infoSeq(path),
     title: headers.get("TITLE") || "Untitled",
     author: headers.get("AUTHOR") || "Unknown",
     date: headers.get("DATE") || "Undated",
     body: unquoteBody(bodyParts.join("\n\n").trim()),
   };
+}
+
+function infoSeq(path: string): number | null {
+  const match = /info_(\d+)\.md$/u.exec(path);
+  return match ? Number(match[1]) : null;
 }
 
 function unquoteBody(body: string): string {
