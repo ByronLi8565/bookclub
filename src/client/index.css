@@ -509,8 +509,18 @@ button:disabled:hover {
   position: relative;
   width: min(900px, 92vw);
   height: min(560px, 82vh);
+  background: #fff;
   border: var(--line);
-  box-shadow: 8px 8px 0 #000;
+  /* Stacked offset rectangles fake a block of pages on the lower-right edge,
+     finished with the original hard drop shadow. */
+  box-shadow:
+    5px 5px 0 0 #fff,
+    5px 5px 0 3px #000,
+    10px 10px 0 0 #fff,
+    10px 10px 0 3px #000,
+    15px 15px 0 0 #fff,
+    15px 15px 0 3px #000,
+    20px 20px 0 0 #000;
 }
 
 /* The center spine: makes the card read like an open book. */
@@ -522,6 +532,20 @@ button:disabled:hover {
   left: 50%;
   border-left: var(--line);
   transform: translateX(-50%);
+}
+
+/* A red ribbon bookmark poking out of the top of the book. */
+.home-card::after {
+  content: "";
+  position: absolute;
+  top: -42px;
+  left: 87%;
+  width: 36px;
+  height: 70px;
+  background: #d60000;
+  border: var(--line);
+  border-radius: 4px 4px 8px 8px;
+  z-index: -1;
 }
 
 .home-corner {
