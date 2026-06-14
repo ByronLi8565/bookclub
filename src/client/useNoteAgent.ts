@@ -35,6 +35,10 @@ export function useNoteAgent(sourceId: string | null): NoteSync {
 
     void call().catch((error: unknown) => {
       console.error("note agent call failed", error);
+      spawnToast("Save failed", "The note service rejected that change. Try again.", {
+        type: "error",
+        durationMs: 4000,
+      });
     });
     return true;
   };
