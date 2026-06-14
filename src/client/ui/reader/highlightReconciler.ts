@@ -28,9 +28,24 @@ export async function updateHighlights(
     isCancelled: () => boolean;
   },
 ): Promise<void> {
-  for (const { highlight } of desired) {
+  // Erase highlights that have left the desired set.
+  const wanted = new Set(desired.map((d) => d.highlight.id));
+  for (const [id, cfi] of drawn) {
+    if (!wanted.has(id)) {
+      deps.painter.erase(cfi);
+      drawn.delete(id);
+    }
+  }
+
+  for (const { noteId, highlight } of desired) {
+    if (drawn.has(highlight.id)) continue;
     const located = await Effect.runPromise(locateHighlight(highlight, deps.reader));
     if (!located) continue;
+    // A cfi that drifted is rebound back into shared state, but only for a real
+    // note: the composing highlight (noteId null) isn't in shared state yet.
+    if (located.cfi !== highlight.cfi.value && noteId !== null) {
+      deps.rebind(noteId, highlight.id, located.cfi);
+    }
     deps.painter.draw(highlight.id, located.cfi);
     drawn.set(highlight.id, located.cfi);
   }

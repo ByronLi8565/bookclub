@@ -50,4 +50,65 @@ describe("updateHighlights", () => {
     expect(draws).toEqual([{ id: "h1", cfi: "cfi-1" }]);
     expect(drawn.get("h1")).toBe("cfi-1");
   });
+
+  it("erases a drawn highlight that is no longer desired", async () => {
+    const { painter, erases } = fakePainter();
+    const drawn = new Map<string, string>([["gone", "cfi-gone"]]);
+
+    await updateHighlights([], drawn, {
+      reader: fakeReader(new Set()),
+      painter,
+      rebind: noRebind,
+      isCancelled: notCancelled,
+    });
+
+    expect(erases).toEqual(["cfi-gone"]);
+    expect(drawn.has("gone")).toBe(false);
+  });
+
+  it("leaves an already-drawn highlight untouched", async () => {
+    const { painter, draws, erases } = fakePainter();
+    const drawn = new Map<string, string>([["h1", "cfi-1"]]);
+    let located = 0;
+    const reader: SourceReader = {
+      resolveCfi: (cfi) => {
+        located++;
+        return Effect.succeed({} as Range);
+      },
+      findInSections: () => Effect.succeed(null),
+    };
+
+    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
+      reader,
+      painter,
+      rebind: noRebind,
+      isCancelled: notCancelled,
+    });
+
+    expect(draws).toEqual([]);
+    expect(erases).toEqual([]);
+    expect(located).toBe(0);
+  });
+
+  it("rebinds and paints at the fresh cfi when the stored one has drifted", async () => {
+    const { painter, draws } = fakePainter();
+    const drawn = new Map<string, string>();
+    const rebinds: { noteId: string; highlightId: string; cfi: string }[] = [];
+    // Stored cfi no longer resolves; the quote search relocates it to cfi-fresh.
+    const reader: SourceReader = {
+      resolveCfi: () => Effect.succeed(null),
+      findInSections: () => Effect.succeed("cfi-fresh"),
+    };
+
+    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
+      reader,
+      painter,
+      rebind: (noteId, highlightId, cfi) => void rebinds.push({ noteId, highlightId, cfi }),
+      isCancelled: notCancelled,
+    });
+
+    expect(rebinds).toEqual([{ noteId: "n1", highlightId: "h1", cfi: "cfi-fresh" }]);
+    expect(draws).toEqual([{ id: "h1", cfi: "cfi-fresh" }]);
+    expect(drawn.get("h1")).toBe("cfi-fresh");
+  });
 });
