@@ -57,7 +57,9 @@ const ErrorBody = Schema.Struct({
   reason: Schema.optionalKey(Schema.String),
 });
 
-const GroupsResponse = Schema.Struct({ groups: Schema.mutable(Schema.Array(GroupSummary)) });
+// Loose envelope for the home list: the `groups` items are decoded one at a
+// time (see listMyGroups), so the array element type stays unknown here.
+const GroupsEnvelope = Schema.Struct({ groups: Schema.Array(Schema.Unknown) });
 
 const GroupResponse = Schema.Struct({ group: GroupSummary });
 
@@ -88,11 +90,23 @@ async function readError(response: Response): Promise<string> {
   return body?.error ?? `http_${response.status}`;
 }
 
-// The groups the signed-in user belongs to (GET /groups).
+// The groups the signed-in user belongs to (GET /groups). Each summary is
+// decoded independently and bad entries are skipped
 export async function listMyGroups(): Promise<GroupSummary[]> {
   const r = await fetch("/groups");
   if (!r.ok) return [];
-  return (await parseJson(r, GroupsResponse))?.groups ?? [];
+  const envelope = await parseJson(r, GroupsEnvelope);
+  if (!envelope) return [];
+  const decode = Schema.decodeUnknownSync(GroupSummary);
+  const groups: GroupSummary[] = [];
+  for (const raw of envelope.groups) {
+    try {
+      groups.push(decode(raw));
+    } catch {
+      // Drop the unparseable group; the rest of the list still renders.
+    }
+  }
+  return groups;
 }
 
 // Create a group with a write-once URL name (POST /groups).
@@ -135,7 +149,7 @@ export async function redeemInvite(name: string, token: string): Promise<ApiResu
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Owner-only: invite an email to the group (POST /groups/:name/invite).
+// Any member: invite an email to the group (POST /groups/:name/invite).
 export async function inviteToGroup(name: string, email: string): Promise<ApiResult<null>> {
   const r = await fetch(`/groups/${name}/invite`, {
     method: "POST",
@@ -145,7 +159,7 @@ export async function inviteToGroup(name: string, email: string): Promise<ApiRes
   return r.ok ? { ok: true, value: null } : { ok: false, error: await readError(r) };
 }
 
-// Owner-only: get or rotate the group's open invite link (POST .../invite-link).
+// Any member: get or rotate the group's open invite link (POST .../invite-link).
 export async function getInviteLink(
   name: string,
   rotate = false,
@@ -204,7 +218,7 @@ export async function resolveBookTitle(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Owner-only: upload the group's source — EPUB or PDF (PUT /groups/:name/book).
+// Any member: upload a group source — EPUB or PDF (PUT /groups/:name/book).
 // The pre-upload health report rides along in a header (Option A): the client
 // gates on it; the server validates the file's magic bytes independently.
 export async function uploadSource(
@@ -218,11 +232,7 @@ export async function uploadSource(
     "X-Source-Health": encodeURIComponent(JSON.stringify(health)),
   };
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
-  const r = await fetch(`/groups/${name}/book`, {
-    method: "PUT",
-    headers,
-    body: file,
-  });
+  const r = await fetch(`/groups/${name}/book`, { method: "PUT", headers, body: file });
   if (!r.ok) return { ok: false, error: await readError(r) };
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };

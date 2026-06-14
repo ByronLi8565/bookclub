@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Loading } from "../shared/Loading.tsx";
-import type { BookUpload } from "../../groups/useBookUpload.ts";
 import type { SourceSummary } from "../../../shared/types/sources.ts";
 import type { SourceView } from "./useSourceView.ts";
 
@@ -15,18 +14,18 @@ export function Reader({
   books = [],
   selectedSourceId = "",
   onSelectBook = () => {},
-  bookUpload = null,
+  onAddBook = null,
 }: {
   view: SourceView;
   hasFile: boolean;
   loading?: boolean;
   floatingNote?: boolean;
   // The club's library, the active book, and a selection callback for the title
-  // dropdown. `bookUpload` is the owner-only "add a book" action (null hides it).
+  // dropdown. `onAddBook` opens the upload modal (null hides the action).
   books?: SourceSummary[];
   selectedSourceId?: string;
   onSelectBook?: (sourceId: string) => void;
-  bookUpload?: BookUpload | null;
+  onAddBook?: (() => void) | null;
 }) {
   const { fontSize, setFontSize, ready, selection, search } = view;
 
@@ -55,7 +54,7 @@ export function Reader({
           books={books}
           selectedSourceId={selectedSourceId}
           onSelectBook={onSelectBook}
-          upload={bookUpload}
+          onAddBook={onAddBook}
         />
         {view.location && (
           <span className="page-count">
@@ -165,21 +164,21 @@ function bookLabel(book: SourceSummary, activeTitle: string | null, isActive: bo
 }
 
 // The book switcher in the reader bar: shows the active book's title with a
-// disclosure arrow that opens a dropdown of the club's library. Owners get an
-// "Add a book" entry that uploads (and binds) another source. With a single
-// book and no upload affordance it renders as a plain, non-interactive title.
+// disclosure arrow that opens a dropdown of the club's library. An "Add a book"
+// entry opens the upload modal (any member may add a book). With a single book
+// and no add affordance it renders as a plain, non-interactive title.
 function BookMenu({
   activeTitle,
   books,
   selectedSourceId,
   onSelectBook,
-  upload,
+  onAddBook,
 }: {
   activeTitle: string | null;
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
-  upload: BookUpload | null;
+  onAddBook: (() => void) | null;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -195,8 +194,8 @@ function BookMenu({
 
   const active = books.find((b) => b.id === selectedSourceId) ?? null;
   const label = active ? bookLabel(active, activeTitle, true) : (activeTitle ?? "");
-  // No switching and no uploading: just show the title (matches the old bar).
-  const interactive = books.length > 1 || upload !== null;
+  // No switching and no adding: just show the title (matches the old bar).
+  const interactive = books.length > 1 || onAddBook !== null;
 
   // The original title element is preserved verbatim; the dropdown only adds an
   // arrow affordance beside it.
@@ -243,26 +242,18 @@ function BookMenu({
               </button>
             </li>
           ))}
-          {upload && (
+          {onAddBook && (
             <li role="none" className="book-menu-add">
-              <label className="book-menu-item">
-                {upload.busy
-                  ? upload.status === "checking"
-                    ? "checking…"
-                    : "uploading…"
-                  : "+ Add a book"}
-                <input
-                  type="file"
-                  accept=".epub,application/epub+zip,.pdf,application/pdf"
-                  disabled={upload.busy}
-                  hidden
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void upload.pick(f);
-                    setOpen(false);
-                  }}
-                />
-              </label>
+              <button
+                type="button"
+                className="book-menu-item"
+                onClick={() => {
+                  onAddBook();
+                  setOpen(false);
+                }}
+              >
+                + Add a book
+              </button>
             </li>
           )}
         </ul>

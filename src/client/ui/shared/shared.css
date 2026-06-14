@@ -212,7 +212,7 @@
 }
 
 .modal {
-  width: min(380px, 100%);
+  width: min(var(--modal-width), 100%);
   background: var(--white);
   border: var(--line);
   box-shadow: var(--shadow-lg);
@@ -272,6 +272,132 @@
   text-align: center;
 }
 
-.modal--invite {
-  width: min(460px, 100%);
+.modal--upload {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 40px);
+}
+
+.upload-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.upload-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 16px;
+  border: 3px dashed var(--black);
+  text-align: center;
+  cursor: pointer;
+}
+
+.upload-drop.is-dragging {
+  background: var(--highlight);
+  opacity: var(--highlight-opacity);
+}
+
+.upload-drop-icon {
+  margin-bottom: 4px;
+}
+
+.upload-cover {
+  max-height: 160px;
+  max-width: 70%;
+  margin-bottom: 8px;
+  border: var(--line-thin);
+  box-shadow: var(--shadow-sm);
+  object-fit: contain;
+}
+
+.upload-drop-label {
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.upload-drop-hint {
+  font-size: var(--font-xs);
+  font-style: italic;
+  opacity: var(--subtle-opacity);
+}
+
+.upload-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-sm);
+  font-weight: 700;
+}
+
+.upload-checking {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-sm);
+  opacity: var(--subtle-opacity);
+}
+
+.upload-info-head {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.upload-info-table {
+  margin: 0;
+  border-top: var(--line-thin);
+}
+
+.upload-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px;
+  border-bottom: var(--line-thin);
+  font-size: var(--font-sm);
+}
+
+.upload-info-row dt {
+  opacity: var(--subtle-opacity);
+}
+
+.upload-info-row dd {
+  margin: 0;
+  text-align: right;
+  word-break: break-word;
+}
+
+.upload-status--ok {
+  color: #1a9e33;
+  font-weight: 700;
+}
+
+.upload-status--warn {
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.upload-status--error {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.upload-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.upload-submit {
+  border: var(--line);
+  padding: 8px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.upload-submit:disabled {
+  opacity: var(--muted-opacity);
+  box-shadow: none;
 }

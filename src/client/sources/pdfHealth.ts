@@ -5,8 +5,25 @@ import {
   type SourceCapabilities,
   type SourceHealthIssue,
 } from "../../shared/types/sourceHealth.ts";
-import type { SourceInspectionResult } from "./admission.ts";
-import { destroyPdf, isPasswordException, loadPdf, pageTextItems, samplePages } from "./pdf.ts";
+import {
+  EMPTY_METADATA,
+  type InspectionProgress,
+  type SourceInspectionResult,
+  type SourceMetadata,
+} from "./inspection.ts";
+import {
+  destroyPdf,
+  isPasswordException,
+  loadPdf,
+  pageTextItems,
+  renderPageThumbnail,
+} from "./pdf.ts";
+
+// PDF metadata dictionary fields we surface, all optional in the spec.
+interface PdfInfo {
+  Title?: string;
+  Author?: string;
+}
 
 // A PDF with a usable text layer supports everything; an image-only PDF supports
 // none of the text-based capabilities and is rejected.
@@ -18,18 +35,20 @@ const TEXT_CAPABILITIES: SourceCapabilities = {
   pageNavigation: true,
 };
 
-// A file this large warns the owner (download/parse cost), measured in bytes.
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
-// Below this fraction of sampled pages carrying text, warn about low coverage.
-const LOW_COVERAGE = 0.5;
+// Below this fraction of pages carrying text, warn about low coverage.
+const LOW_COVERAGE = 0.8;
 // Fraction of replacement chars above which extraction looks unreliable.
-const BAD_ENCODING = 0.1;
+const BAD_ENCODING = 0.02;
 
 // Health-check a PDF with the same parser the reader uses. Confirms it parses,
-// is not encrypted, has an extractable text layer with usable geometry across
-// sampled pages, and classifies risk via warnings. An image-only PDF fails with
-// `no_text_layer` (it would need OCR to host text highlights).
-export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
+// is not encrypted, and has an extractable text layer with usable geometry.
+// Every page is scanned (not sampled): inspection is rare and runs once at
+// upload, so accuracy is worth the wait — `onProgress` drives a progress bar.
+export async function inspectPdf(
+  file: File,
+  onProgress?: InspectionProgress,
+): Promise<SourceInspectionResult> {
   let doc;
   try {
     doc = await loadPdf(await file.arrayBuffer());
@@ -37,28 +56,38 @@ export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
     if (isPasswordException(error)) {
       return {
         health: healthError([{ code: "encrypted", message: "This PDF is password-protected." }]),
-        title: null,
+        metadata: EMPTY_METADATA,
       };
     }
     return {
       health: healthError([{ code: "parse_failed", message: "This PDF could not be opened." }]),
-      title: null,
+      metadata: EMPTY_METADATA,
     };
   }
 
   try {
     const meta = await doc.getMetadata().catch(() => null);
-    const info = meta?.info as { Title?: string } | undefined;
-    const title = info?.Title?.trim() || null;
+    const info = meta?.info as PdfInfo | undefined;
+    const cover = await doc
+      .getPage(1)
+      .then((page) => renderPageThumbnail(page))
+      .catch(() => null);
+    const metadata: SourceMetadata = {
+      title: info?.Title?.trim() || null,
+      author: info?.Author?.trim() || null,
+      wordCount: null,
+      cover,
+    };
     const numPages = doc.numPages;
-    const pages = samplePages(numPages);
 
     let pagesWithText = 0;
     let pagesWithGeometry = 0;
     let totalChars = 0;
     let replacementChars = 0;
 
-    for (const pageNum of pages) {
+    // Scan every page. Release each page after reading it so a very large
+    // document doesn't accumulate the whole text layer in memory.
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       const page = await doc.getPage(pageNum);
       const items = await pageTextItems(page);
       const text = items.map((i) => i.str).join("");
@@ -68,18 +97,17 @@ export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
       }
       totalChars += text.length;
       replacementChars += (text.match(/\uFFFD/gu) ?? []).length;
+      page.cleanup();
+      onProgress?.(pageNum / numPages);
     }
 
-    // No text on any sampled page: image-only / scanned. Cannot anchor notes.
+    // No text on any page: image-only / scanned. Cannot anchor notes.
     if (pagesWithText === 0) {
       return {
         health: healthError([
-          {
-            code: "no_text_layer",
-            message: "This PDF has no selectable text (it looks scanned).",
-          },
+          { code: "no_text_layer", message: "This PDF has no selectable text (it looks scanned)." },
         ]),
-        title,
+        metadata,
       };
     }
     // Text exists but lacks geometry: cannot build rect anchors.
@@ -88,12 +116,12 @@ export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
         health: healthError([
           { code: "anchor_capture_failed", message: "Text in this PDF has no position data." },
         ]),
-        title,
+        metadata,
       };
     }
 
     const warnings: SourceHealthIssue[] = [];
-    const coverage = pagesWithText / pages.length;
+    const coverage = pagesWithText / numPages;
     if (coverage < 1 && coverage >= LOW_COVERAGE) {
       warnings.push({
         code: "mixed_page_support",
@@ -102,7 +130,7 @@ export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
     } else if (coverage < LOW_COVERAGE) {
       warnings.push({
         code: "low_text_coverage",
-        message: "Most sampled pages have little or no selectable text.",
+        message: "Most pages have little or no selectable text.",
       });
     }
     if (totalChars > 0 && replacementChars / totalChars > BAD_ENCODING) {
@@ -120,7 +148,7 @@ export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
 
     const health =
       warnings.length > 0 ? healthWarn(TEXT_CAPABILITIES, warnings) : healthOk(TEXT_CAPABILITIES);
-    return { health, title };
+    return { health, metadata };
   } finally {
     void destroyPdf(doc);
   }

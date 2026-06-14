@@ -8,12 +8,13 @@ import {
   type RosterEntry,
 } from "../../groups/api.ts";
 import { books, loadSource } from "../../groups/sourceAccess.ts";
-import { useBookUpload, type BookUpload } from "../../groups/useBookUpload.ts";
+import { useBookUpload } from "../../groups/useBookUpload.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
+import { UploadModal } from "./UploadModal.tsx";
 
 // The resolved membership state of a group route. Once a caller is a confirmed
 // member we hold the group + roster here and handle book selection/loading
@@ -57,6 +58,8 @@ export function GroupView({
   // The book the reader is showing; null means "use the club's default book".
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<LoadedFile | null>(null);
+  // Whether the add-a-book upload modal is open (any member may open it).
+  const [uploadOpen, setUploadOpen] = useState(false);
   const userId = session.user?.id ?? null;
 
   const group = resolved.k === "member" ? resolved.group : null;
@@ -75,6 +78,7 @@ export function GroupView({
       });
     }
     setSelectedId(newSourceId);
+    setUploadOpen(false);
   }
 
   const upload = useBookUpload(group, (id) => void onUploaded(id));
@@ -177,32 +181,38 @@ export function GroupView({
     return <GroupMessage title="Members only" body="You need an invite to join this club." />;
   }
 
-  // An empty library: the owner uploads the first book; everyone else waits.
-  if (!effectiveId || !group) {
-    return <NoBook group={resolved.group} isOwner={resolved.isOwner} upload={upload} />;
-  }
+  // The active book, if the library is non-empty and the selection resolves.
+  const source =
+    effectiveId && group ? (sourceById(group, effectiveId) ?? currentSource(group)) : null;
 
-  const source = sourceById(group, effectiveId) ?? currentSource(group);
-  if (!source) {
-    return <NoBook group={resolved.group} isOwner={resolved.isOwner} upload={upload} />;
-  }
+  // An empty library (or unresolved selection): any member can add the first
+  // book. The upload modal is shared with the in-reader "add a book" action.
+  const content =
+    !group || !source ? (
+      <NoBook group={resolved.group} onUpload={() => setUploadOpen(true)} />
+    ) : (
+      <Workspace
+        name={group.name}
+        groupName={group.displayName}
+        groupId={group.groupId}
+        source={source}
+        file={loaded?.sourceId === source.id ? loaded.file : null}
+        storedBookTitle={source.title}
+        onTitleParsed={onTitleParsed}
+        books={books(group)}
+        selectedSourceId={source.id}
+        onSelectBook={setSelectedId}
+        onAddBook={() => setUploadOpen(true)}
+        members={resolved.members}
+        viewer={{ userId: userId ?? "", isOwner: resolved.isOwner }}
+      />
+    );
 
   return (
-    <Workspace
-      name={group.name}
-      groupName={group.displayName}
-      groupId={group.groupId}
-      source={source}
-      file={loaded?.sourceId === source.id ? loaded.file : null}
-      storedBookTitle={source.title}
-      onTitleParsed={onTitleParsed}
-      books={books(group)}
-      selectedSourceId={source.id}
-      onSelectBook={setSelectedId}
-      bookUpload={resolved.isOwner ? upload : null}
-      members={resolved.members}
-      viewer={{ userId: userId ?? "", isOwner: resolved.isOwner }}
-    />
+    <>
+      {content}
+      {uploadOpen && <UploadModal upload={upload} onClose={() => setUploadOpen(false)} />}
+    </>
   );
 }
 
@@ -248,24 +258,16 @@ function GroupGate({
   );
 }
 
-// The club's library is empty: the owner can upload an EPUB or PDF; everyone
-// else waits. Admission (health check + warn confirmation) lives in useBookUpload.
+// The club's library is empty: any member can add the first book. The button
+// opens the upload modal, where admission (health check + metadata preview)
+// happens before the file is committed.
 function NoBook({
   group,
-  isOwner,
-  upload,
+  onUpload,
 }: {
   group: GroupSummary;
-  isOwner: boolean;
-  upload: BookUpload;
+  onUpload: () => void;
 }): React.ReactElement {
-  const label =
-    upload.status === "checking"
-      ? "checking whether highlights will work…"
-      : upload.status === "uploading"
-        ? "uploading…"
-        : "upload the club's book or PDF";
-
   return (
     <div className="home">
       <div className="home-card">
@@ -274,23 +276,9 @@ function NoBook({
         </a>
         <div className="home-main">
           <h1 className="home-title">{group.displayName}</h1>
-          {isOwner ? (
-            <label className="home-upload-link">
-              {upload.busy ? <Loading className="loading--inline" /> : label}
-              <input
-                type="file"
-                accept=".epub,application/epub+zip,.pdf,application/pdf"
-                disabled={upload.busy}
-                hidden
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void upload.pick(f);
-                }}
-              />
-            </label>
-          ) : (
-            <p>Waiting for the owner to add a book.</p>
-          )}
+          <button type="button" className="home-upload-link plain-button" onClick={onUpload}>
+            upload the club&apos;s book or PDF
+          </button>
         </div>
       </div>
     </div>

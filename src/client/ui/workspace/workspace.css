@@ -20,9 +20,94 @@
   display: block;
 }
 
+.settings-tabs {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.settings-body {
+  min-height: 220px;
+}
+
+/* Each setting is a row: name + description on the left, control on the right. */
+.settings-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.settings-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-item-control {
+  flex: 0 0 240px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .settings-item-head {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   font-size: var(--font-md);
+}
+
+.settings-item-desc {
+  margin: 0;
+  font-size: var(--font-xs);
+  font-style: italic;
+  color: var(--gray);
+}
+
+/* Buttons and the smart-arrows <select> share one control look — compact, to
+   sit neatly across from the setting's description. */
+.settings-action {
+  width: 100%;
+  font: inherit;
+  font-size: var(--font-xs);
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+/* Custom dropdown built from the reader's book-menu styling so it matches the
+   rest of the UI rather than the browser-native <select>. */
+.settings-dropdown {
+  display: block;
+  position: relative;
+  max-width: none;
+  width: 100%;
+}
+
+.settings-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Let the label take the room and ellipsize rather than wrap and shove the
+   arrow out of the button. */
+.settings-dropdown-trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The trigger already carries the arrow inline; drop the button reset so it
+   inherits the compact label look and doesn't add its own padding/hover. */
+.settings-dropdown-trigger .book-menu-arrow {
+  padding: 0;
+}
+
+.settings-dropdown .book-menu-list {
+  left: auto;
+  right: 0;
+  min-width: max(240px, 100%);
 }
 
 .settings-detail {

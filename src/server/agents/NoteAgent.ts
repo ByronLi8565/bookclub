@@ -21,9 +21,9 @@ import {
   removeNote,
   type NoteStamp,
   type NoteState,
-} from "../state/noteState.ts";
+} from "../util/noteState.ts";
 
-export type { NoteState } from "../state/noteState.ts";
+export type { NoteState } from "../util/noteState.ts";
 
 // Monotonic so notes created within the same millisecond inside this
 // single-threaded durable object still get strictly increasing, sortable ids.

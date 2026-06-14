@@ -141,15 +141,13 @@ export function Home({ session }: { session: Session }): React.ReactElement {
                   {groups.map((g) => (
                     <li key={g.groupId}>
                       <a href={`/${g.name}`}>{g.displayName}</a>
-                      {g.ownerId === session.user?.id && (
-                        <button
-                          type="button"
-                          className="login-link plain-button"
-                          onClick={() => setInviting(g)}
-                        >
-                          invite
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="login-link plain-button"
+                        onClick={() => setInviting(g)}
+                      >
+                        invite
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -179,21 +177,22 @@ export function Home({ session }: { session: Session }): React.ReactElement {
 
 function InfoScreen({ onClose }: { onClose: () => void }): React.ReactElement {
   return (
-    <div
-      className="home-info-screen"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="home-info-title"
-    >
-      <div className="home-info-panel">
-        <div className="home-info-head">
-          <h2 id="home-info-title">info</h2>
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div
+        className="modal home-info-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="home-info-title"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="modal-head">
+          <strong id="home-info-title">RELEASE LOG</strong>
           <button type="button" onClick={onClose} aria-label="close info">
-            close
+            ✕
           </button>
         </div>
 
-        <div className="note-panel home-info-cards">
+        <div className="modal-body note-panel home-info-cards">
           {infoCards.length === 0 ? (
             <p className="home-info-empty">no info cards yet</p>
           ) : (

@@ -47,9 +47,9 @@ export async function loadSource(
 }
 
 // Load the club's default (first) source. Convenience wrapper over loadSource.
-export async function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | null> {
+export function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | null> {
   const id = currentSourceId(group);
-  return id ? loadSource(group, id) : null;
+  return id ? loadSource(group, id) : Promise.resolve(null);
 }
 
 // Upload a new group source and seed the cache with the same bytes, so the next

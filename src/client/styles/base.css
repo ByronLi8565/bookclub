@@ -4,6 +4,7 @@
   --gray: #777;
   --red: #d60000;
   --green: #2ecc40;
+  --amber: #c77800;
   --link: #0000ee;
   --highlight: #ffe600;
 
@@ -22,6 +23,7 @@
   --shadow-popover: 5px 5px 0 var(--black);
   --shadow-md: 6px 6px 0 var(--black);
   --shadow-lg: 8px 8px 0 var(--black);
+  --modal-width: 460px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 

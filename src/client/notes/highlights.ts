@@ -41,7 +41,7 @@ export function expandToWordBoundaries(range: Range): Range {
 // epub iframe; undefined when the text layer is in the top document). The point
 // is clamped into the visible visual viewport, which on iOS can be
 // offset/zoomed relative to the layout viewport, so the popup stays on-screen.
-export function popupPoint(rect: DOMRect, frame: DOMRect | undefined): { x: number; y: number } {
+export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: number } {
   const vv = window.visualViewport;
   const ox = vv?.offsetLeft ?? 0;
   const oy = vv?.offsetTop ?? 0;

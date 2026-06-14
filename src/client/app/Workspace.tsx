@@ -3,7 +3,6 @@ import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
-import type { BookUpload } from "../groups/useBookUpload.ts";
 import { renameGroup, type RosterEntry } from "../groups/api.ts";
 import { useNoteAgent } from "../notes/agent.ts";
 import { buildConversation } from "../notes/conversation.ts";
@@ -47,8 +46,8 @@ export interface WorkspaceProps {
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
-  // Owner-only "add a book" affordance; null for non-owners (hides the action).
-  bookUpload: BookUpload | null;
+  // Opens the add-a-book upload modal (any member may add a book).
+  onAddBook: () => void;
   members: RosterEntry[];
   // The signed-in caller, used to gate edit/delete affordances (decision 7).
   viewer: NoteViewer;
@@ -65,7 +64,7 @@ export function Workspace({
   books,
   selectedSourceId,
   onSelectBook,
-  bookUpload,
+  onAddBook,
   members,
   viewer,
 }: WorkspaceProps) {
@@ -299,7 +298,7 @@ export function Workspace({
       <WorkspaceHeader
         displayName={displayName}
         onRename={(t) => void onRenameGroup(t)}
-        canInvite={viewer.isOwner}
+        canInvite
         onInvite={() => setInviting(true)}
         onlineCount={agent.online.length}
         onShowPresence={() => setShowingPresence(true)}
@@ -317,7 +316,7 @@ export function Workspace({
             books={books}
             selectedSourceId={selectedSourceId}
             onSelectBook={onSelectBook}
-            bookUpload={bookUpload}
+            onAddBook={onAddBook}
           />
         );
         const notePanel = (

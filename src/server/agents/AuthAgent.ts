@@ -48,7 +48,7 @@ const MAX_SENDS_PER_WINDOW = 5;
 
 // Hash a code salted by the email so identical codes for different emails (and
 // the stored value itself) are not interchangeable.
-async function hashCode(email: string, code: string): Promise<string> {
+function hashCode(email: string, code: string): Promise<string> {
   return sha256Hex(encoder.encode(`${email}:${code}`).buffer);
 }
 

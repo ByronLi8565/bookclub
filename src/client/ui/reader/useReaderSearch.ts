@@ -49,7 +49,7 @@ export function useReaderSearch({
   // The anchor currently underlined, so we can erase it before painting the next.
   const paintedRef = useRef<HighlightAnchor | null>(null);
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null);
-  const debounceRef = useRef<number | undefined>(undefined);
+  const debounceRef = useRef<number | null>(null);
 
   const clearPaint = useCallback(() => {
     if (paintedRef.current) {
@@ -74,8 +74,8 @@ export function useReaderSearch({
 
   // Interrupt any in-flight scan and clear the timer; shared teardown.
   const cancelPending = useCallback(() => {
-    if (debounceRef.current !== undefined) window.clearTimeout(debounceRef.current);
-    debounceRef.current = undefined;
+    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    debounceRef.current = null;
     if (fiberRef.current) {
       Effect.runFork(Fiber.interrupt(fiberRef.current));
       fiberRef.current = null;

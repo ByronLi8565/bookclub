@@ -16,6 +16,7 @@
     "import/no-unassigned-import": "off",
     "unicorn/prefer-query-selector": "off",
     "unicorn/consistent-function-scoping": "off",
-    "unicorn/no-array-callback-reference": "off"
+    "unicorn/no-array-callback-reference": "off",
+    "unicorn/prefer-dom-node-append": "off"
   }
 }

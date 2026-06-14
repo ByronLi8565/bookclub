@@ -129,16 +129,20 @@ export function rectsForRange(
   });
 }
 
-// Evenly spaced 1-based page numbers to sample across a document: always the
-// first and last page, plus a few interior pages.
-export function samplePages(numPages: number, sampleCount = 5): number[] {
-  if (numPages <= sampleCount) {
-    return Array.from({ length: numPages }, (_, i) => i + 1);
-  }
-  const pages = new Set<number>([1, numPages]);
-  const step = (numPages - 1) / (sampleCount - 1);
-  for (let i = 1; i < sampleCount - 1; i++) {
-    pages.add(Math.round(1 + step * i));
-  }
-  return [...pages].toSorted((a, b) => a - b);
+// Render a page to a JPEG data URL no wider than `maxWidth`, for use as a cover
+// thumbnail. Best-effort: returns null if the canvas context is unavailable.
+export async function renderPageThumbnail(
+  page: PDFPageProxy,
+  maxWidth = 240,
+): Promise<string | null> {
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(1, maxWidth / base.width);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  await page.render({ canvas, canvasContext: context, viewport }).promise;
+  return canvas.toDataURL("image/jpeg", 0.8);
 }

@@ -58,16 +58,16 @@ export type CreateResult =
   | { ok: false; reason: "exists" | "name_taken" };
 export type InviteResult =
   | { ok: true; token: string }
-  | { ok: false; reason: "not_owner" | "not_found" };
+  | { ok: false; reason: "not_member" | "not_found" };
 export type RedeemResult =
   | { ok: true; summary: GroupSummary }
   | { ok: false; reason: "not_found" | "bad_invite" | "wrong_email" };
 export type AddSourceResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: "not_owner" | "not_found" };
+  | { ok: false; reason: "not_member" | "not_found" };
 export type InviteLinkResult =
   | { ok: true; token: string }
-  | { ok: false; reason: "not_owner" | "not_found" };
+  | { ok: false; reason: "not_member" | "not_found" };
 export type RenameResult =
   | { ok: true; summary: GroupSummary }
   | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" };
@@ -129,11 +129,11 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
-  // Owner-only: mint an invite token bound to `email`. The worker turns the
+  // Any member: mint an invite token bound to `email`. The worker turns the
   // token into a link and emails it. Returns the token (idempotent per email).
   invite(callerId: string, email: string): InviteResult {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
 
     const normalized = email.trim().toLowerCase();
     const existing = Object.entries(this.state.invites).find(([, inv]) => inv.email === normalized);
@@ -171,18 +171,18 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
-  // Owner-only: get-or-create the reusable open invite token.
+  // Any member: get-or-create the reusable open invite token.
   ensureOpenInvite(callerId: string): InviteLinkResult {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
     if (this.state.openInvite === "") this.setState({ ...this.state, openInvite: token() });
     return { ok: true, token: this.state.openInvite };
   }
 
-  // Owner-only: regenerate the open invite token, invalidating the old link.
+  // Any member: regenerate the open invite token, invalidating the old link.
   rotateOpenInvite(callerId: string): InviteLinkResult {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
     const t = token();
     this.setState({ ...this.state, openInvite: t });
     return { ok: true, token: t };
@@ -260,12 +260,12 @@ export class GroupAgent extends Agent<Env, GroupState> {
     await this.indexFor(user.email);
   }
 
-  // Owner-only: bind a source (by content hash) to this group, recording its
-  // metadata (decision 13, owner-only upload). Idempotent on the hash, but
-  // metadata is refreshed so a re-upload can correct it.
+  // Any member: bind a source (by content hash) to this group, recording its
+  // metadata. Idempotent on the hash, but metadata is refreshed so a re-upload
+  // can correct it.
   addSource(callerId: string, sourceId: string, meta: SourceMeta): AddSourceResult {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
     const sources = this.state.sources.includes(sourceId)
       ? this.state.sources
       : [...this.state.sources, sourceId];
@@ -289,14 +289,18 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   private summary(): GroupSummary {
+    // Legacy groups predate `sources`, `sourceMeta`, and `bookTitles`; their
+    // stored state omits these keys entirely, leaving them undefined here.
+    // Default them so the summary always satisfies the wire schema — otherwise a
+    // single legacy group fails client-side decoding and hides the whole list.
     return {
       groupId: this.state.groupId,
       name: this.state.name,
       displayName: this.state.displayName,
       ownerId: this.state.ownerId,
-      sources: this.state.sources,
-      bookTitles: this.state.bookTitles,
-      sourceMeta: this.state.sourceMeta,
+      sources: this.state.sources ?? [],
+      bookTitles: this.state.bookTitles ?? {},
+      sourceMeta: this.state.sourceMeta ?? {},
       memberCount: Object.keys(this.state.members).length,
     };
   }

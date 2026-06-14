@@ -3,18 +3,12 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n client,worker \"vite --port 5173\" \"wrangler dev --port 8787\"",
-    "dev:worker": "wrangler dev --port 8787",
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",
     "typecheck": "tsc --noEmit",
-    "serve": "vite --port 5173",
-    "test:reader": "bombadil test \"http://localhost:5173/src/tests/harness/index.html?book=/fixtures/dorian.epub\" src/tests/reader.spec.ts --headless --time-limit 90s --exit-on-violation --output-path .bombadil/reader",
     "test": "vitest run",
     "test:watch": "vitest",
     "info:template": "node scripts/new-info-card.mjs",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
-    "fmt": "oxfmt",
     "check": "oxfmt --check && oxlint && tsc --noEmit"
   },
   "dependencies": {

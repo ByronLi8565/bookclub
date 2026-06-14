@@ -45,8 +45,8 @@ type Group = {
     callerId: string,
   ):
     | { ok: true; token: string }
-    | { ok: false; reason: "not_owner" | "not_found" }
-    | Promise<{ ok: true; token: string } | { ok: false; reason: "not_owner" | "not_found" }>;
+    | { ok: false; reason: "not_member" | "not_found" }
+    | Promise<{ ok: true; token: string } | { ok: false; reason: "not_member" | "not_found" }>;
   rotateOpenInvite(callerId: string): ReturnType<Group["ensureOpenInvite"]>;
   renameGroup(
     callerId: string,
@@ -85,8 +85,8 @@ type Group = {
     email: string,
   ):
     | { ok: true; token: string }
-    | { ok: false; reason: "not_owner" | "not_found" }
-    | Promise<{ ok: true; token: string } | { ok: false; reason: "not_owner" | "not_found" }>;
+    | { ok: false; reason: "not_member" | "not_found" }
+    | Promise<{ ok: true; token: string } | { ok: false; reason: "not_member" | "not_found" }>;
   redeem(
     token: string,
     user: Identity,
@@ -103,9 +103,9 @@ type Group = {
     meta: SourceMeta,
   ):
     | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "not_owner" | "not_found" }
+    | { ok: false; reason: "not_member" | "not_found" }
     | Promise<
-        { ok: true; summary: GroupSummary } | { ok: false; reason: "not_owner" | "not_found" }
+        { ok: true; summary: GroupSummary } | { ok: false; reason: "not_member" | "not_found" }
       >;
 };
 type ResolvedGroup = { group: Group; summary: GroupSummary };
@@ -151,13 +151,13 @@ function renameFailure(reason: string): WorkflowFailure {
   return fail(404, reason);
 }
 
-const runWorkflow = async <T>(workflow: WorkflowEffect<T>): Promise<WorkflowResult<T>> => {
+const runWorkflow = <T>(workflow: WorkflowEffect<T>): Promise<WorkflowResult<T>> => {
   return Effect.runPromise(
     workflow.pipe(Effect.match({ onFailure: (failure) => failure, onSuccess: succeed })),
   );
 };
 
-export async function listMyGroups(
+export function listMyGroups(
   env: Env,
   request: Request,
 ): Promise<WorkflowResult<{ groups: GroupSummary[] }>> {
@@ -180,7 +180,7 @@ export async function listMyGroups(
   );
 }
 
-export async function createGroup(
+export function createGroup(
   env: Env,
   request: Request,
   rawName: unknown,
@@ -198,7 +198,7 @@ export async function createGroup(
   );
 }
 
-export async function resolveGroupView(
+export function resolveGroupView(
   env: Env,
   request: Request,
   rawName: string,
@@ -209,14 +209,14 @@ export async function resolveGroupView(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, rawName);
-      const membership = yield* tryPromise(async () => group.membership(me.id));
-      const members = membership.isMember ? yield* tryPromise(async () => group.roster()) : [];
+      const membership = yield* tryPromise(() => group.membership(me.id));
+      const members = membership.isMember ? yield* tryPromise(() => group.roster()) : [];
       return { group: summary, membership, members };
     }),
   );
 }
 
-export async function inviteLink(
+export function inviteLink(
   env: Env,
   request: Request,
   rawName: string,
@@ -226,12 +226,12 @@ export async function inviteLink(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, rawName);
-      const result = yield* tryPromise(async () =>
+      const result = yield* tryPromise(() =>
         rotate ? group.rotateOpenInvite(me.id) : group.ensureOpenInvite(me.id),
       );
       if (!result.ok) {
         return yield* Effect.fail(
-          result.reason === "not_owner" ? fail(403, "not_owner") : fail(404, result.reason),
+          result.reason === "not_member" ? fail(403, "not_member") : fail(404, result.reason),
         );
       }
       const origin = new URL(request.url).origin;
@@ -240,7 +240,7 @@ export async function inviteLink(
   );
 }
 
-export async function renameGroupTitle(
+export function renameGroupTitle(
   env: Env,
   request: Request,
   rawName: string,
@@ -251,14 +251,14 @@ export async function renameGroupTitle(
       const me = yield* requireIdentity(env, request);
       if (typeof title !== "string") return yield* Effect.fail(fail(400, "invalid_request"));
       const { group } = yield* requireGroup(env, rawName);
-      const result = yield* tryPromise(async () => group.renameGroup(me.id, title));
+      const result = yield* tryPromise(() => group.renameGroup(me.id, title));
       if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
       return { group: result.summary };
     }),
   );
 }
 
-export async function renameBookTitle(
+export function renameBookTitle(
   env: Env,
   request: Request,
   rawName: string,
@@ -272,7 +272,7 @@ export async function renameBookTitle(
         return yield* Effect.fail(fail(400, "invalid_request"));
       }
       const { group } = yield* requireGroup(env, rawName);
-      const result = yield* tryPromise(async () => group.renameBook(me.id, sourceId, title));
+      const result = yield* tryPromise(() => group.renameBook(me.id, sourceId, title));
       if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
       return { group: result.summary };
     }),
@@ -282,7 +282,7 @@ export async function renameBookTitle(
 // Read-repair the parsed metadata title for a book: any member whose reader has
 // decoded a title can backfill the club's default label, but only if none is
 // stored yet (the agent enforces set-if-absent). Idempotent and member-driven.
-export async function resolveBookTitle(
+export function resolveBookTitle(
   env: Env,
   request: Request,
   rawName: string,
@@ -296,14 +296,14 @@ export async function resolveBookTitle(
         return yield* Effect.fail(fail(400, "invalid_request"));
       }
       const { group } = yield* requireGroup(env, rawName);
-      const result = yield* tryPromise(async () => group.resolveBookTitle(me.id, sourceId, title));
+      const result = yield* tryPromise(() => group.resolveBookTitle(me.id, sourceId, title));
       if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
       return { group: result.summary };
     }),
   );
 }
 
-export async function inviteByEmail(
+export function inviteByEmail(
   env: Env,
   request: Request,
   rawName: string,
@@ -315,10 +315,10 @@ export async function inviteByEmail(
       const email = normalizeEmail(rawEmail);
       if (!email) return yield* Effect.fail(fail(400, "invalid_email"));
       const { group, summary } = yield* requireGroup(env, rawName);
-      const result = yield* tryPromise(async () => group.invite(me.id, email));
+      const result = yield* tryPromise(() => group.invite(me.id, email));
       if (!result.ok) {
         return yield* Effect.fail(
-          result.reason === "not_owner" ? fail(403, "not_owner") : fail(404, result.reason),
+          result.reason === "not_member" ? fail(403, "not_member") : fail(404, result.reason),
         );
       }
       const origin = new URL(request.url).origin;
@@ -335,7 +335,7 @@ export async function inviteByEmail(
   );
 }
 
-export async function redeemInvite(
+export function redeemInvite(
   env: Env,
   request: Request,
   rawName: string,
@@ -358,7 +358,7 @@ export async function redeemInvite(
   );
 }
 
-export async function uploadSource(
+export function uploadSource(
   env: Env,
   request: Request,
   rawName: string,
@@ -366,8 +366,9 @@ export async function uploadSource(
   return runWorkflow(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
-      const { group, summary } = yield* requireGroup(env, rawName);
-      if (summary.ownerId !== me.id) return yield* Effect.fail(fail(403, "not_owner"));
+      const { group } = yield* requireGroup(env, rawName);
+      const { isMember } = yield* tryPromise(() => group.membership(me.id));
+      if (!isMember) return yield* Effect.fail(fail(403, "not_member"));
       const bytes = yield* tryPromise(() => request.arrayBuffer());
       const contentType = request.headers.get("Content-Type");
       const stored = yield* tryPromise(() => storeSource(env, bytes, contentType));
@@ -381,7 +382,7 @@ export async function uploadSource(
       const rawTitle = request.headers.get("X-Source-Title");
       const title = rawTitle ? decodeURIComponent(rawTitle).trim() || null : null;
       const { id, kind, contentType: storedType, size } = stored.source;
-      yield* tryPromise(async () =>
+      yield* tryPromise(() =>
         group.addSource(me.id, id, { kind, contentType: storedType, size, title }),
       );
       return { hash: id };
@@ -389,7 +390,7 @@ export async function uploadSource(
   );
 }
 
-export async function fetchSource(
+export function fetchSource(
   env: Env,
   request: Request,
   rawName: string,
@@ -399,7 +400,7 @@ export async function fetchSource(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, rawName);
-      const { isMember } = yield* tryPromise(async () => group.membership(me.id));
+      const { isMember } = yield* tryPromise(() => group.membership(me.id));
       if (!isMember) return yield* Effect.fail(fail(403, "forbidden"));
       // A specific bound book if requested, else the club's default (first) book.
       const source = sourceId ? sourceById(summary, sourceId) : currentSource(summary);

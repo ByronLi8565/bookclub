@@ -1,8 +1,74 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cachedSourceSize, refreshSource } from "../../groups/sourceAccess.ts";
 import { setReaderPref, useReaderPrefs, type SmartArrows } from "../../settings/readerPrefs.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
+
+// A custom dropdown that mirrors the reader's book switcher styling (instead of
+// a browser-native <select>) so settings controls match the rest of the UI.
+function SettingDropdown<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+  ariaLabel: string;
+}): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  const active = options.find((o) => o.value === value);
+
+  return (
+    <div className="book-menu settings-dropdown" ref={ref}>
+      <button
+        type="button"
+        className="settings-action settings-dropdown-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span>{active?.label ?? value}</span>
+        <span className="book-menu-arrow" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {open && (
+        <ul className="book-menu-list" role="menu">
+          {options.map((option) => (
+            <li key={option.value} role="none">
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={option.value === value}
+                className={option.value === value ? "book-menu-item is-active" : "book-menu-item"}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 // Identifies the book a settings dialog can manage: its content-hash sourceId
 // and the group URL name used to redownload it from R2.
@@ -24,7 +90,16 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-// Settings dialog. The first item manages the current book's local copy.
+// Settings are grouped into categories, navigated with the same segmented
+// tab bar the mobile pager uses.
+type Category = "info" | "pdf";
+const CATEGORIES: { id: Category; label: string }[] = [
+  { id: "info", label: "Info" },
+  { id: "pdf", label: "PDF" },
+];
+
+// Settings dialog. The "Info" category manages the current book's local copy;
+// "PDF" holds reader behavior toggles.
 export function SettingsModal({
   book,
   onClose,
@@ -32,6 +107,7 @@ export function SettingsModal({
   book: SettingsBook;
   onClose: () => void;
 }): React.ReactElement {
+  const [category, setCategory] = useState<Category>("info");
   // The cached file size in bytes, or null while loading / when not cached.
   const [cachedSize, setCachedSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,50 +157,69 @@ export function SettingsModal({
             ✕
           </button>
         </div>
-        <div className="modal-body">
-          <section className="settings-item">
-            <h2 className="settings-item-head">Local book copy</h2>
-            {loading ? (
-              <Loading className="loading--settings-detail" />
-            ) : cachedSize === null ? (
-              <p className="settings-detail-status">Not stored.</p>
-            ) : (
-              <dl className="settings-detail">
-                <dt>Save location</dt>
-                <dd>Browser storage</dd>
-                <dt>Size</dt>
-                <dd>{formatBytes(cachedSize)}</dd>
-              </dl>
-            )}
+        <div className="modal-body settings-body">
+          {category === "info" && (
+            <section className="settings-item">
+              <div className="settings-item-text">
+                <h2 className="settings-item-head">Local book copy</h2>
+                {loading ? (
+                  <Loading className="loading--settings-detail" />
+                ) : cachedSize === null ? (
+                  <p className="settings-item-desc">Not stored.</p>
+                ) : (
+                  <p className="settings-item-desc">
+                    Stored in browser storage · {formatBytes(cachedSize)}
+                  </p>
+                )}
+              </div>
+              <div className="settings-item-control">
+                <button
+                  type="button"
+                  className="settings-action"
+                  onClick={() => void onRedownload()}
+                  disabled={busy || loading}
+                >
+                  {busy
+                    ? "redownloading…"
+                    : cachedSize === null
+                      ? "download a copy"
+                      : "delete local copy & redownload"}
+                </button>
+              </div>
+            </section>
+          )}
+          {category === "pdf" && (
+            <section className="settings-item">
+              <div className="settings-item-text">
+                <h2 className="settings-item-head">Smart arrow keys</h2>
+                <p className="settings-item-desc">Arrow keys try to scroll before turning page.</p>
+              </div>
+              <div className="settings-item-control">
+                <SettingDropdown<SmartArrows>
+                  value={smartArrows}
+                  onChange={(v) => setReaderPref("smartArrows", v)}
+                  ariaLabel="PDF smart arrow keys"
+                  options={[
+                    { value: "off", label: "Off" },
+                    { value: "smooth", label: "Smooth" },
+                    { value: "instant", label: "Instant" },
+                  ]}
+                />
+              </div>
+            </section>
+          )}
+        </div>
+        <div className="pager-tabs settings-tabs">
+          {CATEGORIES.map((c) => (
             <button
+              key={c.id}
               type="button"
-              className="settings-action"
-              onClick={() => void onRedownload()}
-              disabled={busy || loading}
+              aria-pressed={category === c.id}
+              onClick={() => setCategory(c.id)}
             >
-              {busy
-                ? "redownloading…"
-                : cachedSize === null
-                  ? "download a local copy"
-                  : "delete local copy & redownload"}
+              {c.label}
             </button>
-          </section>
-          <section className="settings-item">
-            <h2 className="settings-item-head">PDF: Smart arrow keys</h2>
-            <p className="settings-detail-status">
-              Arrow keys scroll through a tall page before turning it.
-            </p>
-            <select
-              className="settings-action"
-              value={smartArrows}
-              onChange={(e) => setReaderPref("smartArrows", e.target.value as SmartArrows)}
-              aria-label="PDF smart arrow keys"
-            >
-              <option value="off">Off</option>
-              <option value="smooth">Smooth scrolling</option>
-              <option value="instant">Instant scrolling</option>
-            </select>
-          </section>
+          ))}
         </div>
       </div>
     </div>
