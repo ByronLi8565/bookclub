@@ -1,412 +1,461 @@
 :root {
-  --line: 3px solid #000;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    --line: 3px solid #000;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 * {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
 html,
 body,
 #root {
-  height: 100%;
-  margin: 0;
+    height: 100%;
+    margin: 0;
 }
 
 body {
-  background: #fff;
-  color: #000;
+    background: #fff;
+    color: #000;
 }
 
 button {
-  font: inherit;
-  background: #fff;
-  color: #000;
-  border: var(--line);
-  padding: 4px 10px;
-  cursor: pointer;
+    font: inherit;
+    background: #fff;
+    color: #000;
+    border: var(--line);
+    padding: 4px 10px;
+    cursor: pointer;
 }
 
 button:hover {
-  background: #000;
-  color: #fff;
+    background: #000;
+    color: #fff;
 }
 
 .app {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .topbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: var(--line);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    border-bottom: var(--line);
 }
 
 .topbar h1 {
-  margin: 0;
-  font-size: 20px;
-  text-transform: uppercase;
-  letter-spacing: 2px;
+    margin: 0;
+    font-size: 20px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
 }
 
 .picker {
-  border: var(--line);
-  padding: 6px 12px;
-  cursor: pointer;
-  text-transform: uppercase;
+    border: var(--line);
+    padding: 6px 12px;
+    cursor: pointer;
+    text-transform: uppercase;
 }
 
 .picker input {
-  display: none;
+    display: none;
 }
 
 .source-id {
-  margin-left: auto;
-  opacity: 0.6;
+    margin-left: auto;
+    opacity: 0.6;
 }
 
 .split {
-  flex: 1;
-  display: flex;
-  min-height: 0;
+    flex: 1;
+    display: flex;
+    min-height: 0;
 }
 
 .split-pane {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .split-pane--grow {
-  flex: 1;
+    flex: 1;
 }
 
 .split-divider {
-  width: 0;
-  border-left: var(--line);
-  cursor: col-resize;
-  flex: 0 0 auto;
-  touch-action: none;
+    width: 0;
+    border-left: var(--line);
+    cursor: col-resize;
+    flex: 0 0 auto;
+    touch-action: none;
 }
 
 .split-divider:hover {
-  border-left-color: #000;
-  box-shadow: 0 0 0 2px #000;
+    border-left-color: #000;
+    box-shadow: 0 0 0 2px #000;
 }
 
 .split-overlay {
-  position: fixed;
-  inset: 0;
-  cursor: col-resize;
-  z-index: 10;
+    position: fixed;
+    inset: 0;
+    cursor: col-resize;
+    z-index: 10;
 }
 
 .reader {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
 }
 
 .reader-empty {
-  margin: auto;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.6;
+    margin: auto;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.6;
 }
 
 .reader-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: var(--line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-bottom: var(--line);
 }
 
 .reader-bar .spacer {
-  flex: 1;
+    flex: 1;
 }
 
 .reader-bar .font-size {
-  min-width: 48px;
-  text-align: center;
+    min-width: 48px;
+    text-align: center;
 }
 
 .reader-bar .page-count {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.7;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.7;
 }
 
 .reader-stage {
-  flex: 1;
-  min-height: 0;
-  position: relative;
+    flex: 1;
+    min-height: 0;
+    position: relative;
 }
 
 .reader-surface {
-  height: 100%;
-  min-height: 0;
-  position: relative;
+    height: 100%;
+    min-height: 0;
+    position: relative;
 }
 
 .reader-surface .reader-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
 }
 
 .reader-page-turn {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 2;
-  width: clamp(44px, 7vw, 84px);
-  border: none;
-  background: transparent;
-  padding: 0;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    width: clamp(44px, 7vw, 84px);
+    border: none;
+    background: transparent;
+    padding: 0;
 }
 
 .reader-page-turn:hover {
-  background: transparent;
+    background: transparent;
 }
 
 .reader-page-turn:focus-visible {
-  outline: 2px solid #000;
-  outline-offset: -6px;
+    outline: 2px solid #000;
+    outline-offset: -6px;
 }
 
 .reader-page-turn--prev {
-  left: 0;
+    left: 0;
 }
 
 .reader-page-turn--next {
-  right: 0;
+    right: 0;
 }
 
 .note-panel {
-  padding: 18px;
-  overflow-y: auto;
-  flex: 1;
+    padding: 18px;
+    overflow-y: auto;
+    flex: 1;
 }
 
 .note-panel h2 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+    margin: 0 0 12px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
 .note-panel .empty {
-  opacity: 0.6;
+    opacity: 0.6;
 }
 
 .note-panel ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 .note-panel .note {
-  display: flex;
-  flex-direction: column;
-  border: var(--line);
+    display: flex;
+    flex-direction: column;
+    border: var(--line);
 }
 
 .note-panel .note--deleted {
-  opacity: 0.75;
+    opacity: 0.75;
 }
 
 .note-panel .note-head {
-  display: flex;
+    display: flex;
+}
+
+/* The note's seq as a filled black square in the top-left corner of its head. */
+.note-panel .note-seq {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    min-width: 34px;
+    padding: 0 6px;
+    background: #fff;
+    color: #000;
+    font-weight: 700;
+    border-right: var(--line);
 }
 
 .note-panel .quote {
-  flex: 1;
-  border: none;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    flex: 1;
+    border: none;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .note-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .note-panel .replies {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-left: 16px;
-  padding-left: 12px;
-  border-left: var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-left: 16px;
+    padding-left: 12px;
+    border-left: var(--line);
 }
 
 /* The inline reply editor sits one level in, lining up under the note it
    replies to where the new reply will land. */
 .note-panel .reply-compose {
-  margin-left: 16px;
-  padding-left: 12px;
-  border-left: var(--line);
+    margin-left: 16px;
+    padding-left: 12px;
+    border-left: var(--line);
 }
 
 .note-panel .reply,
 .note-panel .edit,
 .note-panel .delete {
-  border: none;
-  border-left: var(--line);
+    border: none;
+    border-left: var(--line);
 }
 
 .note-panel .delete-wrap {
-  position: relative;
-  display: flex;
-  border-left: var(--line);
+    position: relative;
+    display: flex;
+    border-left: var(--line);
 }
 
 .note-panel .delete-wrap .delete {
-  border-left: none;
+    border-left: none;
 }
 
 .delete-confirm {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: -6px;
-  z-index: 4;
-  min-width: 136px;
-  padding: 12px;
-  border: var(--line);
-  background: #fff;
-  box-shadow: 5px 5px 0 #000;
-  text-align: center;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: -6px;
+    z-index: 4;
+    min-width: 136px;
+    padding: 12px;
+    border: var(--line);
+    background: #fff;
+    box-shadow: 5px 5px 0 #000;
+    text-align: center;
 }
 
 .delete-confirm p {
-  margin: 0 0 8px;
-  font-weight: 700;
-  text-transform: lowercase;
+    margin: 0 0 8px;
+    font-weight: 700;
+    text-transform: lowercase;
 }
 
 .delete-confirm-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 700;
 }
 
 .delete-confirm-actions button {
-  border: none;
-  padding: 0 4px;
-  font-size: 20px;
-  line-height: 1;
+    border: none;
+    padding: 0 4px;
+    font-size: 20px;
+    line-height: 1;
 }
 
 .note-panel .edit {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .note-panel .edit img {
-  width: 14px;
-  height: 14px;
+    width: 14px;
+    height: 14px;
 }
 
 .note-panel .edit:hover img {
-  filter: invert(1);
+    filter: invert(1);
 }
 
 .note-panel .note-head + .note-body {
-  border-top: var(--line);
+    border-top: var(--line);
 }
 
 .note-body {
-  padding: 8px 10px;
-  font-size: 14px;
-  line-height: 1.5;
+    padding: 8px 10px;
+    font-size: 14px;
+    line-height: 1.5;
 }
 
 .note-body p {
-  margin: 0 0 8px;
+    margin: 0 0 8px;
 }
 
 .note-body p:last-child {
-  margin-bottom: 0;
+    margin-bottom: 0;
 }
 
 .note-body blockquote {
-  margin: 0 0 8px;
-  padding-left: 10px;
-  border-left: 3px solid #000;
-  opacity: 0.8;
+    margin: 0 0 8px;
+    padding-left: 10px;
+    border-left: 3px solid #000;
+    opacity: 0.8;
+}
+
+/* `[[n]]` cross-reference chip, shared by the read view (button) and the editor
+   (token text node). Inline, monospace, sits on the baseline of the text. */
+.note-ref {
+    display: inline-block;
+    padding: 0 4px;
+    border: 2px solid #000;
+    border-radius: 4px;
+    background: #fff;
+    font: inherit;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.note-ref:hover {
+    background: #000;
+    color: #fff;
+}
+
+/* Brief flash when a reference scrolls its target note into view. */
+.note.flash {
+    animation: note-flash 1.2s ease-out;
+}
+
+@keyframes note-flash {
+    from {
+        background: #ffe600;
+    }
+
+    to {
+        background: #fff;
+    }
 }
 
 .note-editor {
-  display: flex;
-  flex-direction: column;
+    display: flex;
+    flex-direction: column;
 }
 
 .note-editor-input {
-  padding: 8px 10px;
-  min-height: 64px;
-  outline: none;
-  font-size: 14px;
-  line-height: 1.5;
+    padding: 8px 10px;
+    min-height: 64px;
+    outline: none;
+    font-size: 14px;
+    line-height: 1.5;
 }
 
 .note-editor-input .bc-bold {
-  font-weight: 700;
+    font-weight: 700;
 }
 
 .note-editor-input .bc-italic {
-  font-style: italic;
+    font-style: italic;
 }
 
 .note-editor-input .bc-quote {
-  padding-left: 10px;
-  border-left: 3px solid #000;
-  opacity: 0.8;
+    padding-left: 10px;
+    border-left: 3px solid #000;
+    opacity: 0.8;
 }
 
 .note-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 6px;
-  border-top: var(--line);
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 6px;
+    border-top: var(--line);
 }
 
 .note-editor-actions .primary {
-  font-weight: 700;
+    font-weight: 700;
 }
 
 .bc-highlight {
-  fill: #ffeb3b;
-  fill-opacity: 0.4;
-  /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
+    fill: #ffeb3b;
+    fill-opacity: 0.4;
+    /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
      larger font reflows it across more lines) and keeps the text readable. */
-  mix-blend-mode: multiply;
+    mix-blend-mode: multiply;
 }
 
 .add-note {
-  position: fixed;
-  transform: translate(-50%, 8px);
-  z-index: 10;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  font-size: 12px;
-  background: #fff;
-  border: var(--line);
-  box-shadow: 4px 4px 0 #000;
+    position: fixed;
+    transform: translate(-50%, 8px);
+    z-index: 10;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 12px;
+    background: #fff;
+    border: var(--line);
+    box-shadow: 4px 4px 0 #000;
 }

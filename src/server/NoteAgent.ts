@@ -51,13 +51,13 @@ export class NoteAgent extends Agent<Env, NoteState> {
   // Last-write-wins edit of a note's body; bumps version and stamps editedAt.
   @callable()
   editNote(id: string, body: string): void {
-    this.setState({
-      notes: this.state.notes.map((note) =>
+    this.setNotes(
+      this.state.notes.map((note) =>
         note.id === id && note.deletedAt === null
           ? { ...note, body, editedAt: new Date().toISOString(), version: note.version + 1 }
           : note,
       ),
-    });
+    );
   }
 
   @callable()
@@ -74,7 +74,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
       (note) => note.id !== id && extractReferences(note.body).includes(target.seq),
     );
     if (!hasChildren && !isReferenced) {
-      this.setState({ notes: this.state.notes.filter((note) => note.id !== id) });
+      this.setNotes(this.state.notes.filter((note) => note.id !== id));
       return;
     }
 
@@ -85,8 +85,8 @@ export class NoteAgent extends Agent<Env, NoteState> {
       hour: "numeric",
       minute: "2-digit",
     });
-    this.setState({
-      notes: this.state.notes.map((note) =>
+    this.setNotes(
+      this.state.notes.map((note) =>
         note.id === id
           ? {
               ...note,
@@ -98,14 +98,14 @@ export class NoteAgent extends Agent<Env, NoteState> {
             }
           : note,
       ),
-    });
+    );
   }
 
   // Rebind a single embedded highlight's cfi after a client re-located it.
   @callable()
   rebindHighlight(noteId: string, highlightId: string, cfiValue: string): void {
-    this.setState({
-      notes: this.state.notes.map((note) =>
+    this.setNotes(
+      this.state.notes.map((note) =>
         note.id === noteId
           ? {
               ...note,
@@ -115,7 +115,12 @@ export class NoteAgent extends Agent<Env, NoteState> {
             }
           : note,
       ),
-    });
+    );
+  }
+
+  // Replace the note list while preserving the seq counter.
+  private setNotes(notes: Note[]): void {
+    this.setState({ notes, nextSeq: this.state.nextSeq ?? 1 });
   }
 
   // Stamp the server-authored fields of a new note. sourceId is the agent's own

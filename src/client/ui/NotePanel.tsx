@@ -1,10 +1,8 @@
 import type { Note } from "../notes.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
-import { NoteThread, type NoteActions } from "./NoteThread.tsx";
+import { NoteThread, type NoteActions, type NoteRefs } from "./NoteThread.tsx";
 
-// Right-pane list of note threads. Top-level notes (parent null, or an orphan
-// whose parent no longer resolves) render as threads with their flattened
-// replies; a compose slot at the bottom turns the armed highlight into a note.
+// Right-pane list of note threads.
 export function NotePanel({
   notes,
   composing,
@@ -12,6 +10,7 @@ export function NotePanel({
   onComposeSave,
   onComposeCancel,
   actions,
+  refs,
 }: {
   notes: Note[];
   composing: boolean;
@@ -19,6 +18,7 @@ export function NotePanel({
   onComposeSave: (body: string) => void;
   onComposeCancel: () => void;
   actions: NoteActions;
+  refs: NoteRefs;
 }) {
   const ids = new Set(notes.map((n) => n.id));
   const childrenMap = new Map<string, Note[]>();
@@ -39,7 +39,13 @@ export function NotePanel({
       {notes.length === 0 && !composing && <p className="empty">Select text to add a note.</p>}
       <ul>
         {roots.map((root) => (
-          <NoteThread key={root.id} root={root} childrenMap={childrenMap} actions={actions} />
+          <NoteThread
+            key={root.id}
+            root={root}
+            childrenMap={childrenMap}
+            actions={actions}
+            refs={refs}
+          />
         ))}
         {composing && (
           <li className="note compose">
@@ -48,6 +54,7 @@ export function NotePanel({
               submitLabel="Publish"
               onSave={onComposeSave}
               onCancel={onComposeCancel}
+              validSeqs={refs.validSeqs}
             />
           </li>
         )}

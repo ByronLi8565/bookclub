@@ -1,10 +1,11 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { captureHighlight, locateHighlight, type Highlight } from "./highlights.ts";
-import type { Note } from "./notes.ts";
+import { effectiveHighlight, noteSnippet, type Note } from "./notes.ts";
 import { hashFile } from "./storage/hashFile.ts";
 import { NotePanel } from "./ui/NotePanel.tsx";
+import type { NoteRefs } from "./ui/NoteThread.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
@@ -161,10 +162,56 @@ export default function App() {
     setReplyingTo((id) => (id === note.id ? null : id));
   }
 
-  function onJump(note: Note) {
-    const cfi = note.highlights[0]?.cfi.value;
-    if (cfi) view.goTo(cfi);
-  }
+  // Lookups for references: id -> note (anchor inheritance), seq -> note (jump
+  // target), and seq -> snippet (chip hover). Built once per note-state change.
+  const byId = useMemo(() => new Map(notes.map((n) => [n.id, n] as const)), [notes]);
+  const bySeq = useMemo(() => new Map(notes.map((n) => [n.seq, n] as const)), [notes]);
+  const noteRefs = useMemo<NoteRefs>(
+    () => ({
+      validSeqs: new Set(bySeq.keys()),
+      byId,
+      refs: new Map([...bySeq].map(([seq, n]) => [seq, noteSnippet(n)] as const)),
+    }),
+    [byId, bySeq],
+  );
+
+  const { goTo } = view;
+
+  // Scroll the panel to a note and flash it. Shared by every "go to this note"
+  // path (jumping from the note itself, or following a `[[n]]` reference) so the
+  // feedback is consistent.
+  const flashNote = useCallback((seq: number) => {
+    const el = document.getElementById(`note-${seq}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.remove("flash");
+    requestAnimationFrame(() => {
+      el.classList.add("flash");
+      window.setTimeout(() => el.classList.remove("flash"), 1200);
+    });
+  }, []);
+
+  const onJump = useCallback(
+    (note: Note) => {
+      const hl = effectiveHighlight(note, byId);
+      if (hl) goTo(hl.cfi.value);
+      flashNote(note.seq);
+    },
+    [byId, goTo, flashNote],
+  );
+
+  // Click a `[[n]]` chip: jump the reader to note n's (inherited) highlight and
+  // flash it in the panel.
+  const onReference = useCallback(
+    (seq: number) => {
+      const target = bySeq.get(seq);
+      if (!target) return;
+      const hl = effectiveHighlight(target, byId);
+      if (hl) goTo(hl.cfi.value);
+      flashNote(seq);
+    },
+    [bySeq, byId, goTo, flashNote],
+  );
 
   // Seed a new note's body with the highlighted passage as a blockquote, then a
   // blank paragraph for the note text.
@@ -199,10 +246,12 @@ export default function App() {
             composeInitialBody={composeInitialBody}
             onComposeSave={onComposeSave}
             onComposeCancel={onComposeCancel}
+            refs={noteRefs}
             actions={{
               editingId,
               replyingTo,
               onJump,
+              onReference,
               onDelete,
               onEdit: (note) => setEditingId(note.id),
               onEditSave,
