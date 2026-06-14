@@ -1,0 +1,3 @@
+[secrets]
+SESSION_HMAC_SECRET = { provider = "keychain", value = "SESSION_HMAC_SECRET" }
+EMAIL_FROM = { provider = "keychain", value = "EMAIL_FROM" }
