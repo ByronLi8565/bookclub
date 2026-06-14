@@ -28,6 +28,7 @@ export default defineConfig({
     proxy: {
       "/agents": { target: "http://localhost:8787", ws: true, changeOrigin: true },
       "/auth": { target: "http://localhost:8787", changeOrigin: true },
+      "/groups": { target: "http://localhost:8787", changeOrigin: true },
     },
   },
 });

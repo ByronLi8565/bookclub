@@ -1,4 +1,11 @@
-import { Agent, callable, type Connection, type ConnectionContext, getAgentByName } from "agents";
+import {
+  Agent,
+  callable,
+  type Connection,
+  type ConnectionContext,
+  getAgentByName,
+  getCurrentAgent,
+} from "agents";
 import { monotonicFactory } from "ulidx";
 import type { Highlight } from "../client/highlights.ts";
 import type { GroupRole } from "./GroupAgent.ts";
@@ -54,24 +61,38 @@ export class NoteAgent extends Agent<Env, NoteState> {
     connection.setState({ userId: me.id, name: me.name, role } satisfies ConnIdentity);
   }
 
-  @callable()
-  addNote(body: string, highlights: Highlight[]): void {
-    this.setState(addNote(this.state, this.name, body, highlights, this.stamp));
+  // The server-authoritative identity stamped on this connection at connect time
+  // (ADR 0001). Mutations read it to attribute and authorize changes; it can
+  // never be spoofed by a client message.
+  private get me(): ConnIdentity {
+    const { connection } = getCurrentAgent<NoteAgent>();
+    if (!connection) throw new Error("note mutation outside a connection");
+    return connection.state as ConnIdentity;
   }
 
   @callable()
-  addReply(parent: string, body: string): void {
-    this.setState(addReply(this.state, this.name, parent, body, this.stamp));
+  addNote(sourceId: string, body: string, highlights: Highlight[]): void {
+    const { userId, name } = this.me;
+    this.setState(
+      addNote(this.state, sourceId, { id: userId, name }, body, highlights, this.stamp),
+    );
+  }
+
+  @callable()
+  addReply(sourceId: string, parent: string, body: string): void {
+    const { userId, name } = this.me;
+    this.setState(addReply(this.state, sourceId, { id: userId, name }, parent, body, this.stamp));
   }
 
   @callable()
   editNote(id: string, body: string): void {
-    this.setState(editNote(this.state, id, body, this.stamp.now()));
+    this.setState(editNote(this.state, id, body, this.stamp.now(), this.me.userId));
   }
 
   @callable()
   removeNote(id: string): void {
-    this.setState(removeNote(this.state, id, this.stamp.now()));
+    const { userId, role } = this.me;
+    this.setState(removeNote(this.state, id, this.stamp.now(), userId, role === "owner"));
   }
 
   @callable()

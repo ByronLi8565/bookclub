@@ -27,6 +27,8 @@ interface ResizableView {
 export interface SourceView {
   containerRef: React.RefObject<HTMLDivElement | null>;
   ready: boolean;
+  // The epub's parsed metadata title, once loaded (null until then / if absent).
+  title: string | null;
   fontSize: number;
   setFontSize: (pct: number) => void;
   next: () => void;
@@ -55,6 +57,7 @@ export function useSourceView(
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const [title, setTitle] = useState<string | null>(null);
 
   // Single source of truth: a usable rendition exists iff the reader is ready.
   const viewRef = useRef(Effect.runSync(Ref.make(Option.none<LiveView>())));
@@ -83,6 +86,7 @@ export function useSourceView(
 
     publish(Option.none());
     setLocation(null);
+    setTitle(null);
 
     const book = ePub();
     // `spread: "auto"` gives a two-page spread on a wide pane, like a real book.
@@ -161,6 +165,11 @@ export function useSourceView(
     const load = Effect.gen(function* () {
       const buf = yield* Effect.tryPromise(() => file.arrayBuffer());
       yield* Effect.tryPromise(() => book.open(buf, "binary"));
+      // Surface the epub's metadata title (used as the default book label).
+      const metadata = yield* Effect.tryPromise(() => book.loaded.metadata).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      yield* Effect.sync(() => setTitle(metadata?.title?.trim() || null));
       // Start on the first real chapter
       const start = yield* Effect.tryPromise(() => book.loaded.navigation).pipe(
         Effect.map(firstChapterHref),
@@ -268,6 +277,7 @@ export function useSourceView(
   return {
     containerRef,
     ready,
+    title,
     fontSize,
     setFontSize,
     next,

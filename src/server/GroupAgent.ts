@@ -28,8 +28,22 @@ export interface GroupState {
   ownerId: string;
   members: Record<string, Member>; // by userId
   sources: string[]; // book content hashes bound to this group
-  invites: Record<string, Invite>; // by token
+  invites: Record<string, Invite>; // by token (email-bound, single-use)
+  // The reusable open invite token; "" until the owner mints one. Any signed-in
+  // user can redeem it (decision: open invite links), and it survives redemption.
+  openInvite: string;
+  // Member-set display titles for bound books, by sourceId. Overrides the epub's
+  // parsed metadata title; any member may set one.
+  bookTitles: Record<string, string>;
   createdAt: string;
+}
+
+// A member in the roster: their id plus a display snapshot. The email is omitted
+// (only the owner's invite flow needs it).
+export interface RosterEntry {
+  id: string;
+  name: string;
+  role: GroupRole;
 }
 
 // The public, non-sensitive view of a group (no invite tokens).
@@ -39,6 +53,7 @@ export interface GroupSummary {
   displayName: string;
   ownerId: string;
   sources: string[];
+  bookTitles: Record<string, string>;
   memberCount: number;
 }
 
@@ -62,6 +77,17 @@ export type RedeemResult =
 export type AddSourceResult =
   | { ok: true; summary: GroupSummary }
   | { ok: false; reason: "not_owner" | "not_found" };
+export type InviteLinkResult =
+  | { ok: true; token: string }
+  | { ok: false; reason: "not_owner" | "not_found" };
+export type RenameResult =
+  | { ok: true; summary: GroupSummary }
+  | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" };
+export type RenameGroupResult =
+  | { ok: true; summary: GroupSummary }
+  | { ok: false; reason: "not_member" | "not_found" | "empty" };
+
+const MAX_TITLE_LENGTH = 100;
 
 function token(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -80,6 +106,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
     members: {},
     sources: [],
     invites: {},
+    openInvite: "",
+    bookTitles: {},
     createdAt: "",
   };
 
@@ -103,6 +131,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
       },
       sources: [],
       invites: {},
+      openInvite: "",
+      bookTitles: {},
       createdAt: now,
     });
     await this.indexFor(owner.email);
@@ -127,29 +157,95 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, token: t };
   }
 
-  // Redeem an invite: the caller (signed in) joins as a member. The invite is
-  // single-use and must match the caller's email.
+  // Redeem an invite: the caller (signed in) joins as a member. The open invite
+  // token is reusable and email-agnostic; email-bound tokens are single-use and
+  // must match the caller's email.
   async redeem(t: string, user: Identity): Promise<RedeemResult> {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
     if (this.state.members[user.id]) return { ok: true, summary: this.summary() };
+
+    // Open link: any signed-in user joins; the token survives for reuse.
+    if (this.state.openInvite !== "" && t === this.state.openInvite) {
+      await this.join(user, this.state.invites);
+      return { ok: true, summary: this.summary() };
+    }
 
     const invite = this.state.invites[t];
     if (!invite) return { ok: false, reason: "bad_invite" };
     if (invite.email !== user.email.trim().toLowerCase())
       return { ok: false, reason: "wrong_email" };
 
-    const now = new Date().toISOString();
+    // Email-bound: single-use, so consume the token as the caller joins.
     const { [t]: _used, ...rest } = this.state.invites;
+    await this.join(user, rest);
+    return { ok: true, summary: this.summary() };
+  }
+
+  // Owner-only: get-or-create the reusable open invite token.
+  ensureOpenInvite(callerId: string): InviteLinkResult {
+    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
+    if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
+    if (this.state.openInvite === "") this.setState({ ...this.state, openInvite: token() });
+    return { ok: true, token: this.state.openInvite };
+  }
+
+  // Owner-only: regenerate the open invite token, invalidating the old link.
+  rotateOpenInvite(callerId: string): InviteLinkResult {
+    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
+    if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
+    const t = token();
+    this.setState({ ...this.state, openInvite: t });
+    return { ok: true, token: t };
+  }
+
+  // The member roster (any member may view it).
+  roster(): RosterEntry[] {
+    return Object.entries(this.state.members).map(([id, m]) => ({
+      id,
+      name: m.name,
+      role: m.role,
+    }));
+  }
+
+  // Any member may rename the club's display name (the URL name stays write-once).
+  // An empty title is rejected; titles are length-capped.
+  renameGroup(callerId: string, rawTitle: string): RenameGroupResult {
+    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const title = rawTitle.trim();
+    if (title === "") return { ok: false, reason: "empty" };
+    this.setState({ ...this.state, displayName: title.slice(0, MAX_TITLE_LENGTH) });
+    return { ok: true, summary: this.summary() };
+  }
+
+  // Any member may set a display title for a bound book. An empty title is
+  // rejected; titles are length-capped.
+  renameBook(callerId: string, sourceId: string, rawTitle: string): RenameResult {
+    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
+    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    if (!this.state.sources.includes(sourceId)) return { ok: false, reason: "bad_source" };
+    const title = rawTitle.trim();
+    if (title === "") return { ok: false, reason: "empty" };
+    this.setState({
+      ...this.state,
+      bookTitles: { ...this.state.bookTitles, [sourceId]: title.slice(0, MAX_TITLE_LENGTH) },
+    });
+    return { ok: true, summary: this.summary() };
+  }
+
+  // Add the caller to the members map (with the given invites map) and index the
+  // group under their account. Shared by the open and email-bound redeem paths.
+  private async join(user: Identity, invites: Record<string, Invite>): Promise<void> {
+    const now = new Date().toISOString();
     this.setState({
       ...this.state,
       members: {
         ...this.state.members,
         [user.id]: { role: "member", name: user.name, email: user.email, joinedAt: now },
       },
-      invites: rest,
+      invites,
     });
     await this.indexFor(user.email);
-    return { ok: true, summary: this.summary() };
   }
 
   // Owner-only: bind a book content hash to this group (decision 13, owner-only
@@ -181,6 +277,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
       displayName: this.state.displayName,
       ownerId: this.state.ownerId,
       sources: this.state.sources,
+      bookTitles: this.state.bookTitles,
       memberCount: Object.keys(this.state.members).length,
     };
   }

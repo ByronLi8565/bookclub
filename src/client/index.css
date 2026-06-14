@@ -68,6 +68,18 @@ button:disabled:hover {
   font-size: 20px;
   text-transform: uppercase;
   letter-spacing: 2px;
+  cursor: text;
+}
+
+.topbar-title-edit {
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  border: var(--line);
+  padding: 0 6px;
+  background: var(--white);
 }
 
 .picker {
@@ -591,6 +603,71 @@ button:disabled:hover {
   font-size: 15px;
 }
 
+.home-create {
+  display: flex;
+  align-items: stretch;
+}
+
+.home-create input {
+  font: inherit;
+  border: var(--line);
+  border-radius: 0;
+  outline: none;
+  padding: 4px 10px;
+  background: var(--white);
+}
+
+.home-create-confirm {
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  line-height: 1;
+  width: 34px;
+  padding: 0;
+  /* Sit flush against the input, sharing the border edge. */
+  border-left: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-create-confirm:hover {
+  background: var(--white);
+  color: var(--black);
+}
+
+/* Keep the plus on its black square (and white) even while disabled. */
+.home-create-confirm:disabled,
+.home-create-confirm:disabled:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+.home-clubs {
+  margin-top: 8px;
+}
+
+.home-club-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-club-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-home {
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
+}
+
 .home-existing {
   display: flex;
   align-items: stretch;
@@ -727,6 +804,159 @@ button:disabled:hover {
   margin: 0;
   font-weight: 700;
   text-align: center;
+}
+
+.modal--invite {
+  width: min(460px, 100%);
+}
+
+.invite-link {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.invite-link input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  border: var(--line);
+  padding: 4px 8px;
+  background: var(--white);
+}
+
+.invite-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: var(--line);
+  background: var(--white);
+  cursor: pointer;
+}
+
+.invite-icon:hover:not(:disabled) {
+  background: var(--black);
+  color: var(--white);
+}
+
+.invite-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.invite-people {
+  margin-top: 16px;
+  border-top: var(--line);
+  padding-top: 12px;
+}
+
+.invite-people-head {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.invite-people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invite-people-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.invite-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: var(--line);
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.invite-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invite-person-role {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.topbar-invite {
+  font: inherit;
+  border: var(--line);
+  padding: 2px 10px;
+  background: var(--white);
+  cursor: pointer;
+}
+
+.group-context {
+  padding: 8px 0 10px;
+  border-bottom: var(--line);
+  margin-bottom: 8px;
+}
+
+.group-book {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-book-title {
+  font-weight: 700;
+}
+
+.group-book-rename {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.6;
+}
+
+.group-book-rename:hover {
+  opacity: 1;
+}
+
+.group-book-edit {
+  display: flex;
+  gap: 6px;
+}
+
+.group-book-edit input {
+  font: inherit;
+  border: var(--line);
+  padding: 2px 8px;
+  background: var(--white);
+}
+
+.group-roster {
+  margin: 6px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .toast-viewport {

@@ -120,6 +120,14 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return { ok: true, user };
   }
 
+  // Dev-only shortcut: sign in by email with no code (used in local dev where
+  // email delivery isn't configured). Upserts the user and returns it.
+  devLogin(email: string, displayName?: string): User {
+    const user = this.upsertUser(email, displayName);
+    this.setState({ ...this.state, user, pending: null });
+    return user;
+  }
+
   // The current user record, if any.
   getUser(): User | null {
     return this.state.user;

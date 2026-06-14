@@ -16,7 +16,7 @@ export function noteTitle(note: Note): string {
     minute: "2-digit",
   });
   const verb = note.parent === null ? "posted" : "replied";
-  return `${note.author} ${verb} ${when}`;
+  return `${note.author.name} ${verb} ${when}`;
 }
 
 // Read-view data shared by every row: which seqs resolve (for editor chips),
@@ -25,6 +25,15 @@ export interface NoteRefs {
   validSeqs: Set<number>;
   byId: Map<string, Note>;
   refs: Map<number, string>;
+}
+
+// The signed-in caller, used to gate edit/delete affordances per note. The
+// server is the enforcer (decision 7); these only hide buttons that would be
+// rejected anyway. A member may edit their own note; the author or the group
+// owner may delete one.
+export interface NoteViewer {
+  userId: string;
+  isOwner: boolean;
 }
 
 // The per-note callbacks and the single-open-editor selectors, threaded down to
@@ -50,15 +59,21 @@ function NoteRow({
   actions,
   refs,
   canWrite,
+  viewer,
 }: {
   note: Note;
   actions: NoteActions;
   refs: NoteRefs;
   canWrite: boolean;
+  viewer: NoteViewer;
 }) {
   // A note can jump if it (or an ancestor, for replies) carries a highlight.
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
+  // Affordance gating (decision 7): author edits own; author or owner deletes.
+  const isAuthor = note.author.id === viewer.userId;
+  const canEdit = isAuthor;
+  const canDelete = isAuthor || viewer.isOwner;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmRef = useRef<HTMLDivElement | null>(null);
 
@@ -118,7 +133,7 @@ function NoteRow({
               ↩
             </button>
           )}
-          {!deleted && (
+          {!deleted && canEdit && (
             <button
               className="edit"
               onClick={() => actions.onEdit(note)}
@@ -128,7 +143,7 @@ function NoteRow({
               <img src={editIcon} alt="" aria-hidden="true" />
             </button>
           )}
-          {!deleted && (
+          {!deleted && canDelete && (
             <div className="delete-wrap" ref={confirmRef}>
               <button
                 className="delete"
@@ -197,6 +212,7 @@ function Replies({
   actions,
   refs,
   canWrite,
+  viewer,
   depth,
 }: {
   parent: Note;
@@ -204,6 +220,7 @@ function Replies({
   actions: NoteActions;
   refs: NoteRefs;
   canWrite: boolean;
+  viewer: NoteViewer;
   depth: number;
 }) {
   const children = childrenOf(parent.id);
@@ -211,13 +228,14 @@ function Replies({
 
   const content = children.map((child) => (
     <Fragment key={child.id}>
-      <NoteRow note={child} actions={actions} refs={refs} canWrite={canWrite} />
+      <NoteRow note={child} actions={actions} refs={refs} canWrite={canWrite} viewer={viewer} />
       <Replies
         parent={child}
         childrenOf={childrenOf}
         actions={actions}
         refs={refs}
         canWrite={canWrite}
+        viewer={viewer}
         depth={depth + 1}
       />
     </Fragment>
@@ -233,22 +251,25 @@ export function NoteThread({
   actions,
   refs,
   canWrite,
+  viewer,
 }: {
   root: Note;
   childrenOf: (id: string) => Note[];
   actions: NoteActions;
   refs: NoteRefs;
   canWrite: boolean;
+  viewer: NoteViewer;
 }) {
   return (
     <li className="note-thread">
-      <NoteRow note={root} actions={actions} refs={refs} canWrite={canWrite} />
+      <NoteRow note={root} actions={actions} refs={refs} canWrite={canWrite} viewer={viewer} />
       <Replies
         parent={root}
         childrenOf={childrenOf}
         actions={actions}
         refs={refs}
         canWrite={canWrite}
+        viewer={viewer}
         depth={1}
       />
     </li>

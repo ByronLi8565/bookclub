@@ -6,7 +6,7 @@ function note(over: Partial<Note> & { id: string }): Note {
   return {
     seq: 1,
     sourceId: "book",
-    author: "local",
+    author: { id: "u-local", name: "local" },
     parent: null,
     body: "",
     highlights: [],

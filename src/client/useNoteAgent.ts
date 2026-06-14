@@ -10,19 +10,20 @@ import { spawnToast } from "./ui/toast.tsx";
 export interface NoteSync {
   notes: Note[];
   syncStatus: "syncing" | "online" | "offline";
-  addNote: (body: string, highlights: Highlight[]) => boolean;
-  addReply: (parent: string, body: string) => boolean;
+  addNote: (sourceId: string, body: string, highlights: Highlight[]) => boolean;
+  addReply: (sourceId: string, parent: string, body: string) => boolean;
   editNote: (id: string, body: string) => boolean;
   removeNote: (id: string) => boolean;
   rebindHighlight: (noteId: string, highlightId: string, cfiValue: string) => boolean;
 }
 
-// Connect to the per-book NoteAgent durable object (one instance per sourceId)
-// over a websocket and expose its live state. With no book open we park the
-// connection on a throwaway "idle" instance whose empty state we ignore, so the
-// hook count stays stable across file picks.
-export function useNoteAgent(sourceId: string | null): NoteSync {
-  const agent = useAgent<NoteAgent, NoteState>({ agent: "note-agent", name: sourceId ?? "idle" });
+// Connect to the per-group NoteAgent durable object (one instance per groupId,
+// decision 6) over a websocket and expose its live state. The notes for all of a
+// group's books live in this one instance, each tagged with its sourceId. With
+// no group open we park the connection on a throwaway "idle" instance whose
+// empty state we ignore, so the hook count stays stable.
+export function useNoteAgent(groupId: string | null): NoteSync {
+  const agent = useAgent<NoteAgent, NoteState>({ agent: "note-agent", name: groupId ?? "idle" });
   const { stub } = agent;
   const fire = (call: () => Promise<unknown>) => {
     if (agent.readyState !== agent.OPEN) {
@@ -44,16 +45,16 @@ export function useNoteAgent(sourceId: string | null): NoteSync {
   };
 
   return {
-    notes: sourceId ? (agent.state?.notes ?? []) : [],
+    notes: groupId ? (agent.state?.notes ?? []) : [],
     syncStatus: syncStatus(
-      sourceId,
+      groupId,
       agent.readyState,
       agent.CONNECTING,
       agent.OPEN,
       agent.identified,
     ),
-    addNote: (body, highlights) => fire(() => stub.addNote(body, highlights)),
-    addReply: (parent, body) => fire(() => stub.addReply(parent, body)),
+    addNote: (sourceId, body, highlights) => fire(() => stub.addNote(sourceId, body, highlights)),
+    addReply: (sourceId, parent, body) => fire(() => stub.addReply(sourceId, parent, body)),
     editNote: (id, body) => fire(() => stub.editNote(id, body)),
     removeNote: (id) => fire(() => stub.removeNote(id)),
     rebindHighlight: (noteId, highlightId, cfiValue) =>
@@ -62,13 +63,13 @@ export function useNoteAgent(sourceId: string | null): NoteSync {
 }
 
 function syncStatus(
-  sourceId: string | null,
+  groupId: string | null,
   readyState: number,
   connectingState: number,
   openState: number,
   identified: boolean,
 ): NoteSync["syncStatus"] {
-  if (!sourceId) return "syncing";
+  if (!groupId) return "syncing";
   if (readyState === openState) return identified ? "online" : "syncing";
   if (readyState === connectingState) return "syncing";
   return "offline";

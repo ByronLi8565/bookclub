@@ -12,11 +12,16 @@ export type SessionStatus = "loading" | "anon" | "authed";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
+// startLogin's result. In local dev the server signs the user in directly
+// (no code step); `devSignedIn` tells the UI to skip straight to "done".
+export type StartResult = { ok: true; devSignedIn?: boolean } | { ok: false; error: string };
+
 export interface Session {
   status: SessionStatus;
   user: SessionUser | null;
-  // Request a login code for an email (POST /auth/start).
-  startLogin: (email: string) => Promise<ActionResult>;
+  // Request a login code for an email (POST /auth/start). In local dev this
+  // signs the user in directly (devSignedIn) with no code step.
+  startLogin: (email: string) => Promise<StartResult>;
   // Submit a code to complete sign-in (POST /auth/verify); sets the user on ok.
   verify: (email: string, code: string, displayName?: string) => Promise<ActionResult>;
   signOut: () => Promise<void>;
@@ -52,13 +57,26 @@ export function useSession(): Session {
     };
   }, []);
 
-  const startLogin = useCallback(async (email: string): Promise<ActionResult> => {
+  const startLogin = useCallback(async (email: string): Promise<StartResult> => {
     const r = await fetch("/auth/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     });
-    return r.ok ? { ok: true } : { ok: false, error: await readError(r) };
+    if (!r.ok) return { ok: false, error: await readError(r) };
+    // Dev shortcut: the server already created the session and returned the user.
+    if (r.status !== 204) {
+      const body = (await r.json().catch(() => null)) as {
+        devSignedIn?: boolean;
+        user?: SessionUser;
+      } | null;
+      if (body?.devSignedIn && body.user) {
+        setUser(body.user);
+        setStatus("authed");
+        return { ok: true, devSignedIn: true };
+      }
+    }
+    return { ok: true };
   }, []);
 
   const verify = useCallback(

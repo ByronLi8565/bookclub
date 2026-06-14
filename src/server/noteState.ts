@@ -1,5 +1,5 @@
 import type { Highlight } from "../client/highlights.ts";
-import type { Note } from "../client/notes.ts";
+import type { Note, NoteAuthor } from "../client/notes.ts";
 import { extractReferences } from "../client/references.ts";
 
 // The whole synced state for one Source (book): the notes plus the next
@@ -25,28 +25,39 @@ export function emptyNoteState(): NoteState {
 export function addNote(
   state: NoteState,
   sourceId: string,
+  author: NoteAuthor,
   body: string,
   highlights: Highlight[],
   stamp: NoteStamp,
 ): NoteState {
-  return append(state, sourceId, null, body, highlights, stamp);
+  return append(state, sourceId, author, null, body, highlights, stamp);
 }
 
 export function addReply(
   state: NoteState,
   sourceId: string,
+  author: NoteAuthor,
   parent: string,
   body: string,
   stamp: NoteStamp,
 ): NoteState {
-  return append(state, sourceId, parent, body, [], stamp);
+  return append(state, sourceId, author, parent, body, [], stamp);
 }
 
-export function editNote(state: NoteState, id: string, body: string, now: string): NoteState {
+// Edit a note's body. Author-only (decision 7): a caller may only edit their own
+// note. A mismatch (or a missing/deleted note) is a no-op — the server is the
+// enforcer, independent of any UI gating.
+export function editNote(
+  state: NoteState,
+  id: string,
+  body: string,
+  now: string,
+  callerId: string,
+): NoteState {
   return setNotes(
     state,
     state.notes.map((note) =>
-      note.id === id && note.deletedAt === null
+      note.id === id && note.deletedAt === null && note.author.id === callerId
         ? { ...note, body, editedAt: now, version: note.version + 1 }
         : note,
     ),
@@ -57,9 +68,18 @@ export function editNote(state: NoteState, id: string, body: string, now: string
 // replies and no `[[seq]]` references in any other note. Otherwise it becomes a
 // tombstone, so threads stay intact and references never dangle. (No tombstone
 // GC: a tombstone is not reclaimed if its last dependent later disappears.)
-export function removeNote(state: NoteState, id: string, now: string): NoteState {
+export function removeNote(
+  state: NoteState,
+  id: string,
+  now: string,
+  callerId: string,
+  isOwner: boolean,
+): NoteState {
   const target = state.notes.find((note) => note.id === id);
   if (!target) return state;
+  // Author may delete their own note; the group owner may moderate any note
+  // (decision 7). Anyone else is a no-op.
+  if (target.author.id !== callerId && !isOwner) return state;
 
   const hasChildren = state.notes.some((note) => note.parent === id);
   const isReferenced = state.notes.some(
@@ -125,6 +145,7 @@ function setNotes(state: NoteState, notes: Note[]): NoteState {
 function append(
   state: NoteState,
   sourceId: string,
+  author: NoteAuthor,
   parent: string | null,
   body: string,
   highlights: Highlight[],
@@ -135,7 +156,7 @@ function append(
     id: stamp.id(),
     seq,
     sourceId,
-    author: "local",
+    author,
     parent,
     body,
     highlights,

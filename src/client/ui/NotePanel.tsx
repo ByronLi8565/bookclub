@@ -1,6 +1,6 @@
 import type { Conversation } from "../conversation.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
-import { NoteThread, type NoteActions, type NoteRefs } from "./NoteThread.tsx";
+import { NoteThread, type NoteActions, type NoteRefs, type NoteViewer } from "./NoteThread.tsx";
 
 // Right-pane list of note threads.
 export function NotePanel({
@@ -12,6 +12,8 @@ export function NotePanel({
   onComposeCancel,
   actions,
   refs,
+  viewer,
+  context,
 }: {
   conversation: Conversation;
   canWrite: boolean;
@@ -21,11 +23,15 @@ export function NotePanel({
   onComposeCancel: () => void;
   actions: NoteActions;
   refs: NoteRefs;
+  viewer: NoteViewer;
+  // The group/book collaboration context rendered above the note list.
+  context?: React.ReactNode;
 }) {
   const { roots } = conversation;
 
   return (
     <aside className="note-panel">
+      {context}
       <h2>Notes</h2>
       {roots.length === 0 && !composing && <p className="empty">Select text to add a note.</p>}
       <ul>
@@ -37,6 +43,7 @@ export function NotePanel({
             actions={actions}
             refs={refs}
             canWrite={canWrite}
+            viewer={viewer}
           />
         ))}
         {composing && (

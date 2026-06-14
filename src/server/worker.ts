@@ -1,12 +1,10 @@
 import { getAgentByName, routeAgentRequest } from "agents";
 import { Hono, type Context } from "hono";
-import { monotonicFactory } from "ulidx";
+import type { User as AuthUser } from "./AuthAgent.ts";
 import type { Env } from "./env.ts";
-import { REGISTRY_ID } from "./GroupRegistry.ts";
-import { EPUB_CONTENT_TYPE, getBook, storeBook } from "./books.ts";
-import { currentIdentity, SESSION_COOKIE } from "./identity.ts";
-import { sendInvite } from "./email.ts";
-import { parseName } from "./names.ts";
+import { registerGroupRoutes } from "./groupRoutes.ts";
+import { clearedCookie, currentIdentity, sessionCookie } from "./identity.ts";
+import { normalizeEmail, readJson } from "./http.ts";
 import { signSession, SESSION_TTL_MS } from "./session.ts";
 
 export { NoteAgent } from "./NoteAgent.ts";
@@ -14,12 +12,32 @@ export { AuthAgent } from "./AuthAgent.ts";
 export { GroupAgent } from "./GroupAgent.ts";
 export { GroupRegistry } from "./GroupRegistry.ts";
 
-const ulid = monotonicFactory();
-
 // The worker is a Hono app. Route order matters: explicit /auth/* routes are
 // matched first; the catch-all then hands websocket + rpc traffic to the agents
 // router and finally falls back to the Vite-built client assets.
 const app = new Hono<{ Bindings: Env }>();
+
+// In local dev, email delivery isn't configured, so the login code is only
+// logged to the console. Skip the round-trip entirely and sign the user in from
+// /auth/start. Never true in production (EMAIL/EMAIL_FROM are set there).
+function isDevAuth(env: Env): boolean {
+  return !env.EMAIL || !env.EMAIL_FROM;
+}
+
+// Sign a fresh session for a user and return the Set-Cookie header value.
+async function mintSessionCookie(env: Env, user: AuthUser): Promise<string> {
+  const exp = Date.now() + SESSION_TTL_MS;
+  const token = await signSession(
+    { userId: user.id, email: user.email, name: user.displayName, exp },
+    env.SESSION_HMAC_SECRET,
+  );
+  return sessionCookie(token);
+}
+
+// The user shape exposed to the client.
+function publicUser(user: AuthUser): { id: string; email: string; name: string } {
+  return { id: user.id, email: user.email, name: user.displayName };
+}
 
 app.post("/auth/start", async (c) => {
   const body = await readJson(c.req.raw);
@@ -27,6 +45,14 @@ app.post("/auth/start", async (c) => {
   if (!email) return c.json({ error: "invalid_email" }, 400);
 
   const auth = await getAgentByName(c.env.AuthAgent, email);
+
+  // Dev shortcut: sign in immediately, no code required.
+  if (isDevAuth(c.env)) {
+    const user = await auth.devLogin(email);
+    c.header("Set-Cookie", await mintSessionCookie(c.env, user));
+    return c.json({ devSignedIn: true, user: publicUser(user) });
+  }
+
   const sent = await auth.startLogin(email);
   // Rate limited: tell the client so it can back off. Otherwise 204.
   if (!sent) return c.json({ error: "rate_limited" }, 429);
@@ -44,15 +70,8 @@ app.post("/auth/verify", async (c) => {
   const result = await auth.verifyLogin(email, code, displayName);
   if (!result.ok) return c.json({ error: result.reason }, 400);
 
-  const exp = Date.now() + SESSION_TTL_MS;
-  const token = await signSession(
-    { userId: result.user.id, email: result.user.email, name: result.user.displayName, exp },
-    c.env.SESSION_HMAC_SECRET,
-  );
-  c.header("Set-Cookie", sessionCookie(token));
-  return c.json({
-    user: { id: result.user.id, email: result.user.email, name: result.user.displayName },
-  });
+  c.header("Set-Cookie", await mintSessionCookie(c.env, result.user));
+  return c.json({ user: publicUser(result.user) });
 });
 
 app.post("/auth/signout", (c) => {
@@ -66,128 +85,8 @@ app.get("/auth/me", async (c) => {
   return c.json({ user: { id: me.id, email: me.email, name: me.name } });
 });
 
-// List the groups the signed-in user belongs to (the home list).
-app.get("/groups", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const auth = await getAgentByName(c.env.AuthAgent, me.email);
-  const groupIds = await auth.getGroupIds();
-  const summaries = await Promise.all(
-    groupIds.map(async (id) => (await getAgentByName(c.env.GroupAgent, id)).getSummary()),
-  );
-  return c.json({ groups: summaries.filter((s) => s !== null) });
-});
-
-// Create a group with a unique, write-once URL name.
-app.post("/groups", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const body = await readJson(c.req.raw);
-  const parsed = parseName(body?.name);
-  if (!parsed.ok) return c.json({ error: "invalid_name", reason: parsed.error }, 400);
-
-  const groupId = ulid();
-  const group = await getAgentByName(c.env.GroupAgent, groupId);
-  const result = await group.create(parsed.name, me);
-  if (!result.ok) {
-    if (result.reason === "name_taken") return c.json({ error: "name_taken" }, 409);
-    return c.json({ error: result.reason }, 409);
-  }
-  return c.json({ group: result.summary }, 201);
-});
-
-// Resolve a group by URL name, with the caller's membership.
-app.get("/groups/:name", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const group = await resolveGroup(c.env, c.req.param("name"));
-  if (!group) return c.json({ error: "not_found" }, 404);
-  const summary = await group.getSummary();
-  if (!summary) return c.json({ error: "not_found" }, 404);
-  const membership = await group.membership(me.id);
-  return c.json({ group: summary, membership });
-});
-
-// Owner-only: invite an email to the group; deliver a redeem link.
-app.post("/groups/:name/invite", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const body = await readJson(c.req.raw);
-  const email = normalizeEmail(body?.email);
-  if (!email) return c.json({ error: "invalid_email" }, 400);
-
-  const group = await resolveGroup(c.env, c.req.param("name"));
-  if (!group) return c.json({ error: "not_found" }, 404);
-  const summary = await group.getSummary();
-  if (!summary) return c.json({ error: "not_found" }, 404);
-
-  const result = await group.invite(me.id, email);
-  if (!result.ok) {
-    if (result.reason === "not_owner") return c.json({ error: "not_owner" }, 403);
-    return c.json({ error: result.reason }, 404);
-  }
-  const origin = new URL(c.req.url).origin;
-  const link = `${origin}/${summary.name}?invite=${result.token}`;
-  await sendInvite(c.env, email, summary.displayName, link);
-  return c.body(null, 204);
-});
-
-// Redeem an invite token: the signed-in caller joins the group.
-app.post("/groups/:name/join", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const body = await readJson(c.req.raw);
-  const inviteToken = typeof body?.token === "string" ? body.token : null;
-  if (!inviteToken) return c.json({ error: "invalid_request" }, 400);
-
-  const group = await resolveGroup(c.env, c.req.param("name"));
-  if (!group) return c.json({ error: "not_found" }, 404);
-  const result = await group.redeem(inviteToken, me);
-  if (!result.ok) {
-    if (result.reason === "not_found") return c.json({ error: "not_found" }, 404);
-    return c.json({ error: result.reason }, 403);
-  }
-  return c.json({ group: result.summary });
-});
-
-// Owner-only: upload the group's book. Bytes are stored in R2 by content hash
-// (dedup) and the hash is bound to the group as its source (decision 13).
-app.put("/groups/:name/book", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const group = await resolveGroup(c.env, c.req.param("name"));
-  if (!group) return c.json({ error: "not_found" }, 404);
-  const summary = await group.getSummary();
-  if (!summary) return c.json({ error: "not_found" }, 404);
-  if (summary.ownerId !== me.id) return c.json({ error: "not_owner" }, 403);
-
-  const bytes = await c.req.arrayBuffer();
-  if (bytes.byteLength === 0) return c.json({ error: "empty" }, 400);
-  const hash = await storeBook(c.env, bytes);
-  await group.addSource(me.id, hash);
-  return c.json({ hash });
-});
-
-// Member-only: stream the group's bound book from R2. 404 until the owner has
-// uploaded one.
-app.get("/groups/:name/book", async (c) => {
-  const me = await currentIdentity(c.req.raw, c.env);
-  if (!me) return c.json({ error: "unauthenticated" }, 401);
-  const group = await resolveGroup(c.env, c.req.param("name"));
-  if (!group) return c.json({ error: "not_found" }, 404);
-  const summary = await group.getSummary();
-  if (!summary) return c.json({ error: "not_found" }, 404);
-  const { isMember } = await group.membership(me.id);
-  if (!isMember) return c.json({ error: "forbidden" }, 403);
-
-  const hash = summary.sources[0];
-  if (!hash) return c.json({ error: "no_book" }, 404);
-  const object = await getBook(c.env, hash);
-  if (!object) return c.json({ error: "no_book" }, 404);
-  return new Response(object.body, {
-    headers: { "Content-Type": EPUB_CONTENT_TYPE, "X-Source-Id": hash },
-  });
-});
+// All /groups* routes live in their own module to keep this file focused.
+registerGroupRoutes(app);
 
 // Connect gate (decision 6): the NoteAgent is keyed by groupId, so the :name
 // segment of its agent route is a groupId. Reject the websocket/rpc unless the
@@ -222,40 +121,3 @@ app.all("*", async (c) => {
 });
 
 export default app;
-
-// Resolve a URL name to its GroupAgent stub via the registry, or null if the
-// name shape is illegal or unclaimed.
-async function resolveGroup(env: Env, rawName: string) {
-  const parsed = parseName(rawName);
-  if (!parsed.ok) return null;
-  const registry = await getAgentByName(env.GroupRegistry, REGISTRY_ID);
-  const groupId = await registry.resolve(parsed.name.key);
-  if (!groupId) return null;
-  return getAgentByName(env.GroupAgent, groupId);
-}
-
-// Normalize an email for use as both the AuthAgent key and the stored address.
-function normalizeEmail(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const email = raw.trim().toLowerCase();
-  // Deliberately permissive: a single `@` with non-empty sides. Real validation
-  // happens by whether the code is received.
-  return /^[^@\s]+@[^@\s]+$/u.test(email) ? email : null;
-}
-
-async function readJson(request: Request): Promise<Record<string, unknown> | null> {
-  try {
-    return (await request.json()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function sessionCookie(token: string): string {
-  const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
-}
-
-function clearedCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
-}

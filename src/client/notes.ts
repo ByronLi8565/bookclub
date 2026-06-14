@@ -2,11 +2,19 @@ import { BOLD_STAR, ITALIC_STAR, QUOTE, type Transformer } from "@lexical/markdo
 import type { Highlight } from "./highlights.ts";
 import { REFERENCE_PATTERN } from "./references.ts";
 
+// A note's author: a stable user id plus a display-name snapshot taken at write
+// time (decision 8). The id is the authority for edit/delete permissions; the
+// name is just for display and may go stale if the user later renames.
+export interface NoteAuthor {
+  id: string;
+  name: string;
+}
+
 export interface Note {
   id: string; // server ULID (sortable, monotonic per book)
   seq: number; // human-readable per-book number; the
   sourceId: string; // the hash of the book this note belongs to
-  author: string;
+  author: NoteAuthor;
   parent: string | null; // another note id for replies; null for top-level notes
   body: string; // markdown serialized from Lexical
   highlights: Highlight[];

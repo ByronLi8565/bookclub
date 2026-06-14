@@ -3,10 +3,12 @@ import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildConversation } from "./conversation.ts";
 import { captureHighlight, type Highlight } from "./highlights.ts";
+import { renameBook, renameGroup, type RosterEntry } from "./groups/api.ts";
 import { effectiveHighlight, noteSnippet, type Note } from "./notes.ts";
-import { hashFile } from "./storage/hashFile.ts";
+import { GroupContext } from "./ui/GroupContext.tsx";
+import { InviteModal } from "./ui/InviteModal.tsx";
 import { NotePanel } from "./ui/NotePanel.tsx";
-import type { NoteRefs } from "./ui/NoteThread.tsx";
+import type { NoteRefs, NoteViewer } from "./ui/NoteThread.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import {
   updateHighlights,
@@ -15,16 +17,44 @@ import {
 } from "./ui/reader/highlightReconciler.ts";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
+import { showSyncStatusToast } from "./ui/syncStatus.ts";
 import { spawnToast, ToastViewport } from "./ui/toast.tsx";
+import { WorkspaceHeader } from "./ui/WorkspaceHeader.tsx";
 import { useNoteAgent } from "./useNoteAgent.ts";
 
-// The reader + notes workspace (the Steps 1-5 app). Phase A renders Home at the
-// root instead; Phase B's router will mount this at `/:name` (a group's books).
-export function Workspace() {
-  const [file, setFile] = useState<File | null>(null);
-  const [sourceId, setSourceId] = useState<string | null>(null);
+// The reader + notes workspace (the Steps 1-5 app), mounted by GroupView at
+// `/:name` for a group the caller is a member of. The book and its sourceId
+// (content hash) are supplied by the group; the NoteAgent is keyed by groupId
+// (decision 6), so all of the group's notes flow through one instance.
+export interface WorkspaceProps {
+  name: string; // the group's URL name (for invite/title APIs)
+  groupName: string; // the group's display name
+  groupId: string;
+  sourceId: string;
+  file: File;
+  // A member-set book title override, if any (else the epub metadata title).
+  bookTitleOverride: string | null;
+  members: RosterEntry[];
+  // The signed-in caller, used to gate edit/delete affordances (decision 7).
+  viewer: NoteViewer;
+}
+
+export function Workspace({
+  name,
+  groupName,
+  groupId,
+  sourceId,
+  file,
+  bookTitleOverride,
+  members,
+  viewer,
+}: WorkspaceProps) {
+  const [inviting, setInviting] = useState(false);
+  // Local overrides so a rename shows immediately (propagation is refetch-only).
+  const [override, setOverride] = useState<string | null>(bookTitleOverride);
+  const [displayName, setDisplayName] = useState(groupName);
   // Notes are owned by the durable object; this is its live broadcast state.
-  const agent = useNoteAgent(sourceId);
+  const agent = useNoteAgent(groupId);
   const notes = agent.notes;
   const canWriteNotes = agent.syncStatus === "online";
 
@@ -36,13 +66,10 @@ export function Workspace() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
-  const filePickRef = useRef(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const onSelectRef = useRef<(cfi: string, range: Range) => void>(() => {});
   const view = useSourceView(file, (cfi, range) => onSelectRef.current(cfi, range));
 
-  useHotkey("Mod+O", () => fileInputRef.current?.click(), { preventDefault: true });
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
 
@@ -71,7 +98,7 @@ export function Workspace() {
   function onComposeSave(body: string) {
     const highlight = composingRef.current;
     if (!sourceIdRef.current || !highlight) return;
-    if (agent.addNote(body, [highlight])) setComposing(null);
+    if (agent.addNote(sourceId, body, [highlight])) setComposing(null);
   }
 
   function onComposeCancel() {
@@ -93,7 +120,7 @@ export function Workspace() {
       setReplyingTo(null);
       return;
     }
-    if (agent.addReply(parentId, body)) setReplyingTo(null);
+    if (agent.addReply(sourceId, parentId, body)) setReplyingTo(null);
   }
 
   // Keep the rendition's painted highlights in sync with the live note state.
@@ -135,25 +162,6 @@ export function Workspace() {
   useEffect(() => {
     drawnRef.current.clear();
   }, [sourceId]);
-
-  const onPick = useCallback((f: File) => {
-    const pickId = ++filePickRef.current;
-    setSourceId(null);
-    setComposing(null);
-    setFile(f);
-    Effect.runPromise(hashFile(f)).then((id) => {
-      if (filePickRef.current === pickId) setSourceId(id);
-    });
-  }, []);
-
-  // TEMP: accept ?book=<url> to auto-load a fixture (used by the bombadil test).
-  useEffect(() => {
-    const url = new URLSearchParams(window.location.search).get("book");
-    if (!url) return;
-    fetch(url)
-      .then((r) => r.blob())
-      .then((b) => onPick(new File([b], url.split("/").pop() ?? "book.epub")));
-  }, [onPick]);
 
   function onDelete(note: Note) {
     // Erasing the paint is handled by the sync effect once the note leaves state.
@@ -220,37 +228,41 @@ export function Workspace() {
     ? `> ${composing.quote.exact.replaceAll(/\s+/gu, " ").trim()}\n\n`
     : "";
 
+  // The book label: a member's override, else the epub metadata title, else a
+  // short hash. Any member may rename (the server enforces membership).
+  const bookTitle = override ?? view.title ?? `book ${sourceId.slice(0, 8)}`;
+  async function onRenameBook(title: string): Promise<void> {
+    const result = await renameBook(name, sourceId, title);
+    if (result.ok) setOverride(title);
+    else spawnToast("Rename failed", "Couldn't rename the book.", { type: "error" });
+  }
+  async function onRenameGroup(title: string): Promise<void> {
+    const result = await renameGroup(name, title);
+    if (result.ok) setDisplayName(title);
+    else spawnToast("Rename failed", "Couldn't rename the club.", { type: "error" });
+  }
+
   return (
     <div className="app">
-      <header className="topbar">
-        <h1>bookclub</h1>
-        <label className="picker">
-          open epub
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".epub,application/epub+zip"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onPick(f);
-            }}
-          />
-        </label>
-        {sourceId && (
-          <button
-            type="button"
-            className={`sync-badge sync-badge--${agent.syncStatus}`}
-            onClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
-            aria-label="show sync status"
-          >
-            {agent.syncStatus}
-          </button>
-        )}
-      </header>
+      <WorkspaceHeader
+        displayName={displayName}
+        onRename={(t) => void onRenameGroup(t)}
+        canInvite={viewer.isOwner}
+        onInvite={() => setInviting(true)}
+        syncStatus={agent.syncStatus}
+        onSyncClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
+      />
       <SplitPane
-        left={<Reader view={view} hasFile={!!file} />}
+        left={<Reader view={view} hasFile />}
         right={
           <NotePanel
+            context={
+              <GroupContext
+                bookTitle={bookTitle}
+                members={members}
+                onRename={(t) => void onRenameBook(t)}
+              />
+            }
             conversation={conversation}
             canWrite={canWriteNotes}
             composing={composing !== null}
@@ -258,6 +270,7 @@ export function Workspace() {
             onComposeSave={onComposeSave}
             onComposeCancel={onComposeCancel}
             refs={noteRefs}
+            viewer={viewer}
             actions={{
               editingId,
               replyingTo,
@@ -274,19 +287,10 @@ export function Workspace() {
           />
         }
       />
+      {inviting && (
+        <InviteModal name={name} displayName={displayName} onClose={() => setInviting(false)} />
+      )}
       <ToastViewport />
     </div>
   );
-}
-
-function showSyncStatusToast(status: "syncing" | "online" | "offline", sourceId: string): void {
-  if (status === "online") {
-    spawnToast("Status: Online", `Synced to book with hash ${sourceId}.`, { type: "info" });
-    return;
-  }
-  if (status === "syncing") {
-    spawnToast("Status: Syncing", `Connecting to book with hash ${sourceId}.`, { type: "info" });
-    return;
-  }
-  spawnToast("Status: Offline", `Offline for book with hash ${sourceId}.`, { type: "error" });
 }

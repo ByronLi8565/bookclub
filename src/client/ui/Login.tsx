@@ -64,8 +64,17 @@ export function LoginModal({
     setError(null);
     const result = await session.startLogin(email);
     setBusy(false);
-    if (result.ok) setStep("code");
-    else setError(message(result.error));
+    if (!result.ok) {
+      setError(message(result.error));
+      return;
+    }
+    // Local dev: signed in already, no code step. Show success and close.
+    if (result.devSignedIn) {
+      setStep("done");
+      setTimeout(onClose, 1200);
+      return;
+    }
+    setStep("code");
   }
 
   async function onVerify(e: React.FormEvent): Promise<void> {
