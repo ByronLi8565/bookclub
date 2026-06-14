@@ -11,6 +11,7 @@ export default Alchemy.Stack(
   Effect.gen(function* () {
     const site = yield* Cloudflare.Vite("bookclub", {
       url: true,
+      domain: "bookclub.byron.land",
       compatibility: { flags: ["nodejs_compat"] },
       assets: { htmlHandling: "auto-trailing-slash", notFoundHandling: "single-page-application" },
       // `env` is alchemy's binding map for the worker (the build only reads
