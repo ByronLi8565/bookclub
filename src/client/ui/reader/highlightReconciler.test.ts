@@ -71,7 +71,7 @@ describe("updateHighlights", () => {
     const drawn = new Map<string, string>([["h1", "cfi-1"]]);
     let located = 0;
     const reader: SourceReader = {
-      resolveCfi: (cfi) => {
+      resolveCfi: () => {
         located++;
         return Effect.succeed({} as Range);
       },

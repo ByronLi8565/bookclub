@@ -1,12 +1,17 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { captureHighlight, locateHighlight, type Highlight } from "./highlights.ts";
+import { captureHighlight, type Highlight } from "./highlights.ts";
 import { effectiveHighlight, noteSnippet, type Note } from "./notes.ts";
 import { hashFile } from "./storage/hashFile.ts";
 import { NotePanel } from "./ui/NotePanel.tsx";
 import type { NoteRefs } from "./ui/NoteThread.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
+import {
+  updateHighlights,
+  type DesiredHighlight,
+  type HighlightPainter,
+} from "./ui/reader/highlightReconciler.ts";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
 import { spawnToast, ToastViewport } from "./ui/toast.tsx";
@@ -88,40 +93,33 @@ export default function App() {
     if (agent.addReply(parentId, body)) setReplyingTo(null);
   }
 
-  // Keep the rendition's painted highlights in sync with the live note state:
-  // draw (and rebind drifted cfis for) highlights that appear, erase those that
-  // leave. Runs on every state change, so a peer's note shows up here too.
+  // Keep the rendition's painted highlights in sync with the live note state.
+  // The reconciler draws (and rebinds drifted cfis for) highlights that appear
+  // and erases those that leave; we just hand it the desired set, a painter, and
+  // a cancel flag. Runs on every state change, so a peer's note shows up here too.
   useEffect(() => {
     if (!view.ready) return;
     let cancelled = false;
 
-    // The composing highlight is painted but not yet in state; keep it alive.
-    const live = new Set<string>();
-    for (const note of notes) for (const h of note.highlights) live.add(h.id);
-    const comp = composingRef.current;
-    if (comp) live.add(comp.id);
-    for (const [hid, cfi] of drawnRef.current) {
-      if (!live.has(hid)) {
-        view.eraseHighlight(cfi);
-        drawnRef.current.delete(hid);
-      }
+    const desired: DesiredHighlight[] = [];
+    for (const note of notes) {
+      for (const h of note.highlights) desired.push({ noteId: note.id, highlight: h });
     }
+    // The composing highlight is painted but not yet in state; keep it alive.
+    const comp = composingRef.current;
+    if (comp) desired.push({ noteId: null, highlight: comp });
 
-    void (async () => {
-      for (const note of notes) {
-        for (const h of note.highlights) {
-          if (cancelled) return;
-          if (drawnRef.current.has(h.id)) continue;
-          const located = await Effect.runPromise(locateHighlight(h, view.reader));
-          if (cancelled || !located) continue;
-          // A drifted cfi is rebound back into shared state for everyone.
-          if (located.cfi !== h.cfi.value) agent.rebindHighlight(note.id, h.id, located.cfi);
-          const cfi = located.cfi;
-          view.drawHighlight(h.id, cfi, () => view.goTo(cfi));
-          drawnRef.current.set(h.id, cfi);
-        }
-      }
-    })();
+    const painter: HighlightPainter = {
+      draw: (id, cfi) => view.drawHighlight(id, cfi, () => view.goTo(cfi)),
+      erase: (cfi) => view.eraseHighlight(cfi),
+    };
+
+    void updateHighlights(desired, drawnRef.current, {
+      reader: view.reader,
+      painter,
+      rebind: agent.rebindHighlight,
+      isCancelled: () => cancelled,
+    });
 
     return () => {
       cancelled = true;
