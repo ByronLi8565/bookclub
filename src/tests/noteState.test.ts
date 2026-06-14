@@ -10,7 +10,7 @@ import {
   removeNote,
   type NoteStamp,
   type NoteState,
-} from "./noteState.ts";
+} from "../server/noteState.ts";
 
 // A deterministic stamp: ids count up (n1, n2, ...) and time is fixed unless set.
 function fakeStamp(now = "2026-01-01T00:00:00.000Z"): NoteStamp {

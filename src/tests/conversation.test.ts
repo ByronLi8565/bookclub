@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildConversation } from "./conversation.ts";
-import type { Note } from "./notes.ts";
+import { buildConversation } from "../client/conversation.ts";
+import type { Note } from "../client/notes.ts";
 
 function note(over: Partial<Note> & { id: string }): Note {
   return {

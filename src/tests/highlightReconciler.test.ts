@@ -1,7 +1,10 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
-import { cfiSelector, type Highlight, type SourceReader } from "../../highlights.ts";
-import { updateHighlights, type HighlightPainter } from "./highlightReconciler.ts";
+import { cfiSelector, type Highlight, type SourceReader } from "../client/highlights.ts";
+import {
+  updateHighlights,
+  type HighlightPainter,
+} from "../client/ui/reader/highlightReconciler.ts";
 
 // An in-memory painter that records the draw/erase calls made against it.
 function fakePainter() {
