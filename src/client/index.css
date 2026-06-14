@@ -1,5 +1,11 @@
 :root {
-  --line: 3px solid #000;
+  --black: #000;
+  --white: #fff;
+  --gray: #777;
+  --red: #d60000;
+  --highlight: #ffe600;
+
+  --line: 3px solid var(--black);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
@@ -15,32 +21,32 @@ body,
 }
 
 body {
-  background: #fff;
-  color: #000;
+  background: var(--white);
+  color: var(--black);
 }
 
 button {
   font: inherit;
-  background: #fff;
-  color: #000;
+  background: var(--white);
+  color: var(--black);
   border: var(--line);
   padding: 4px 10px;
   cursor: pointer;
 }
 
 button:hover {
-  background: #000;
-  color: #fff;
+  background: var(--black);
+  color: var(--white);
 }
 
 button:disabled {
-  color: #777;
+  color: var(--gray);
   cursor: not-allowed;
 }
 
 button:disabled:hover {
-  background: #fff;
-  color: #777;
+  background: var(--white);
+  color: var(--gray);
 }
 
 .app {
@@ -85,18 +91,18 @@ button:disabled:hover {
 }
 
 .sync-badge--online {
-  background: #000;
-  color: #fff;
+  background: var(--black);
+  color: var(--white);
 }
 
 .sync-badge--syncing {
-  background: #fff;
-  color: #000;
+  background: var(--white);
+  color: var(--black);
 }
 
 .sync-badge--offline {
-  background: #d60000;
-  color: #fff;
+  background: var(--red);
+  color: var(--white);
 }
 
 .split {
@@ -124,8 +130,8 @@ button:disabled:hover {
 }
 
 .split-divider:hover {
-  border-left-color: #000;
-  box-shadow: 0 0 0 2px #000;
+  border-left-color: var(--black);
+  box-shadow: 0 0 0 2px var(--black);
 }
 
 .split-overlay {
@@ -206,7 +212,7 @@ button:disabled:hover {
 }
 
 .reader-page-turn:focus-visible {
-  outline: 2px solid #000;
+  outline: 2px solid var(--black);
   outline-offset: -6px;
 }
 
@@ -266,8 +272,8 @@ button:disabled:hover {
   align-self: stretch;
   min-width: 34px;
   padding: 0 6px;
-  background: #fff;
-  color: #000;
+  background: var(--white);
+  color: var(--black);
   font-weight: 700;
   border-right: var(--line);
 }
@@ -329,8 +335,8 @@ button:disabled:hover {
   min-width: 136px;
   padding: 12px;
   border: var(--line);
-  background: #fff;
-  box-shadow: 5px 5px 0 #000;
+  background: var(--white);
+  box-shadow: 5px 5px 0 var(--black);
   text-align: center;
 }
 
@@ -391,7 +397,7 @@ button:disabled:hover {
 .note-body blockquote {
   margin: 0 0 8px;
   padding-left: 10px;
-  border-left: 3px solid #000;
+  border-left: 3px solid var(--black);
   opacity: 0.8;
 }
 
@@ -400,9 +406,9 @@ button:disabled:hover {
 .note-ref {
   display: inline-block;
   padding: 0 4px;
-  border: 2px solid #000;
+  border: 2px solid var(--black);
   border-radius: 4px;
-  background: #fff;
+  background: var(--white);
   font: inherit;
   font-weight: 700;
   line-height: 1.2;
@@ -411,8 +417,8 @@ button:disabled:hover {
 }
 
 .note-ref:hover {
-  background: #000;
-  color: #fff;
+  background: var(--black);
+  color: var(--white);
 }
 
 /* Brief flash when a reference scrolls its target note into view. */
@@ -422,11 +428,11 @@ button:disabled:hover {
 
 @keyframes note-flash {
   from {
-    background: #ffe600;
+    background: var(--highlight);
   }
 
   to {
-    background: #fff;
+    background: var(--white);
   }
 }
 
@@ -453,7 +459,7 @@ button:disabled:hover {
 
 .note-editor-input .bc-quote {
   padding-left: 10px;
-  border-left: 3px solid #000;
+  border-left: 3px solid var(--black);
   opacity: 0.8;
 }
 
@@ -470,7 +476,7 @@ button:disabled:hover {
 }
 
 .bc-highlight {
-  fill: #ffeb3b;
+  fill: var(--highlight);
   fill-opacity: 0.4;
   /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
      larger font reflows it across more lines) and keeps the text readable. */
@@ -484,9 +490,9 @@ button:disabled:hover {
   text-transform: uppercase;
   letter-spacing: 1px;
   font-size: 12px;
-  background: #fff;
+  background: var(--white);
   border: var(--line);
-  box-shadow: 4px 4px 0 #000;
+  box-shadow: 4px 4px 0 var(--black);
 }
 
 .home-loading {
@@ -509,18 +515,18 @@ button:disabled:hover {
   position: relative;
   width: min(900px, 92vw);
   height: min(560px, 82vh);
-  background: #fff;
+  background: var(--white);
   border: var(--line);
   /* Stacked offset rectangles fake a block of pages on the lower-right edge,
      finished with the original hard drop shadow. */
   box-shadow:
-    5px 5px 0 0 #fff,
-    5px 5px 0 3px #000,
-    10px 10px 0 0 #fff,
-    10px 10px 0 3px #000,
-    15px 15px 0 0 #fff,
-    15px 15px 0 3px #000,
-    20px 20px 0 0 #000;
+    5px 5px 0 0 var(--white),
+    5px 5px 0 3px var(--black),
+    10px 10px 0 0 var(--white),
+    10px 10px 0 3px var(--black),
+    15px 15px 0 0 var(--white),
+    15px 15px 0 3px var(--black),
+    20px 20px 0 0 var(--black);
 }
 
 /* The center spine: makes the card read like an open book. */
@@ -539,10 +545,10 @@ button:disabled:hover {
   content: "";
   position: absolute;
   top: -42px;
-  left: 87%;
+  left: 90%;
   width: 36px;
   height: 70px;
-  background: #d60000;
+  background: var(--red);
   border: var(--line);
   border-radius: 4px 4px 8px 8px;
   z-index: -1;
@@ -587,20 +593,35 @@ button:disabled:hover {
 
 .home-existing {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
   border: var(--line);
-  padding: 4px 10px;
-  cursor: pointer;
+  padding: 0;
 }
 
+.home-existing-label {
+  align-self: center;
+  padding: 4px 10px;
+}
+
+/* The club picker sits to the right of the label, divided by the box's interior
+   separator. */
 .home-existing select {
   font: inherit;
   border: none;
   border-left: var(--line);
-  padding: 2px 4px;
-  background: #fff;
+  padding: 4px 10px;
+  background: var(--white);
   cursor: pointer;
+}
+
+/* Grayed out until signed in. */
+.home-existing:has(select:disabled) {
+  color: var(--gray);
+}
+
+.home-existing select:disabled {
+  color: var(--gray);
+  cursor: not-allowed;
 }
 
 .login {
@@ -628,26 +649,84 @@ button:disabled:hover {
 
 .login-link:hover {
   background: none;
-  color: #000;
+  color: var(--black);
   text-decoration: none;
 }
 
-.login--form form {
-  display: flex;
-  gap: 6px;
+.login-error {
+  margin: 8px 0 0;
+  color: var(--red);
+  font-size: 12px;
 }
 
-.login input {
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 35%);
+  padding: 20px;
+}
+
+.modal {
+  width: min(380px, 100%);
+  background: var(--white);
+  border: var(--line);
+  box-shadow: 8px 8px 0 var(--black);
+}
+
+.modal-head {
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--line);
+}
+
+.modal-head strong {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.modal-head button {
+  border: none;
+  border-left: var(--line);
+  padding: 0 12px;
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-body form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-body input {
   font: inherit;
   border: var(--line);
-  padding: 4px 8px;
-  width: 180px;
+  padding: 8px 10px;
+  width: 100%;
 }
 
-.login-error {
-  margin: 6px 0 0;
-  color: #d60000;
+.modal-body .primary {
+  font-weight: 700;
+}
+
+.modal-note {
+  margin: 0;
   font-size: 12px;
+  opacity: 0.7;
+}
+
+.modal-success {
+  margin: 0;
+  font-weight: 700;
+  text-align: center;
 }
 
 .toast-viewport {
@@ -669,8 +748,8 @@ button:disabled:hover {
   flex-direction: column;
   max-width: 100%;
   border: var(--line);
-  background: #fff;
-  box-shadow: 6px 6px 0 #000;
+  background: var(--white);
+  box-shadow: 6px 6px 0 var(--black);
   animation: toast-fade var(--toast-duration) linear forwards;
   pointer-events: auto;
 }
@@ -700,18 +779,18 @@ button:disabled:hover {
 }
 
 .toast--error .toast-head {
-  background: #d60000;
-  color: #fff;
+  background: var(--red);
+  color: var(--white);
 }
 
 .toast--error .toast-head button {
-  background: #d60000;
-  color: #fff;
+  background: var(--red);
+  color: var(--white);
 }
 
 .toast--error .toast-head button:hover {
-  background: #fff;
-  color: #d60000;
+  background: var(--white);
+  color: var(--red);
 }
 
 .toast p {
