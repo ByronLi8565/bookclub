@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   expandToWordBoundaries,
@@ -349,28 +350,28 @@ export function usePdfSourceView(
     underlineLayerRef.current = underlineLayer;
     composingLayerRef.current = composingLayer;
 
-    let cancelled = false;
-    void (async () => {
-      try {
-        const doc = await loadPdf(await file.arrayBuffer());
-        if (cancelled) {
-          void destroyPdf(doc);
-          return;
-        }
-        docRef.current = doc;
-        const meta = await doc.getMetadata().catch(() => null);
+    // Open + render as a forked fiber so the cleanup can interrupt it instead of
+    // threading a `cancelled` flag through every async step. The document is
+    // committed to `docRef` synchronously inside the load step (before any
+    // interruptible boundary), so teardown can always dispose it.
+    const fiber = Effect.runFork(
+      Effect.gen(function* () {
+        const doc = yield* Effect.promise(async () => {
+          const loaded = await loadPdf(await file.arrayBuffer());
+          docRef.current = loaded;
+          return loaded;
+        });
+        const meta = yield* Effect.promise(() => doc.getMetadata().catch(() => null));
         const info = meta?.info as { Title?: string } | undefined;
         setTitle(info?.Title?.trim() || null);
-        await renderPage();
-        if (!cancelled) await scrollToTextTop();
-        if (!cancelled) setReady(true);
-      } catch (error) {
-        if (!cancelled) console.error("failed to open pdf", error);
-      }
-    })();
+        yield* Effect.promise(() => renderPage());
+        yield* Effect.promise(() => scrollToTextTop());
+        setReady(true);
+      }).pipe(Effect.catchCause(() => Effect.sync(() => console.error("failed to open pdf")))),
+    );
 
     return () => {
-      cancelled = true;
+      Effect.runFork(Fiber.interrupt(fiber));
       renderSeqRef.current++;
       const doc = docRef.current;
       docRef.current = null;
