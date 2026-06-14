@@ -1,25 +1,28 @@
-/* Settings button, sits at the right end of the workspace toolbar. */
+/* The three toolbar controls (presence, sync badge, settings) share one height
+   so their boxes line up; the presence indicator sets the reference size. */
+.presence-indicator,
+.sync-badge,
 .settings-button {
-  display: flex;
+  height: 32px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  background: var(--white);
-  color: var(--black);
-  border: var(--line);
+}
+
+/* Settings button, sits at the right end of the workspace toolbar. */
+.settings-button {
+  width: 32px;
 }
 
 .settings-button img {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
 .settings-item-head {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: var(--font-md);
 }
 
 .settings-detail {
@@ -90,7 +93,7 @@
 }
 
 .presence-count {
-  font-size: 14px;
+  font-size: var(--font-sm);
   font-weight: 700;
 }
 
@@ -99,15 +102,15 @@
   height: 12px;
   border: 2px solid var(--black);
   border-radius: 50%;
-  background: #2ecc40;
+  background: var(--green);
 }
 
 .sync-badge {
   border: var(--line);
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--font-xs);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: var(--letter-label);
 }
 
 .sync-badge--online {

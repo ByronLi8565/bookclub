@@ -95,7 +95,7 @@ export function WorkspaceHeader({
       </button>
       <button
         type="button"
-        className="settings-button"
+        className="settings-button icon-button"
         onClick={() => setSettingsOpen(true)}
         aria-label="settings"
       >

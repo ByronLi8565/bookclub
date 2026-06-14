@@ -3,9 +3,25 @@
   --white: #fff;
   --gray: #777;
   --red: #d60000;
+  --green: #2ecc40;
+  --link: #0000ee;
   --highlight: #ffe600;
 
   --line: 3px solid var(--black);
+  --line-thin: 2px solid var(--black);
+  --font-xxs: 11px;
+  --font-xs: 12px;
+  --font-sm: 14px;
+  --font-md: 16px;
+  --letter-label: 1px;
+  --control-min: 44px;
+  --muted-opacity: 0.6;
+  --subtle-opacity: 0.7;
+  --highlight-opacity: 0.4;
+  --shadow-sm: 4px 4px 0 var(--black);
+  --shadow-popover: 5px 5px 0 var(--black);
+  --shadow-md: 6px 6px 0 var(--black);
+  --shadow-lg: 8px 8px 0 var(--black);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
@@ -57,6 +73,48 @@ button:disabled {
 button:disabled:hover {
   background: var(--white);
   color: var(--gray);
+}
+
+.plain-button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.plain-button:hover {
+  background: none;
+  color: var(--black);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: var(--line);
+  background: var(--white);
+  color: var(--black);
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--black);
+  color: var(--white);
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app {

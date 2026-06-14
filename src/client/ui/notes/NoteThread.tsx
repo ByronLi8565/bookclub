@@ -94,7 +94,7 @@ function NoteRow({
       <div className="note editing" id={`note-${note.seq}`}>
         <div className="note-head">
           <span className="note-seq">{note.seq}</span>
-          <button className="quote" disabled>
+          <button className="quote truncate" disabled>
             {noteTitle(note)} (editing)
           </button>
         </div>
@@ -116,7 +116,7 @@ function NoteRow({
         <div className="note-head">
           <span className="note-seq">{note.seq}</span>
           <button
-            className="quote"
+            className="quote truncate"
             onClick={() => actions.onJump(note)}
             disabled={!anchored}
             title={anchored ? "Jump to highlight" : undefined}

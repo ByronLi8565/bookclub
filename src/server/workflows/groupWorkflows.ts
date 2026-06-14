@@ -7,7 +7,7 @@ import type {
   RosterEntry,
   SourceMeta,
 } from "../../shared/types/groups.ts";
-import { currentSource } from "../../shared/sources.ts";
+import { currentSource, sourceById } from "../../shared/sources.ts";
 import { getSource, storeSource } from "../services/sources.ts";
 import { sendInvite } from "../services/email.ts";
 import type { Env } from "../env.ts";
@@ -341,9 +341,13 @@ export async function uploadSource(
           stored.reason === "empty" ? fail(400, "empty") : fail(400, "unsupported_type"),
         );
       }
+      // The client sends the parsed metadata title (URL-encoded) so we can record
+      // a human-readable default label for the book.
+      const rawTitle = request.headers.get("X-Source-Title");
+      const title = rawTitle ? decodeURIComponent(rawTitle).trim() || null : null;
       const { id, kind, contentType: storedType, size } = stored.source;
       yield* tryPromise(async () =>
-        group.addSource(me.id, id, { kind, contentType: storedType, size }),
+        group.addSource(me.id, id, { kind, contentType: storedType, size, title }),
       );
       return { hash: id };
     }),
@@ -354,6 +358,7 @@ export async function fetchSource(
   env: Env,
   request: Request,
   rawName: string,
+  sourceId?: string | null,
 ): Promise<WorkflowResult<{ hash: string; contentType: string; object: R2ObjectBody }>> {
   return runWorkflow(
     Effect.gen(function* () {
@@ -361,7 +366,8 @@ export async function fetchSource(
       const { group, summary } = yield* requireGroup(env, rawName);
       const { isMember } = yield* tryPromise(async () => group.membership(me.id));
       if (!isMember) return yield* Effect.fail(fail(403, "forbidden"));
-      const source = currentSource(summary);
+      // A specific bound book if requested, else the club's default (first) book.
+      const source = sourceId ? sourceById(summary, sourceId) : currentSource(summary);
       if (!source) return yield* Effect.fail(fail(404, "no_book"));
       const object = yield* tryPromise(() => getSource(env, source.id));
       if (!object) return yield* Effect.fail(fail(404, "no_book"));

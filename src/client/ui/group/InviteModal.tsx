@@ -112,7 +112,7 @@ export function InviteModal({
                 {members.map((m) => (
                   <li key={m.id}>
                     <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
-                    <span className="invite-person-name">{m.name}</span>
+                    <span className="invite-person-name truncate">{m.name}</span>
                     <span className="invite-person-role">{m.role}</span>
                   </li>
                 ))}
@@ -129,7 +129,7 @@ export function InviteModal({
                 <input type="text" readOnly value={shownLink} aria-label="invite link" />
                 <button
                   type="button"
-                  className="invite-icon"
+                  className="invite-icon icon-button"
                   onClick={() => void onCopy()}
                   disabled={!link}
                   aria-label="copy link"
@@ -139,7 +139,7 @@ export function InviteModal({
                 </button>
                 <button
                   type="button"
-                  className="invite-icon"
+                  className="invite-icon icon-button"
                   onClick={() => void onRotate()}
                   disabled={busy}
                   aria-label="regenerate link"

@@ -9,7 +9,7 @@
   .topbar h1,
   .topbar-title-edit {
     font-size: 16px;
-    letter-spacing: 1px;
+    letter-spacing: var(--letter-label);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -37,7 +37,7 @@
   }
 
   .home-card {
-    box-shadow: 8px 8px 0 var(--black);
+    box-shadow: var(--shadow-lg);
   }
 
   .home-card::before {

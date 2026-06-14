@@ -8,11 +8,12 @@
 .reader-empty {
   margin: auto;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.6;
+  letter-spacing: var(--letter-label);
+  opacity: var(--muted-opacity);
 }
 
-.reader-bar {
+.reader-bar,
+.reader-search {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -32,22 +33,90 @@
 .reader-bar .reader-title {
   font-weight: 700;
   max-width: 40%;
+}
+
+/* Book switcher: the original title element is kept; an arrow button to its
+   right opens the dropdown. */
+.book-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 40%;
+}
+
+.book-menu .reader-title {
+  max-width: none;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.reader-bar .page-count {
-  font-variant-numeric: tabular-nums;
-  opacity: 0.7;
+.book-menu-arrow {
+  flex: none;
+  font: inherit;
+  line-height: 1;
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: var(--subtle-opacity);
+  cursor: pointer;
 }
 
-.reader-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: var(--line);
+.book-menu-arrow:hover {
+  opacity: 1;
+}
+
+.book-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  margin: 0;
+  padding: 4px;
+  min-width: max(220px, 100%);
+  list-style: none;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+}
+
+.book-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-menu-item:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+.book-menu-item.is-active {
+  font-weight: 700;
+}
+
+.book-menu-add {
+  border-top: var(--line);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.reader-bar .page-count {
+  font-variant-numeric: tabular-nums;
+  opacity: var(--subtle-opacity);
 }
 
 .reader-search-input {
@@ -68,7 +137,7 @@
   font-variant-numeric: tabular-nums;
   min-width: 56px;
   text-align: center;
-  opacity: 0.7;
+  opacity: var(--subtle-opacity);
 }
 
 .reader-stage {
@@ -127,7 +196,7 @@
 
 .bc-highlight {
   fill: var(--highlight);
-  fill-opacity: 0.4;
+  fill-opacity: var(--highlight-opacity);
   /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
      larger font reflows it across more lines) and keeps the text readable. */
   mix-blend-mode: multiply;
@@ -140,9 +209,26 @@
   stroke-width: 2px;
 }
 
-/* PDF reader: the page wrapper centers the canvas; the text layer sits over it
-   for selection, and two absolutely-positioned overlay layers paint note
-   highlights and search underlines from normalized rects. */
+/* PDF reader: a scroll container owns overflow so zooming grows the page inside
+   the pane (pan/scroll) instead of bursting out of it. `touch-action` keeps the
+   browser's own pinch-zoom off — the adapter drives zoom itself — while still
+   allowing one-finger panning. */
+.pdf-scroller {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+  scrollbar-width: none;
+}
+
+.pdf-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* The page wrapper centers the canvas; the text layer sits over it for
+   selection, and absolutely-positioned overlay layers paint note highlights and
+   search underlines from normalized rects. */
 .pdf-page {
   position: relative;
 }
@@ -213,7 +299,7 @@
    compound into darker bands, and the composing/saved layers look identical. */
 .pdf-highlights,
 .pdf-composing {
-  opacity: 0.4;
+  opacity: var(--highlight-opacity);
   mix-blend-mode: multiply;
 }
 
@@ -233,12 +319,12 @@
   transform: translate(-50%, 8px);
   z-index: 10;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  font-size: 12px;
-  min-height: 44px;
+  letter-spacing: var(--letter-label);
+  font-size: var(--font-xs);
+  min-height: var(--control-min);
   padding: 0 16px;
   background: var(--white);
   border: var(--line);
-  box-shadow: 4px 4px 0 var(--black);
+  box-shadow: var(--shadow-sm);
   touch-action: manipulation;
 }

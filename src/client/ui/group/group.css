@@ -8,32 +8,15 @@
   flex: 1;
   min-width: 0;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-xs);
   border: var(--line);
   padding: 4px 8px;
   background: var(--white);
 }
 
 .invite-icon {
-  display: grid;
-  place-items: center;
   width: 34px;
   height: 34px;
-  flex: 0 0 auto;
-  padding: 0;
-  border: var(--line);
-  background: var(--white);
-  cursor: pointer;
-}
-
-.invite-icon:hover:not(:disabled) {
-  background: var(--black);
-  color: var(--white);
-}
-
-.invite-icon:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .invite-share {
@@ -44,10 +27,10 @@
 
 .invite-people-head {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: var(--font-xxs);
   text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.6;
+  letter-spacing: var(--letter-label);
+  opacity: var(--muted-opacity);
 }
 
 .invite-people-list {
@@ -90,7 +73,7 @@
 }
 
 .presence-pip--on {
-  background: #2ecc40;
+  background: var(--green);
 }
 
 .presence-pip--off {
@@ -104,26 +87,16 @@
   flex-direction: column;
 }
 
-.invite-person-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .invite-person-email {
-  font-size: 11px;
+  font-size: var(--font-xxs);
   opacity: 0.55;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .invite-person-role {
-  font-size: 11px;
+  font-size: var(--font-xxs);
   text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.6;
+  letter-spacing: var(--letter-label);
+  opacity: var(--muted-opacity);
 }
 
 .person--offline {
@@ -147,11 +120,7 @@
 }
 
 .group-book-rename {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0;
-  opacity: 0.6;
+  opacity: var(--muted-opacity);
 }
 
 .group-book-rename:hover {
@@ -172,6 +141,6 @@
 
 .group-roster {
   margin: 6px 0 0;
-  font-size: 12px;
-  opacity: 0.7;
+  font-size: var(--font-xs);
+  opacity: var(--subtle-opacity);
 }

@@ -1,3 +1,4 @@
+import type * as PdfjsModule from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 // Vite resolves this to a hashed URL for the worker bundle. This is a tiny
 // string constant, not the library itself, so it stays a static import.
@@ -10,8 +11,8 @@ export type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 // inspected or opened — rather than bundled into the main chunk that every
 // (EPUB-only) club pays for. The module is cached after the first import and
 // its worker is wired up once.
-let pdfjsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
-function pdfjsLib(): Promise<typeof import("pdfjs-dist")> {
+let pdfjsPromise: Promise<typeof PdfjsModule> | null = null;
+function pdfjsLib(): Promise<typeof PdfjsModule> {
   pdfjsPromise ??= import("pdfjs-dist").then((lib) => {
     lib.GlobalWorkerOptions.workerSrc = workerUrl;
     return lib;
@@ -20,7 +21,7 @@ function pdfjsLib(): Promise<typeof import("pdfjs-dist")> {
 }
 
 // The TextLayer constructor, loaded lazily with the rest of PDF.js.
-export async function loadTextLayerCtor(): Promise<typeof import("pdfjs-dist").TextLayer> {
+export async function loadTextLayerCtor(): Promise<typeof PdfjsModule.TextLayer> {
   return (await pdfjsLib()).TextLayer;
 }
 

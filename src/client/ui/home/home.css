@@ -113,7 +113,7 @@
 .home-upload-link {
   align-self: flex-start;
   font-size: 15px;
-  color: #0000ee;
+  color: var(--link);
   text-decoration: underline;
   cursor: pointer;
 }

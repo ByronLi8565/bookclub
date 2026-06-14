@@ -47,7 +47,7 @@ export function GroupContext({
           <span className="group-book-title">{bookTitle}</span>
           <button
             type="button"
-            className="group-book-rename"
+            className="group-book-rename plain-button"
             aria-label="rename book"
             title="Rename book"
             onClick={() => {

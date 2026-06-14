@@ -1,10 +1,10 @@
 import { fetchSource, uploadSource, type ApiResult, type GroupSummary } from "./api.ts";
 import { deleteCachedSource, getCachedSource, putCachedSource } from "./sourceCache.ts";
-import { currentSource, currentSourceRef } from "../../shared/sources.ts";
+import { currentSourceId, sourceById, sourceRefById } from "../../shared/sources.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import { sourceKindFor, type SourceSummary } from "../../shared/types/sources.ts";
 
-export { currentSource, currentSourceRef } from "../../shared/sources.ts";
+export { books, currentSource, currentSourceRef } from "../../shared/sources.ts";
 
 export interface LoadedSource {
   source: SourceSummary;
@@ -15,8 +15,8 @@ export interface LoadedSource {
 // Build a SourceSummary for a freshly fetched/uploaded file, preferring the
 // club's recorded metadata and falling back to what the File itself carries.
 function summaryFor(group: GroupSummary, sourceId: string, file: File): SourceSummary {
-  const known = currentSource(group);
-  if (known && known.id === sourceId) return known;
+  const known = sourceById(group, sourceId);
+  if (known) return known;
   return {
     id: sourceId,
     kind: sourceKindFor(file.type, file.name) ?? "epub",
@@ -26,25 +26,30 @@ function summaryFor(group: GroupSummary, sourceId: string, file: File): SourceSu
   };
 }
 
-// Load the group's current source, preferring the local IndexedDB copy and
-// falling back to the worker/R2 route on a miss. Successful network fetches seed
-// the cache.
-export async function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | null> {
-  const ref = currentSourceRef(group);
+// Load a specific bound source, preferring the local IndexedDB copy and falling
+// back to the worker/R2 route on a miss. Successful network fetches seed the
+// cache.
+export async function loadSource(
+  group: GroupSummary,
+  sourceId: string,
+): Promise<LoadedSource | null> {
+  const ref = sourceRefById(group, sourceId);
   if (!ref) return null;
 
   const cached = await getCachedSource(ref.id);
   if (cached) return { source: summaryFor(group, ref.id, cached), file: cached, fromCache: true };
 
-  const fetched = await fetchSource(group.name);
+  const fetched = await fetchSource(group.name, ref.id);
   if (!fetched) return null;
-  const sourceId = fetched.sourceId ?? ref.id;
-  void putCachedSource(sourceId, fetched.file);
-  return {
-    source: summaryFor(group, sourceId, fetched.file),
-    file: fetched.file,
-    fromCache: false,
-  };
+  const id = fetched.sourceId ?? ref.id;
+  void putCachedSource(id, fetched.file);
+  return { source: summaryFor(group, id, fetched.file), file: fetched.file, fromCache: false };
+}
+
+// Load the club's default (first) source. Convenience wrapper over loadSource.
+export async function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | null> {
+  const id = currentSourceId(group);
+  return id ? loadSource(group, id) : null;
 }
 
 // Upload a new group source and seed the cache with the same bytes, so the next
@@ -53,8 +58,9 @@ export async function uploadCurrentSource(
   group: GroupSummary,
   file: File,
   health: SourceHealth,
+  title: string | null,
 ): Promise<ApiResult<LoadedSource>> {
-  const uploaded = await uploadSource(group.name, file, health);
+  const uploaded = await uploadSource(group.name, file, health, title);
   if (!uploaded.ok) return uploaded;
   await putCachedSource(uploaded.value, file);
   return {
@@ -76,7 +82,7 @@ export async function refreshSource(
   sourceId: string,
 ): Promise<ApiResult<LoadedSource>> {
   await deleteCachedSource(sourceId);
-  const fetched = await fetchSource(groupName);
+  const fetched = await fetchSource(groupName, sourceId);
   if (!fetched) return { ok: false, error: "no_source" };
   const id = fetched.sourceId ?? sourceId;
   await putCachedSource(id, fetched.file);

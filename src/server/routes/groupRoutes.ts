@@ -94,10 +94,16 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-  // Member-only: stream the group's bound source from R2. 404 until the owner
-  // has uploaded one. The content type reflects the stored source kind.
+  // Member-only: stream a bound source from R2 (the club's default book, or the
+  // one named by ?sourceId=). 404 until the owner has uploaded one. The content
+  // type reflects the stored source kind.
   app.get("/groups/:name/book", async (c) => {
-    const result = await fetchSource(c.env, c.req.raw, c.req.param("name"));
+    const result = await fetchSource(
+      c.env,
+      c.req.raw,
+      c.req.param("name"),
+      c.req.query("sourceId") ?? null,
+    );
     if (!result.ok) return workflowError(result);
     return new Response(result.value.object.body, {
       headers: { "Content-Type": result.value.contentType, "X-Source-Id": result.value.hash },

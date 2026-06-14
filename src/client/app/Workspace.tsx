@@ -2,7 +2,8 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
-import type { SourceRef } from "../../shared/types/sources.ts";
+import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
+import type { BookUpload } from "../groups/useBookUpload.ts";
 import { renameGroup, type RosterEntry } from "../groups/api.ts";
 import { useNoteAgent } from "../notes/agent.ts";
 import { buildConversation } from "../notes/conversation.ts";
@@ -34,10 +35,16 @@ export interface WorkspaceProps {
   name: string; // the group's URL name (for invite/title APIs)
   groupName: string; // the group's display name
   groupId: string;
-  source: SourceRef; // the bound source (content hash + kind + content type)
+  source: SourceRef; // the active source (content hash + kind + content type)
   file: File | null;
   // A member-set source title override, if any (else the source metadata title).
   bookTitleOverride: string | null;
+  // The club's library and which book is active, for the reader's book switcher.
+  books: SourceSummary[];
+  selectedSourceId: string;
+  onSelectBook: (sourceId: string) => void;
+  // Owner-only "add a book" affordance; null for non-owners (hides the action).
+  bookUpload: BookUpload | null;
   members: RosterEntry[];
   // The signed-in caller, used to gate edit/delete affordances (decision 7).
   viewer: NoteViewer;
@@ -49,6 +56,10 @@ export function Workspace({
   groupId,
   source,
   file,
+  books,
+  selectedSourceId,
+  onSelectBook,
+  bookUpload,
   members,
   viewer,
 }: WorkspaceProps) {
@@ -61,9 +72,14 @@ export function Workspace({
   const [pane, setPane] = useState<Pane>("reader");
   // Local override so a rename shows immediately (propagation is refetch-only).
   const [displayName, setDisplayName] = useState(groupName);
-  // Notes are owned by the durable object; this is its live broadcast state.
+  // Notes are owned by the durable object; this is its live broadcast state. One
+  // NoteAgent serves the whole club (decision 6), so notes for every book flow
+  // through it; scope to the active book before rendering and reconciling.
   const agent = useNoteAgent(groupId);
-  const notes = agent.notes;
+  const notes = useMemo(
+    () => agent.notes.filter((n) => n.sourceId === sourceId),
+    [agent.notes, sourceId],
+  );
   const canWriteNotes = agent.syncStatus === "online";
 
   // The armed highlight being composed into a new note (painted, awaiting save).
@@ -278,6 +294,10 @@ export function Workspace({
             hasFile={file !== null}
             loading={file === null || !view.ready}
             floatingNote={!isMobile}
+            books={books}
+            selectedSourceId={selectedSourceId}
+            onSelectBook={onSelectBook}
+            bookUpload={bookUpload}
           />
         );
         const notePanel = (

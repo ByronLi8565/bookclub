@@ -128,7 +128,11 @@ export function Home({ session }: { session: Session }): React.ReactElement {
                     <li key={g.groupId}>
                       <a href={`/${g.name}`}>{g.displayName}</a>
                       {g.ownerId === session.user?.id && (
-                        <button type="button" className="login-link" onClick={() => setInviting(g)}>
+                        <button
+                          type="button"
+                          className="login-link plain-button"
+                          onClick={() => setInviting(g)}
+                        >
                           invite
                         </button>
                       )}

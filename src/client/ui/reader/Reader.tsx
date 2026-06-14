@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loading } from "../shared/Loading.tsx";
+import type { BookUpload } from "../../groups/useBookUpload.ts";
+import type { SourceSummary } from "../../../shared/types/sources.ts";
 import type { SourceView } from "./useSourceView.ts";
 
 // Reader shell around the SourceView iframe. `floatingNote` renders the desktop
@@ -10,11 +12,21 @@ export function Reader({
   hasFile,
   loading = false,
   floatingNote = true,
+  books = [],
+  selectedSourceId = "",
+  onSelectBook = () => {},
+  bookUpload = null,
 }: {
   view: SourceView;
   hasFile: boolean;
   loading?: boolean;
   floatingNote?: boolean;
+  // The club's library, the active book, and a selection callback for the title
+  // dropdown. `bookUpload` is the owner-only "add a book" action (null hides it).
+  books?: SourceSummary[];
+  selectedSourceId?: string;
+  onSelectBook?: (sourceId: string) => void;
+  bookUpload?: BookUpload | null;
 }) {
   const { fontSize, setFontSize, ready, selection, search } = view;
 
@@ -38,11 +50,13 @@ export function Reader({
   return (
     <div className="reader">
       <div className="reader-bar">
-        {view.title && (
-          <span className="reader-title" title={view.title}>
-            {view.title}
-          </span>
-        )}
+        <BookMenu
+          activeTitle={view.title}
+          books={books}
+          selectedSourceId={selectedSourceId}
+          onSelectBook={onSelectBook}
+          upload={bookUpload}
+        />
         {view.location && (
           <span className="page-count">
             {view.location.page} / {view.location.total}
@@ -137,6 +151,121 @@ export function Reader({
         >
           Add Note
         </button>
+      )}
+    </div>
+  );
+}
+
+// A human label for a book in the switcher: the member-set title override, or
+// (for the active book) the parsed title, falling back to kind + short hash.
+function bookLabel(book: SourceSummary, activeTitle: string | null, isActive: boolean): string {
+  if (book.title) return book.title;
+  if (isActive && activeTitle) return activeTitle;
+  return `${book.kind.toUpperCase()} · ${book.id.slice(0, 8)}`;
+}
+
+// The book switcher in the reader bar: shows the active book's title with a
+// disclosure arrow that opens a dropdown of the club's library. Owners get an
+// "Add a book" entry that uploads (and binds) another source. With a single
+// book and no upload affordance it renders as a plain, non-interactive title.
+function BookMenu({
+  activeTitle,
+  books,
+  selectedSourceId,
+  onSelectBook,
+  upload,
+}: {
+  activeTitle: string | null;
+  books: SourceSummary[];
+  selectedSourceId: string;
+  onSelectBook: (sourceId: string) => void;
+  upload: BookUpload | null;
+}): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  const active = books.find((b) => b.id === selectedSourceId) ?? null;
+  const label = active ? bookLabel(active, activeTitle, true) : (activeTitle ?? "");
+  // No switching and no uploading: just show the title (matches the old bar).
+  const interactive = books.length > 1 || upload !== null;
+
+  // The original title element is preserved verbatim; the dropdown only adds an
+  // arrow affordance beside it.
+  const title = label ? (
+    <span className="reader-title" title={label}>
+      {label}
+    </span>
+  ) : (
+    <span className="reader-title" />
+  );
+
+  if (!interactive) return title;
+
+  return (
+    <div className="book-menu" ref={ref}>
+      {title}
+      <button
+        type="button"
+        className="book-menu-arrow"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="switch book"
+        onClick={() => setOpen((v) => !v)}
+      >
+        ▾
+      </button>
+      {open && (
+        <ul className="book-menu-list" role="menu">
+          {books.map((book) => (
+            <li key={book.id} role="none">
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={book.id === selectedSourceId}
+                className={
+                  book.id === selectedSourceId ? "book-menu-item is-active" : "book-menu-item"
+                }
+                onClick={() => {
+                  onSelectBook(book.id);
+                  setOpen(false);
+                }}
+              >
+                {bookLabel(book, activeTitle, book.id === selectedSourceId)}
+              </button>
+            </li>
+          ))}
+          {upload && (
+            <li role="none" className="book-menu-add">
+              <label className="book-menu-item">
+                {upload.busy
+                  ? upload.status === "checking"
+                    ? "checking…"
+                    : "uploading…"
+                  : "+ Add a book"}
+                <input
+                  type="file"
+                  accept=".epub,application/epub+zip,.pdf,application/pdf"
+                  disabled={upload.busy}
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void upload.pick(f);
+                    setOpen(false);
+                  }}
+                />
+              </label>
+            </li>
+          )}
+        </ul>
       )}
     </div>
   );

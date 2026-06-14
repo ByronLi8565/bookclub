@@ -31,7 +31,11 @@ export function Login({
     return (
       <div className="login login--authed">
         <span className="login-email">{session.user.email}</span>
-        <button type="button" className="login-link" onClick={() => void session.signOut()}>
+        <button
+          type="button"
+          className="login-link plain-button"
+          onClick={() => void session.signOut()}
+        >
           sign out
         </button>
       </div>

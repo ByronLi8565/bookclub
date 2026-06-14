@@ -10,6 +10,10 @@ export interface SourceMeta {
   kind: SourceKind;
   contentType: string;
   size: number;
+  // The parsed metadata title captured at upload, used as the default
+  // human-readable label when no member has set an override. Null/absent when
+  // the file carried no title (or for legacy entries).
+  title?: string | null;
 }
 
 export interface GroupSummary {

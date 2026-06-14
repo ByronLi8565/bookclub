@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cachedSourceSize, refreshSource } from "../../groups/sourceAccess.ts";
+import { setReaderPref, useReaderPrefs, type SmartArrows } from "../../settings/readerPrefs.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
@@ -35,6 +36,7 @@ export function SettingsModal({
   const [cachedSize, setCachedSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const { smartArrows } = useReaderPrefs();
 
   useEffect(() => {
     let cancelled = false;
@@ -85,9 +87,7 @@ export function SettingsModal({
             {loading ? (
               <Loading className="loading--settings-detail" />
             ) : cachedSize === null ? (
-              <p className="settings-detail-status">
-                Not stored on this device — it's fetched from the cloud (R2) each time.
-              </p>
+              <p className="settings-detail-status">Not stored.</p>
             ) : (
               <dl className="settings-detail">
                 <dt>Save location</dt>
@@ -108,6 +108,22 @@ export function SettingsModal({
                   ? "download a local copy"
                   : "delete local copy & redownload"}
             </button>
+          </section>
+          <section className="settings-item">
+            <h2 className="settings-item-head">PDF: Smart arrow keys</h2>
+            <p className="settings-detail-status">
+              Arrow keys scroll through a tall page before turning it.
+            </p>
+            <select
+              className="settings-action"
+              value={smartArrows}
+              onChange={(e) => setReaderPref("smartArrows", e.target.value as SmartArrows)}
+              aria-label="PDF smart arrow keys"
+            >
+              <option value="off">Off</option>
+              <option value="smooth">Smooth scrolling</option>
+              <option value="instant">Instant scrolling</option>
+            </select>
           </section>
         </div>
       </div>

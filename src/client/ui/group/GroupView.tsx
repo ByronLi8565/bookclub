@@ -1,33 +1,30 @@
 import { useEffect, useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
 import { fetchGroup, redeemInvite, type GroupSummary, type RosterEntry } from "../../groups/api.ts";
-import {
-  currentSource,
-  loadCurrentSource,
-  uploadCurrentSource,
-} from "../../groups/sourceAccess.ts";
-import { inspectSource } from "../../sources/admission.ts";
-import type { SourceSummary } from "../../../shared/types/sources.ts";
+import { books, loadSource } from "../../groups/sourceAccess.ts";
+import { useBookUpload, type BookUpload } from "../../groups/useBookUpload.ts";
+import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
-// The resolved state of a group route. Each variant maps to a distinct render.
-type View =
+// The resolved membership state of a group route. Once a caller is a confirmed
+// member we hold the group + roster here and handle book selection/loading
+// separately, so switching books never re-runs membership resolution.
+type Resolved =
   | { k: "loading" }
   | { k: "anon" }
   | { k: "notfound" }
   | { k: "refused" }
-  | { k: "nobook"; group: GroupSummary; isOwner: boolean }
-  | {
-      k: "ready";
-      group: GroupSummary;
-      source: SourceSummary;
-      file: File | null;
-      isOwner: boolean;
-      members: RosterEntry[];
-    };
+  | { k: "member"; group: GroupSummary; isOwner: boolean; members: RosterEntry[] };
+
+// The locally-loaded bytes for one book, tagged with the sourceId they belong to
+// so a render can tell whether the loaded file still matches the selection.
+interface LoadedFile {
+  sourceId: string;
+  file: File | null;
+}
 
 // Pull a one-shot invite token off the URL and strip it so a refresh or a failed
 // redeem doesn't keep re-triggering.
@@ -39,8 +36,10 @@ function takeInviteToken(): string | null {
 }
 
 // Mounted at `/:name`. Resolves the group, redeems a pending `?invite`, enforces
-// membership, loads the group's book from the worker, and hands off to the
+// membership, loads the selected book from the worker, and hands off to the
 // reader workspace. Non-members are refused; signed-out visitors are prompted.
+// A club may bind several books; the selected one is held in client state and
+// defaults to the club's first (current) book.
 export function GroupView({
   name,
   session,
@@ -48,77 +47,93 @@ export function GroupView({
   name: string;
   session: Session;
 }): React.ReactElement {
-  const [view, setView] = useState<View>({ k: "loading" });
-  const [reload, setReload] = useState(0);
+  const [resolved, setResolved] = useState<Resolved>({ k: "loading" });
+  // The book the reader is showing; null means "use the club's default book".
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<LoadedFile | null>(null);
   const userId = session.user?.id ?? null;
 
+  const group = resolved.k === "member" ? resolved.group : null;
+  const effectiveId = group ? (selectedId ?? currentSourceId(group)) : null;
+
+  // After an upload, fold the refreshed group into state and jump to the new
+  // book. Doesn't bump `reload`, so membership resolution doesn't re-run.
+  async function onUploaded(newSourceId: string): Promise<void> {
+    const refreshed = await fetchGroup(name);
+    if (refreshed?.membership.isMember) {
+      setResolved({
+        k: "member",
+        group: refreshed.group,
+        isOwner: refreshed.group.ownerId === userId,
+        members: refreshed.members,
+      });
+    }
+    setSelectedId(newSourceId);
+  }
+
+  const upload = useBookUpload(group, (id) => void onUploaded(id));
+
+  // Resolve membership (and redeem a pending invite). Re-runs only on identity /
+  // route changes, never on a book switch.
   useEffect(() => {
     if (session.status === "loading") return;
     if (session.status === "anon") {
-      setView({ k: "anon" });
+      setResolved({ k: "anon" });
       return;
     }
 
     let cancelled = false;
-    setView({ k: "loading" });
+    setResolved({ k: "loading" });
+    setSelectedId(null);
+    setLoaded(null);
 
     void (async () => {
-      // Resolve membership, redeeming a pending invite first if present.
-      let resolved = await fetchGroup(name);
-      if (!resolved) {
-        if (!cancelled) setView({ k: "notfound" });
+      let view = await fetchGroup(name);
+      if (!view) {
+        if (!cancelled) setResolved({ k: "notfound" });
         return;
       }
-      if (!resolved.membership.isMember) {
+      if (!view.membership.isMember) {
         const token = takeInviteToken();
         if (token) {
           const joined = await redeemInvite(name, token);
-          // Refetch so the roster and membership reflect the new join.
-          if (joined.ok) resolved = (await fetchGroup(name)) ?? resolved;
+          if (joined.ok) view = (await fetchGroup(name)) ?? view;
           else spawnToast("Invite failed", "That invite link isn't valid.", { type: "error" });
         }
       }
       if (cancelled) return;
-      if (!resolved.membership.isMember) {
-        setView({ k: "refused" });
+      if (!view.membership.isMember) {
+        setResolved({ k: "refused" });
         return;
       }
-
-      const isOwner = resolved.group.ownerId === userId;
-      const source = currentSource(resolved.group);
-      if (!source) {
-        setView({ k: "nobook", group: resolved.group, isOwner });
-        return;
-      }
-
-      setView({
-        k: "ready",
-        group: resolved.group,
-        source,
-        file: null,
-        isOwner,
-        members: resolved.members,
+      setResolved({
+        k: "member",
+        group: view.group,
+        isOwner: view.group.ownerId === userId,
+        members: view.members,
       });
-      const loaded = await loadCurrentSource(resolved.group);
-      if (cancelled) return;
-      if (loaded)
-        setView({
-          k: "ready",
-          group: resolved.group,
-          source: loaded.source,
-          file: loaded.file,
-          isOwner,
-          members: resolved.members,
-        });
-      else setView({ k: "nobook", group: resolved.group, isOwner });
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [name, session.status, userId, reload]);
+  }, [name, session.status, userId]);
 
-  if (view.k === "loading") {
+  // Load the selected book's bytes whenever the selection (or group) changes.
+  useEffect(() => {
+    if (!group || !effectiveId) return;
+    let cancelled = false;
+    setLoaded(null);
+    void loadSource(group, effectiveId).then((result) => {
+      if (cancelled) return;
+      setLoaded({ sourceId: effectiveId, file: result?.file ?? null });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [group, effectiveId]);
+
+  if (resolved.k === "loading") {
     return (
       <div className="home">
         <div className="home-card">
@@ -129,32 +144,38 @@ export function GroupView({
       </div>
     );
   }
-  if (view.k === "anon")
+  if (resolved.k === "anon")
     return <GroupGate session={session} message="Sign in to open this club." />;
-  if (view.k === "notfound")
+  if (resolved.k === "notfound")
     return <GroupMessage title="No such club" body={`"${name}" doesn't exist.`} />;
-  if (view.k === "refused") {
+  if (resolved.k === "refused") {
     return <GroupMessage title="Members only" body="You need an invite to join this club." />;
   }
-  if (view.k === "nobook") {
-    return (
-      <NoBook
-        group={view.group}
-        isOwner={view.isOwner}
-        onUploaded={() => setReload((n) => n + 1)}
-      />
-    );
+
+  // An empty library: the owner uploads the first book; everyone else waits.
+  if (!effectiveId || !group) {
+    return <NoBook group={resolved.group} isOwner={resolved.isOwner} upload={upload} />;
   }
+
+  const source = sourceById(group, effectiveId) ?? currentSource(group);
+  if (!source) {
+    return <NoBook group={resolved.group} isOwner={resolved.isOwner} upload={upload} />;
+  }
+
   return (
     <Workspace
-      name={view.group.name}
-      groupName={view.group.displayName}
-      groupId={view.group.groupId}
-      source={view.source}
-      file={view.file}
-      bookTitleOverride={view.group.bookTitles[view.source.id] ?? null}
-      members={view.members}
-      viewer={{ userId: userId ?? "", isOwner: view.isOwner }}
+      name={group.name}
+      groupName={group.displayName}
+      groupId={group.groupId}
+      source={source}
+      file={loaded?.sourceId === source.id ? loaded.file : null}
+      bookTitleOverride={group.bookTitles[source.id] ?? null}
+      books={books(group)}
+      selectedSourceId={source.id}
+      onSelectBook={setSelectedId}
+      bookUpload={resolved.isOwner ? upload : null}
+      members={resolved.members}
+      viewer={{ userId: userId ?? "", isOwner: resolved.isOwner }}
     />
   );
 }
@@ -201,74 +222,21 @@ function GroupGate({
   );
 }
 
-// The group has no source yet: the owner can upload an EPUB or PDF; everyone
-// else waits. Before upload the file is health-checked (source admission): an
-// `error` refuses the file, a `warn` requires confirmation, `ok` uploads.
+// The club's library is empty: the owner can upload an EPUB or PDF; everyone
+// else waits. Admission (health check + warn confirmation) lives in useBookUpload.
 function NoBook({
   group,
   isOwner,
-  onUploaded,
+  upload,
 }: {
   group: GroupSummary;
   isOwner: boolean;
-  onUploaded: () => void;
+  upload: BookUpload;
 }): React.ReactElement {
-  const [status, setStatus] = useState<"idle" | "checking" | "uploading">("idle");
-
-  // Upload after a health check has cleared (ok, or warn confirmed by the owner).
-  async function upload(
-    file: File,
-    health: Parameters<typeof uploadCurrentSource>[2],
-  ): Promise<void> {
-    setStatus("uploading");
-    const result = await uploadCurrentSource(group, file, health);
-    if (result.ok) {
-      onUploaded();
-    } else {
-      setStatus("idle");
-      spawnToast("Upload failed", "Couldn't store that file. Try again.", { type: "error" });
-    }
-  }
-
-  async function onPick(file: File): Promise<void> {
-    setStatus("checking");
-    const inspection = await inspectSource(file);
-    if (!inspection.ok) {
-      setStatus("idle");
-      spawnToast(
-        "Unsupported file",
-        inspection.reason === "unsupported_type"
-          ? "Choose an EPUB or PDF file."
-          : "That file couldn't be read.",
-        { type: "error" },
-      );
-      return;
-    }
-    const { health } = inspection;
-    if (health.status === "error") {
-      setStatus("idle");
-      spawnToast(
-        "Can't use this file",
-        health.errors[0]?.message ?? "This file can't host anchored notes.",
-        { type: "error" },
-      );
-      return;
-    }
-    if (health.status === "warn") {
-      const summary = health.warnings.map((w) => `• ${w.message}`).join("\n");
-      if (!window.confirm(`This file may have issues:\n\n${summary}\n\nUse it anyway?`)) {
-        setStatus("idle");
-        return;
-      }
-    }
-    await upload(file, health);
-  }
-
-  const busy = status !== "idle";
   const label =
-    status === "checking"
+    upload.status === "checking"
       ? "checking whether highlights will work…"
-      : status === "uploading"
+      : upload.status === "uploading"
         ? "uploading…"
         : "upload the club's book or PDF";
 
@@ -282,15 +250,15 @@ function NoBook({
           <h1 className="home-title">{group.displayName}</h1>
           {isOwner ? (
             <label className="home-upload-link">
-              {busy ? <Loading className="loading--inline" /> : label}
+              {upload.busy ? <Loading className="loading--inline" /> : label}
               <input
                 type="file"
                 accept=".epub,application/epub+zip,.pdf,application/pdf"
-                disabled={busy}
+                disabled={upload.busy}
                 hidden
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) void onPick(f);
+                  if (f) void upload.pick(f);
                 }}
               />
             </label>

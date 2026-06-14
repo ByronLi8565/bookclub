@@ -18,7 +18,7 @@
   max-width: 100%;
   border: var(--line);
   background: var(--white);
-  box-shadow: 6px 6px 0 var(--black);
+  box-shadow: var(--shadow-md);
   animation: toast-fade var(--toast-duration) linear forwards;
   pointer-events: auto;
 }
@@ -35,9 +35,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--font-xs);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: var(--letter-label);
 }
 
 .toast-head button {
@@ -66,7 +66,7 @@
   margin: 0;
   padding: 10px 12px;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: var(--font-xs);
   line-height: 1.4;
 }
 

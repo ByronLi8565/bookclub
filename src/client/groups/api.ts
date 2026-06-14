@@ -29,6 +29,7 @@ const SourceMeta = Schema.Struct({
   kind: Schema.Union([Schema.Literal("epub"), Schema.Literal("pdf")]),
   contentType: Schema.String,
   size: Schema.Number,
+  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
 const GroupSummary = Schema.Struct({
@@ -192,13 +193,16 @@ export async function uploadSource(
   name: string,
   file: File,
   health: SourceHealth,
+  title: string | null,
 ): Promise<ApiResult<string>> {
+  const headers: Record<string, string> = {
+    "Content-Type": file.type || EPUB_CONTENT_TYPE,
+    "X-Source-Health": encodeURIComponent(JSON.stringify(health)),
+  };
+  if (title) headers["X-Source-Title"] = encodeURIComponent(title);
   const r = await fetch(`/groups/${name}/book`, {
     method: "PUT",
-    headers: {
-      "Content-Type": file.type || EPUB_CONTENT_TYPE,
-      "X-Source-Health": encodeURIComponent(JSON.stringify(health)),
-    },
+    headers,
     body: file,
   });
   if (!r.ok) return { ok: false, error: await readError(r) };
@@ -206,11 +210,14 @@ export async function uploadSource(
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
 }
 
-// Fetch the group's source bytes (GET /groups/:name/book). Returns null when no
-// source has been uploaded yet (or access is refused). The filename extension
-// reflects the content type so the reader adapter can be chosen from the File.
-export async function fetchSource(name: string): Promise<FetchedSource | null> {
-  const r = await fetch(`/groups/${name}/book`);
+// Fetch a group's source bytes (GET /groups/:name/book). Without a sourceId the
+// club's default (first) book is returned; pass one to load a specific book.
+// Returns null when no source has been uploaded yet (or access is refused). The
+// filename extension reflects the content type so the reader adapter can be
+// chosen from the File.
+export async function fetchSource(name: string, requestId?: string): Promise<FetchedSource | null> {
+  const query = requestId ? `?sourceId=${encodeURIComponent(requestId)}` : "";
+  const r = await fetch(`/groups/${name}/book${query}`);
   if (!r.ok) return null;
   const sourceId = r.headers.get("X-Source-Id");
   const contentType = r.headers.get("Content-Type") ?? EPUB_CONTENT_TYPE;

@@ -3,9 +3,9 @@ import {
   healthOk,
   healthWarn,
   type SourceCapabilities,
-  type SourceHealth,
   type SourceHealthIssue,
 } from "../../shared/types/sourceHealth.ts";
+import type { SourceInspectionResult } from "./admission.ts";
 import { destroyPdf, isPasswordException, loadPdf, pageTextItems, samplePages } from "./pdf.ts";
 
 // A PDF with a usable text layer supports everything; an image-only PDF supports
@@ -29,18 +29,27 @@ const BAD_ENCODING = 0.1;
 // is not encrypted, has an extractable text layer with usable geometry across
 // sampled pages, and classifies risk via warnings. An image-only PDF fails with
 // `no_text_layer` (it would need OCR to host text highlights).
-export async function inspectPdf(file: File): Promise<SourceHealth> {
+export async function inspectPdf(file: File): Promise<SourceInspectionResult> {
   let doc;
   try {
     doc = await loadPdf(await file.arrayBuffer());
   } catch (error) {
     if (isPasswordException(error)) {
-      return healthError([{ code: "encrypted", message: "This PDF is password-protected." }]);
+      return {
+        health: healthError([{ code: "encrypted", message: "This PDF is password-protected." }]),
+        title: null,
+      };
     }
-    return healthError([{ code: "parse_failed", message: "This PDF could not be opened." }]);
+    return {
+      health: healthError([{ code: "parse_failed", message: "This PDF could not be opened." }]),
+      title: null,
+    };
   }
 
   try {
+    const meta = await doc.getMetadata().catch(() => null);
+    const info = meta?.info as { Title?: string } | undefined;
+    const title = info?.Title?.trim() || null;
     const numPages = doc.numPages;
     const pages = samplePages(numPages);
 
@@ -63,15 +72,24 @@ export async function inspectPdf(file: File): Promise<SourceHealth> {
 
     // No text on any sampled page: image-only / scanned. Cannot anchor notes.
     if (pagesWithText === 0) {
-      return healthError([
-        { code: "no_text_layer", message: "This PDF has no selectable text (it looks scanned)." },
-      ]);
+      return {
+        health: healthError([
+          {
+            code: "no_text_layer",
+            message: "This PDF has no selectable text (it looks scanned).",
+          },
+        ]),
+        title,
+      };
     }
     // Text exists but lacks geometry: cannot build rect anchors.
     if (pagesWithGeometry === 0) {
-      return healthError([
-        { code: "anchor_capture_failed", message: "Text in this PDF has no position data." },
-      ]);
+      return {
+        health: healthError([
+          { code: "anchor_capture_failed", message: "Text in this PDF has no position data." },
+        ]),
+        title,
+      };
     }
 
     const warnings: SourceHealthIssue[] = [];
@@ -100,9 +118,9 @@ export async function inspectPdf(file: File): Promise<SourceHealth> {
       });
     }
 
-    return warnings.length > 0
-      ? healthWarn(TEXT_CAPABILITIES, warnings)
-      : healthOk(TEXT_CAPABILITIES);
+    const health =
+      warnings.length > 0 ? healthWarn(TEXT_CAPABILITIES, warnings) : healthOk(TEXT_CAPABILITIES);
+    return { health, title };
   } finally {
     void destroyPdf(doc);
   }

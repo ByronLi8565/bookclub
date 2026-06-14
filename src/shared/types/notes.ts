@@ -8,8 +8,8 @@ export interface NoteAuthor {
 }
 
 export interface Note {
-  id: string; // server ULID (sortable, monotonic per book)
-  seq: number; // human-readable per-book number
+  id: string; // server ULID (sortable, monotonic per club)
+  seq: number; // human-readable per-club number (the NoteAgent serves one club)
   sourceId: string; // the hash of the source this note belongs to
   author: NoteAuthor;
   parent: string | null; // another note id for replies; null for top-level notes

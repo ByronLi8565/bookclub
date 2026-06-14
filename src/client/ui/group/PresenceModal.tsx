@@ -65,8 +65,8 @@ export function PresenceModal({
                     <span className={`presence-pip presence-pip--${p.isOnline ? "on" : "off"}`} />
                   </span>
                   <span className="invite-person-text">
-                    <span className="invite-person-name">{p.name}</span>
-                    {p.email && <span className="invite-person-email">{p.email}</span>}
+                    <span className="invite-person-name truncate">{p.name}</span>
+                    {p.email && <span className="invite-person-email truncate">{p.email}</span>}
                   </span>
                   <span className="invite-person-role">{p.isOnline ? p.role : "offline"}</span>
                 </li>

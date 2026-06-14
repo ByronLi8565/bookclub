@@ -10,6 +10,7 @@ import {
   type SearchMatch,
   type SourceReader,
 } from "../../notes/highlights.ts";
+import { useReaderPrefs } from "../../settings/readerPrefs.ts";
 import {
   destroyPdf,
   loadPdf,
@@ -29,6 +30,23 @@ interface Drawn {
   onClick: () => void;
 }
 
+// Navigation/zoom tunables, grouped so the paging + zoom feel is easy to adjust
+// (or later expose as user settings) without hunting through the adapter.
+const READER_NAV = {
+  // Fraction of the visible height an arrow key scrolls before it turns a page.
+  // 1 = one full screen
+  scrollStepFraction: 1,
+  // px tolerance for treating the page's top/bottom edge as fully in view.
+  edgeEpsilon: 20,
+  // When a page opens, skip its top whitespace and rest the first line this many
+  // CSS px below the pane's top. 0 would pin text flush to the edge.
+  textTopMargin: 24,
+  // Zoom bounds (percent of fit-to-width) and trackpad-pinch sensitivity.
+  minZoom: 50,
+  maxZoom: 400,
+  pinchWheelSensitivity: 0.01,
+} as const;
+
 // The PDF source adapter: a PDF.js single-page view behind the format-agnostic
 // SourceView. Anchors are page + normalized rects; selection, search, and
 // rebind all flow through the page text layer.
@@ -42,6 +60,11 @@ export function usePdfSourceView(
   onSelectRef.current = onSelect;
   const onSwipeRef = useRef(onSwipe);
   onSwipeRef.current = onSwipe;
+  // Smart-arrow mode, mirrored to a ref so the navigation callbacks read the
+  // latest value without being re-created on every preference change.
+  const { smartArrows } = useReaderPrefs();
+  const smartArrowsRef = useRef(smartArrows);
+  smartArrowsRef.current = smartArrows;
 
   const [ready, setReady] = useState(false);
   const [title, setTitle] = useState<string | null>(null);
@@ -54,6 +77,7 @@ export function usePdfSourceView(
   const fontSizeRef = useRef(100);
   fontSizeRef.current = fontSize;
   // DOM layers, built once the container + file are ready.
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
@@ -79,6 +103,39 @@ export function usePdfSourceView(
     geometryRef.current.set(pageNum, geom);
     return geom;
   }, []);
+
+  // The px scroll range that keeps the page's *text* within the pane: `floor`
+  // parks the first line just below the top (trimming the large top margin many
+  // PDFs bake in), `ceil` parks the last line just above the bottom. Both are
+  // clamped to the real scrollable range, so navigation never lands in the page
+  // box's whitespace. Reads cached geometry — the current page is always
+  // rendered, hence cached — and falls back to the full range when absent.
+  const scrollBounds = useCallback((): { floor: number; ceil: number } => {
+    const scroller = scrollerRef.current;
+    const wrap = wrapRef.current;
+    if (!scroller || !wrap) return { floor: 0, ceil: 0 };
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const geom = geometryRef.current.get(pageRef.current);
+    if (!geom || geom.runs.length === 0) return { floor: 0, ceil: maxScroll };
+    const h = wrap.clientHeight;
+    const minY = Math.min(...geom.runs.map((run) => run.y));
+    const maxY = Math.max(...geom.runs.map((run) => run.y + run.height));
+    const floor = Math.min(maxScroll, Math.max(0, minY * h - READER_NAV.textTopMargin));
+    const ceil = Math.max(
+      floor,
+      Math.min(maxScroll, maxY * h + READER_NAV.textTopMargin - scroller.clientHeight),
+    );
+    return { floor, ceil };
+  }, []);
+
+  // Park the current page at the top of its text, ensuring geometry is loaded.
+  const scrollToTextTop = useCallback(async (): Promise<void> => {
+    const pageNum = pageRef.current;
+    await geometryFor(pageNum);
+    const scroller = scrollerRef.current;
+    if (!scroller || pageNum !== pageRef.current) return;
+    scroller.scrollTop = scrollBounds().floor;
+  }, [geometryFor, scrollBounds]);
 
   // Paint overlay divs for the rects of `anchor` (only if it's on the current
   // page) into `layer`, tagged so they can be removed by highlight id.
@@ -209,9 +266,38 @@ export function usePdfSourceView(
       setSelection(null);
       pendingRef.current = null;
       clearComposing();
-      void renderPage();
+      // Park the freshly-rendered page at the top of its text.
+      void renderPage().then(() => scrollToTextTop());
     },
-    [renderPage, location, clearComposing],
+    [renderPage, location, clearComposing, scrollToTextTop],
+  );
+
+  // Scroll within the current page by one capped step, bounded by the page's
+  // *text* (floor = first line, ceil = last line) rather than the raw page box,
+  // returning false when already pinned to that edge so the caller turns the
+  // page. A page whose text fits the viewport reports "at edge" in both
+  // directions, so the first key press turns straight away.
+  const scrollWithinPage = useCallback(
+    (dir: "down" | "up"): boolean => {
+      // "off" disables intra-page scrolling: arrows turn the page immediately.
+      const mode = smartArrowsRef.current;
+      if (mode === "off") return false;
+      const scroller = scrollerRef.current;
+      if (!scroller) return false;
+      const { floor, ceil } = scrollBounds();
+      if (ceil - floor <= READER_NAV.edgeEpsilon) return false;
+      const atDown = scroller.scrollTop >= ceil - READER_NAV.edgeEpsilon;
+      const atUp = scroller.scrollTop <= floor + READER_NAV.edgeEpsilon;
+      if ((dir === "down" && atDown) || (dir === "up" && atUp)) return false;
+      const step = scroller.clientHeight * READER_NAV.scrollStepFraction;
+      const target =
+        dir === "down"
+          ? Math.min(ceil, scroller.scrollTop + step)
+          : Math.max(floor, scroller.scrollTop - step);
+      scroller.scrollTo({ top: target, behavior: mode === "smooth" ? "smooth" : "auto" });
+      return true;
+    },
+    [scrollBounds],
   );
 
   // Load the document and build the DOM layers once the container is mounted.
@@ -227,6 +313,11 @@ export function usePdfSourceView(
     underlineRef.current = null;
     pageRef.current = 1;
 
+    // A scroll container owns overflow so zooming grows the page *inside* the
+    // pane (scrolling/clipping) instead of bursting out of it. The page wrapper
+    // is centered within it.
+    const scroller = document.createElement("div");
+    scroller.className = "pdf-scroller";
     const wrap = document.createElement("div");
     wrap.className = "pdf-page";
     wrap.style.position = "relative";
@@ -248,7 +339,9 @@ export function usePdfSourceView(
     // Canvas (paint) below, overlays above it, text layer on top for selection.
     for (const child of [canvas, highlightLayer, underlineLayer, composingLayer, textLayer])
       wrap.appendChild(child);
-    host.appendChild(wrap);
+    scroller.appendChild(wrap);
+    host.appendChild(scroller);
+    scrollerRef.current = scroller;
     wrapRef.current = wrap;
     canvasRef.current = canvas;
     textLayerRef.current = textLayer;
@@ -269,6 +362,7 @@ export function usePdfSourceView(
         const info = meta?.info as { Title?: string } | undefined;
         setTitle(info?.Title?.trim() || null);
         await renderPage();
+        if (!cancelled) await scrollToTextTop();
         if (!cancelled) setReady(true);
       } catch (error) {
         if (!cancelled) console.error("failed to open pdf", error);
@@ -281,11 +375,12 @@ export function usePdfSourceView(
       const doc = docRef.current;
       docRef.current = null;
       if (doc) void destroyPdf(doc);
-      wrap.remove();
+      scroller.remove();
+      scrollerRef.current = null;
       wrapRef.current = null;
       setReady(false);
     };
-  }, [file, renderPage]);
+  }, [file, renderPage, scrollToTextTop]);
 
   // Surface a selection inside the text layer as a pending anchor + popup. The
   // text layer lives in the top document, so `selectionchange` fires normally.
@@ -322,14 +417,24 @@ export function usePdfSourceView(
 
   const setFontSize = useCallback(
     (pct: number) => {
-      setFontSizeState(pct);
-      fontSizeRef.current = pct;
+      const clamped = Math.min(READER_NAV.maxZoom, Math.max(READER_NAV.minZoom, Math.round(pct)));
+      if (clamped === fontSizeRef.current) return;
+      setFontSizeState(clamped);
+      fontSizeRef.current = clamped;
       void renderPage();
     },
     [renderPage],
   );
-  const next = useCallback(() => goToPage(pageRef.current + 1), [goToPage]);
-  const prev = useCallback(() => goToPage(pageRef.current - 1), [goToPage]);
+  // Advance only once the bottom of the page is in view; otherwise scroll down.
+  const next = useCallback(() => {
+    if (scrollWithinPage("down")) return;
+    goToPage(pageRef.current + 1);
+  }, [scrollWithinPage, goToPage]);
+  // Mirror for going back: scroll up first, then turn to the previous page.
+  const prev = useCallback(() => {
+    if (scrollWithinPage("up")) return;
+    goToPage(pageRef.current - 1);
+  }, [scrollWithinPage, goToPage]);
   const goTo = useCallback(
     (anchor: HighlightAnchor) => {
       if (anchor.kind === "pdf-text") goToPage(anchor.page);
@@ -375,13 +480,65 @@ export function usePdfSourceView(
     dismissSelection();
   }, [dismissSelection]);
 
-  // Swipe to turn pages (mirrors the epub adapter's gesture wiring).
+  // Pinch-to-zoom, scoped to the PDF scroller so it only affects the page (the
+  // browser's own page zoom is suppressed). Trackpad pinches arrive as
+  // ctrl+wheel; touch pinches are tracked from the two-finger distance.
+  useEffect(() => {
+    if (!ready) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return; // a real scroll, leave it to the container
+      e.preventDefault();
+      setFontSize(fontSizeRef.current * (1 - e.deltaY * READER_NAV.pinchWheelSensitivity));
+    };
+    const dist = (t: TouchList) =>
+      Math.hypot(
+        (t[0]?.clientX ?? 0) - (t[1]?.clientX ?? 0),
+        (t[0]?.clientY ?? 0) - (t[1]?.clientY ?? 0),
+      );
+    let pinchStartDist = 0;
+    let pinchStartZoom = 100;
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      pinchStartDist = dist(e.touches);
+      pinchStartZoom = fontSizeRef.current;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || pinchStartDist <= 0) return;
+      e.preventDefault();
+      setFontSize((pinchStartZoom * dist(e.touches)) / pinchStartDist);
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchStartDist = 0;
+    };
+
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+    scroller.addEventListener("touchmove", onTouchMove, { passive: false });
+    scroller.addEventListener("touchend", onTouchEnd);
+    return () => {
+      scroller.removeEventListener("wheel", onWheel);
+      scroller.removeEventListener("touchstart", onTouchStart);
+      scroller.removeEventListener("touchmove", onTouchMove);
+      scroller.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [ready, setFontSize]);
+
+  // Swipe to turn pages (mirrors the epub adapter's gesture wiring). Ignores
+  // multi-touch so it never fires mid-pinch.
   useEffect(() => {
     let startX = 0;
+    let multiTouch = false;
     const host = containerRef.current;
     if (!host) return;
-    const onStart = (e: TouchEvent) => (startX = e.changedTouches[0]?.clientX ?? 0);
+    const onStart = (e: TouchEvent) => {
+      multiTouch = e.touches.length > 1;
+      startX = e.changedTouches[0]?.clientX ?? 0;
+    };
     const onEnd = (e: TouchEvent) => {
+      if (multiTouch || e.touches.length > 0) return;
       const dx = (e.changedTouches[0]?.clientX ?? 0) - startX;
       if (Math.abs(dx) < 60) return;
       onSwipeRef.current?.(dx < 0 ? "left" : "right");
