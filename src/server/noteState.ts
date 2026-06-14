@@ -1,0 +1,148 @@
+import type { Highlight } from "../client/highlights.ts";
+import type { Note } from "../client/notes.ts";
+import { extractReferences } from "../client/references.ts";
+
+// The whole synced state for one Source (book): the notes plus the next
+// human-readable seq to hand out. Pure transitions over this state live here so
+// the note lifecycle can be tested without a durable object; NoteAgent is a thin
+// adapter that applies them and broadcasts the result.
+export interface NoteState {
+  notes: Note[];
+  nextSeq: number;
+}
+
+// The non-deterministic facts a transition needs, injected so transitions stay
+// pure and testable: a fresh sortable id and the current time.
+export interface NoteStamp {
+  id(): string;
+  now(): string;
+}
+
+export function emptyNoteState(): NoteState {
+  return { notes: [], nextSeq: 1 };
+}
+
+export function addNote(
+  state: NoteState,
+  sourceId: string,
+  body: string,
+  highlights: Highlight[],
+  stamp: NoteStamp,
+): NoteState {
+  return append(state, sourceId, null, body, highlights, stamp);
+}
+
+export function addReply(
+  state: NoteState,
+  sourceId: string,
+  parent: string,
+  body: string,
+  stamp: NoteStamp,
+): NoteState {
+  return append(state, sourceId, parent, body, [], stamp);
+}
+
+export function editNote(state: NoteState, id: string, body: string, now: string): NoteState {
+  return setNotes(
+    state,
+    state.notes.map((note) =>
+      note.id === id && note.deletedAt === null
+        ? { ...note, body, editedAt: now, version: note.version + 1 }
+        : note,
+    ),
+  );
+}
+
+// Delete a note. A note is only hard-deleted when nothing depends on it: no
+// replies and no `[[seq]]` references in any other note. Otherwise it becomes a
+// tombstone, so threads stay intact and references never dangle. (No tombstone
+// GC: a tombstone is not reclaimed if its last dependent later disappears.)
+export function removeNote(state: NoteState, id: string, now: string): NoteState {
+  const target = state.notes.find((note) => note.id === id);
+  if (!target) return state;
+
+  const hasChildren = state.notes.some((note) => note.parent === id);
+  const isReferenced = state.notes.some(
+    (note) => note.id !== id && extractReferences(note.body).includes(target.seq),
+  );
+  if (!hasChildren && !isReferenced) {
+    return setNotes(
+      state,
+      state.notes.filter((note) => note.id !== id),
+    );
+  }
+
+  const deletedAtLabel = new Date(now).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return setNotes(
+    state,
+    state.notes.map((note) =>
+      note.id === id
+        ? {
+            ...note,
+            body: `*This note was deleted on ${deletedAtLabel}*`,
+            highlights: [],
+            editedAt: now,
+            deletedAt: now,
+            version: note.version + 1,
+          }
+        : note,
+    ),
+  );
+}
+
+export function rebindHighlight(
+  state: NoteState,
+  noteId: string,
+  highlightId: string,
+  cfi: string,
+): NoteState {
+  return setNotes(
+    state,
+    state.notes.map((note) =>
+      note.id === noteId
+        ? {
+            ...note,
+            highlights: note.highlights.map((h) =>
+              h.id === highlightId ? { ...h, cfi: { ...h.cfi, value: cfi } } : h,
+            ),
+          }
+        : note,
+    ),
+  );
+}
+
+// Replace the note list while preserving the seq counter.
+function setNotes(state: NoteState, notes: Note[]): NoteState {
+  return { notes, nextSeq: state.nextSeq ?? 1 };
+}
+
+// Append a new note (top-level or reply) with the server-authored fields stamped.
+function append(
+  state: NoteState,
+  sourceId: string,
+  parent: string | null,
+  body: string,
+  highlights: Highlight[],
+  stamp: NoteStamp,
+): NoteState {
+  const seq = state.nextSeq ?? 1;
+  const note: Note = {
+    id: stamp.id(),
+    seq,
+    sourceId,
+    author: "local",
+    parent,
+    body,
+    highlights,
+    createdAt: stamp.now(),
+    editedAt: null,
+    deletedAt: null,
+    version: 1,
+  };
+  return { notes: [...state.notes, note], nextSeq: seq + 1 };
+}
