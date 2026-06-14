@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "serve": "vite --port 5173",
     "test:reader": "bombadil test \"http://localhost:5173/?book=/fixtures/dorian.epub\" bombadil/reader.spec.ts --headless --time-limit 90s --exit-on-violation --output-path .bombadil/reader",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
