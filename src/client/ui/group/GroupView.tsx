@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
 import { fetchGroup, redeemInvite, type GroupSummary, type RosterEntry } from "../../groups/api.ts";
 import {
-  currentBookRef,
-  loadCurrentGroupBook,
-  uploadCurrentGroupBook,
-  type LoadedGroupBook,
-} from "../../groups/bookAccess.ts";
+  currentSource,
+  loadCurrentSource,
+  uploadCurrentSource,
+} from "../../groups/sourceAccess.ts";
+import { inspectSource } from "../../sources/admission.ts";
+import type { SourceSummary } from "../../../shared/types/sources.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { Loading } from "../shared/Loading.tsx";
@@ -22,8 +23,8 @@ type View =
   | {
       k: "ready";
       group: GroupSummary;
-      sourceId: string;
-      book: LoadedGroupBook | null;
+      source: SourceSummary;
+      file: File | null;
       isOwner: boolean;
       members: RosterEntry[];
     };
@@ -84,8 +85,8 @@ export function GroupView({
       }
 
       const isOwner = resolved.group.ownerId === userId;
-      const ref = currentBookRef(resolved.group);
-      if (!ref) {
+      const source = currentSource(resolved.group);
+      if (!source) {
         setView({ k: "nobook", group: resolved.group, isOwner });
         return;
       }
@@ -93,19 +94,19 @@ export function GroupView({
       setView({
         k: "ready",
         group: resolved.group,
-        sourceId: ref.sourceId,
-        book: null,
+        source,
+        file: null,
         isOwner,
         members: resolved.members,
       });
-      const book = await loadCurrentGroupBook(resolved.group);
+      const loaded = await loadCurrentSource(resolved.group);
       if (cancelled) return;
-      if (book)
+      if (loaded)
         setView({
           k: "ready",
           group: resolved.group,
-          sourceId: book.sourceId,
-          book,
+          source: loaded.source,
+          file: loaded.file,
           isOwner,
           members: resolved.members,
         });
@@ -138,7 +139,6 @@ export function GroupView({
   if (view.k === "nobook") {
     return (
       <NoBook
-        name={name}
         group={view.group}
         isOwner={view.isOwner}
         onUploaded={() => setReload((n) => n + 1)}
@@ -150,9 +150,9 @@ export function GroupView({
       name={view.group.name}
       groupName={view.group.displayName}
       groupId={view.group.groupId}
-      sourceId={view.book?.sourceId ?? view.sourceId}
-      file={view.book?.file ?? null}
-      bookTitleOverride={view.group.bookTitles[view.book?.sourceId ?? view.sourceId] ?? null}
+      source={view.source}
+      file={view.file}
+      bookTitleOverride={view.group.bookTitles[view.source.id] ?? null}
       members={view.members}
       viewer={{ userId: userId ?? "", isOwner: view.isOwner }}
     />
@@ -201,30 +201,76 @@ function GroupGate({
   );
 }
 
-// The group has no book yet: the owner can upload one; everyone else waits.
+// The group has no source yet: the owner can upload an EPUB or PDF; everyone
+// else waits. Before upload the file is health-checked (source admission): an
+// `error` refuses the file, a `warn` requires confirmation, `ok` uploads.
 function NoBook({
-  name,
   group,
   isOwner,
   onUploaded,
 }: {
-  name: string;
   group: GroupSummary;
   isOwner: boolean;
   onUploaded: () => void;
 }): React.ReactElement {
-  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<"idle" | "checking" | "uploading">("idle");
 
-  async function onPick(file: File): Promise<void> {
-    setBusy(true);
-    const result = await uploadCurrentGroupBook(name, file);
+  // Upload after a health check has cleared (ok, or warn confirmed by the owner).
+  async function upload(
+    file: File,
+    health: Parameters<typeof uploadCurrentSource>[2],
+  ): Promise<void> {
+    setStatus("uploading");
+    const result = await uploadCurrentSource(group, file, health);
     if (result.ok) {
       onUploaded();
     } else {
-      setBusy(false);
-      spawnToast("Upload failed", "Couldn't store that book. Try again.", { type: "error" });
+      setStatus("idle");
+      spawnToast("Upload failed", "Couldn't store that file. Try again.", { type: "error" });
     }
   }
+
+  async function onPick(file: File): Promise<void> {
+    setStatus("checking");
+    const inspection = await inspectSource(file);
+    if (!inspection.ok) {
+      setStatus("idle");
+      spawnToast(
+        "Unsupported file",
+        inspection.reason === "unsupported_type"
+          ? "Choose an EPUB or PDF file."
+          : "That file couldn't be read.",
+        { type: "error" },
+      );
+      return;
+    }
+    const { health } = inspection;
+    if (health.status === "error") {
+      setStatus("idle");
+      spawnToast(
+        "Can't use this file",
+        health.errors[0]?.message ?? "This file can't host anchored notes.",
+        { type: "error" },
+      );
+      return;
+    }
+    if (health.status === "warn") {
+      const summary = health.warnings.map((w) => `• ${w.message}`).join("\n");
+      if (!window.confirm(`This file may have issues:\n\n${summary}\n\nUse it anyway?`)) {
+        setStatus("idle");
+        return;
+      }
+    }
+    await upload(file, health);
+  }
+
+  const busy = status !== "idle";
+  const label =
+    status === "checking"
+      ? "checking whether highlights will work…"
+      : status === "uploading"
+        ? "uploading…"
+        : "upload the club's book or PDF";
 
   return (
     <div className="home">
@@ -236,10 +282,10 @@ function NoBook({
           <h1 className="home-title">{group.displayName}</h1>
           {isOwner ? (
             <label className="home-upload-link">
-              {busy ? <Loading className="loading--inline" /> : "upload the club's book (epub)"}
+              {busy ? <Loading className="loading--inline" /> : label}
               <input
                 type="file"
-                accept=".epub,application/epub+zip"
+                accept=".epub,application/epub+zip,.pdf,application/pdf"
                 disabled={busy}
                 hidden
                 onChange={(e) => {

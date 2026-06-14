@@ -11,7 +11,11 @@ import { useSourceView } from "../../client/ui/reader/useSourceView.ts";
 // This deliberately lives in src/tests: it is test wiring, not shipped UI.
 export function ReaderHarness() {
   const [file, setFile] = useState<File | null>(null);
-  const view = useSourceView(file, () => {});
+  const view = useSourceView(
+    { id: "harness", kind: "epub", contentType: "application/epub+zip" },
+    file,
+    () => {},
+  );
 
   // Same key bindings the workspace wires up, so the keyboard path is covered.
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: view.ready, preventDefault: true });

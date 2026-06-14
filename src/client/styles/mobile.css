@@ -1,0 +1,58 @@
+/* Tighten the topbar so its controls fit a phone width. */
+@media (max-width: 720px) {
+  .topbar {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  /* Let the title take the slack so invite/presence/settings sit at the right. */
+  .topbar h1,
+  .topbar-title-edit {
+    font-size: 16px;
+    letter-spacing: 1px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reader-bar .reader-title {
+    max-width: 50%;
+  }
+
+  /* Declutter the phone view: drop the progress readout, and swap the sync
+       badge for the presence indicator (the people list). */
+  .reader-bar .page-count,
+  .sync-badge {
+    display: none;
+  }
+
+  /* Landing page: simplify the book illustration for a narrow screen — drop the
+     stacked-page shadow and center spine, center the card and its content, and
+     move the bookmark to the left edge. */
+  .home {
+    padding: 24px;
+    transform: translateX(-8px);
+  }
+
+  .home-card {
+    box-shadow: 8px 8px 0 var(--black);
+  }
+
+  .home-card::before {
+    display: none;
+  }
+
+  .home-card::after {
+    left: 10%;
+  }
+
+  .home-main {
+    left: -10px;
+    right: 0;
+    align-items: center;
+    text-align: center;
+    padding: 0 24px;
+  }
+}

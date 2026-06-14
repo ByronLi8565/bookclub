@@ -1,4 +1,5 @@
-import type { Highlight, Note, NoteAuthor } from "../../shared/types/notes.ts";
+import type { Highlight, HighlightAnchor, Note, NoteAuthor } from "../../shared/types/notes.ts";
+import { migrateHighlight, needsHighlightMigration } from "../../shared/types/notes.ts";
 import { extractReferences } from "../../shared/references.ts";
 
 // The whole synced state for one Source (book): the notes plus the next
@@ -118,7 +119,7 @@ export function rebindHighlight(
   state: NoteState,
   noteId: string,
   highlightId: string,
-  cfi: string,
+  anchor: HighlightAnchor,
 ): NoteState {
   return setNotes(
     state,
@@ -126,13 +127,28 @@ export function rebindHighlight(
       note.id === noteId
         ? {
             ...note,
-            highlights: note.highlights.map((h) =>
-              h.id === highlightId ? { ...h, cfi: { ...h.cfi, value: cfi } } : h,
-            ),
+            highlights: note.highlights.map((h) => (h.id === highlightId ? { ...h, anchor } : h)),
           }
         : note,
     ),
   );
+}
+
+// Normalize persisted notes whose highlights predate the anchor model (they
+// carried a `cfi` selector instead of `anchor`). Returns the same reference when
+// nothing needs migrating, so callers can skip a redundant state write.
+export function migrateNoteState(state: NoteState): NoteState {
+  const stale = state.notes.some((note) =>
+    note.highlights.some((h) => needsHighlightMigration(h as never)),
+  );
+  if (!stale) return state;
+  return {
+    ...state,
+    notes: state.notes.map((note) => ({
+      ...note,
+      highlights: note.highlights.map((h) => migrateHighlight(h as never)),
+    })),
+  };
 }
 
 // Replace the note list while preserving the seq counter.

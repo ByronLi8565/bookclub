@@ -1,0 +1,284 @@
+.split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.split-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.split-pane--grow {
+  flex: 1;
+}
+
+.split-divider {
+  width: 0;
+  border-left: var(--line);
+  cursor: col-resize;
+  flex: 0 0 auto;
+  touch-action: none;
+}
+
+.split-divider:hover {
+  border-left-color: var(--black);
+  box-shadow: 0 0 0 2px var(--black);
+}
+
+.split-overlay {
+  position: fixed;
+  inset: 0;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+/* Phone layout: two full-width pages on a swipeable horizontal track, with a
+   segmented tab bar pinned at the bottom. */
+.pager {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pager-track {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  transition: transform 0.25s ease;
+}
+
+.pager-page {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pager-tabs {
+  display: flex;
+  border-top: var(--line);
+  border-bottom: var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pager-tabs button {
+  flex: 1;
+  border: none;
+  min-height: 44px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  background: var(--white);
+  color: var(--black);
+}
+
+.pager-tabs button[aria-pressed="true"] {
+  background: var(--black);
+  color: var(--white);
+}
+
+/* The selection action that replaces the tabs while text is highlighted. */
+.pager-add-note {
+  background: var(--highlight);
+  font-weight: 700;
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  opacity: 0.6;
+}
+
+.loading-text {
+  display: inline-flex;
+}
+
+.loading-dots span {
+  animation: loading-dot 1.2s steps(2, end) infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.loading-progress {
+  display: block;
+  width: min(180px, 100%);
+  height: 8px;
+  border: var(--line);
+  background: var(--white);
+}
+
+.loading-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--black);
+}
+
+.loading--app {
+  height: 100%;
+}
+
+.loading--home-clubs {
+  align-items: flex-start;
+}
+
+.loading--note-panel {
+  min-height: 140px;
+}
+
+.loading--reader {
+  position: absolute;
+  inset: 0;
+}
+
+.loading--invite-people {
+  min-height: 64px;
+}
+
+.loading--invite-link,
+.loading--settings-detail {
+  min-height: 34px;
+}
+
+.loading--inline {
+  display: inline-flex;
+  min-height: 0;
+  align-items: flex-start;
+  opacity: 1;
+}
+
+@keyframes loading-dot {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  40%,
+  100% {
+    opacity: 1;
+  }
+}
+
+.login {
+  text-align: right;
+}
+
+.login--authed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-email {
+  font-weight: 700;
+}
+
+.login-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.login-link:hover {
+  background: none;
+  color: var(--black);
+  text-decoration: none;
+}
+
+.login-error {
+  margin: 8px 0 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 35%);
+  padding: 20px;
+}
+
+.modal {
+  width: min(380px, 100%);
+  background: var(--white);
+  border: var(--line);
+  box-shadow: 8px 8px 0 var(--black);
+}
+
+.modal-head {
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--line);
+}
+
+.modal-head strong {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.modal-head button {
+  border: none;
+  border-left: var(--line);
+  padding: 0 12px;
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-body form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.modal-body input {
+  font: inherit;
+  border: var(--line);
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.modal-body .primary {
+  font-weight: 700;
+}
+
+.modal-note {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.modal-success {
+  margin: 0;
+  font-weight: 700;
+  text-align: center;
+}
+
+.modal--invite {
+  width: min(460px, 100%);
+}

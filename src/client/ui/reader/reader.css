@@ -1,0 +1,244 @@
+.reader {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.reader-empty {
+  margin: auto;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.reader-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: var(--line);
+}
+
+.reader-bar .spacer {
+  flex: 1;
+}
+
+.reader-bar .font-size {
+  min-width: 48px;
+  text-align: center;
+}
+
+.reader-bar .reader-title {
+  font-weight: 700;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-bar .page-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.reader-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: var(--line);
+}
+
+.reader-search-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 4px 8px;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+}
+
+.reader-search-input:focus {
+  outline: none;
+}
+
+.reader-search-count {
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.reader-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.reader-surface {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.reader-surface .reader-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.reader-page-turn {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: clamp(44px, 7vw, 84px);
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.reader-page-turn:hover {
+  background: transparent;
+}
+
+.reader-page-turn:focus-visible {
+  outline: 2px solid var(--black);
+  outline-offset: -6px;
+}
+
+.reader-page-turn--prev {
+  left: 0;
+}
+
+.reader-page-turn--next {
+  right: 0;
+}
+
+/* Wider page-turn hit zones on touch, where taps are less precise. */
+@media (pointer: coarse) {
+  .reader-page-turn {
+    width: 64px;
+  }
+}
+
+.bc-highlight {
+  fill: var(--highlight);
+  fill-opacity: 0.4;
+  /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
+     larger font reflows it across more lines) and keeps the text readable. */
+  mix-blend-mode: multiply;
+}
+
+/* Search hits are underlined (epub.js draws them as SVG lines), a separate
+   annotation type from note highlights so the two never collide. */
+.bc-search {
+  stroke: var(--red);
+  stroke-width: 2px;
+}
+
+/* PDF reader: the page wrapper centers the canvas; the text layer sits over it
+   for selection, and two absolutely-positioned overlay layers paint note
+   highlights and search underlines from normalized rects. */
+.pdf-page {
+  position: relative;
+}
+
+/* Text-layer rules ported from pdfjs-dist/web/pdf_viewer.css: PDF.js positions
+   each run with `left`/`top` and sizes it through the `--total-scale-factor` /
+   `--font-height` custom properties, so these `font-size`/`transform` rules are
+   load-bearing. Without them the transparent spans render mis-sized and the
+   native selection paints as solid, mis-placed blocks. */
+.pdf-page .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pdf-page .textLayer :is(span, br) {
+  position: absolute;
+  white-space: pre;
+  color: transparent;
+  transform-origin: 0% 0%;
+  cursor: text;
+}
+
+.pdf-page .textLayer > :not(.markedContent),
+.pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.pdf-page .textLayer .markedContent {
+  display: contents;
+}
+
+/* Hide the native selection: while dragging we paint a live "composing" overlay
+   (identical rects to a saved highlight) so the in-progress selection looks
+   exactly like the eventual highlight instead of a full-opacity, gap-filling
+   browser selection. */
+.pdf-page .textLayer ::selection {
+  background: transparent;
+}
+
+/* The overlay layers; the canvas paints below, the text layer selects above. */
+.pdf-highlights,
+.pdf-underlines,
+.pdf-composing {
+  z-index: 1;
+}
+
+/* PDF note highlights are tinted div rects (the epub `.bc-highlight` uses SVG
+   fill, which doesn't apply to divs, so the PDF layer styles its own). The
+   live composing overlay reuses the same look so dragging matches the result.
+
+   Translucency + blend live on the *layer*, not the rects: the layer flattens
+   its opaque, same-color rects first, so rects that overlap line-to-line don't
+   compound into darker bands, and the composing/saved layers look identical. */
+.pdf-highlights,
+.pdf-composing {
+  opacity: 0.4;
+  mix-blend-mode: multiply;
+}
+
+.pdf-highlights .bc-highlight,
+.pdf-composing .bc-highlight {
+  background: var(--highlight);
+  /* Override the epub base rule's multiply; blending is done at the layer. */
+  mix-blend-mode: normal;
+}
+
+.pdf-underlines .bc-search {
+  border-bottom: 2px solid var(--red);
+}
+
+.add-note {
+  position: fixed;
+  transform: translate(-50%, 8px);
+  z-index: 10;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--white);
+  border: var(--line);
+  box-shadow: 4px 4px 0 var(--black);
+  touch-action: manipulation;
+}

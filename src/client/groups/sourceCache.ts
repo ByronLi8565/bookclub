@@ -1,9 +1,9 @@
-import { EPUB_CONTENT_TYPE } from "../../server/services/books.ts";
-
-// A small IndexedDB cache for book bytes, keyed by sourceId (the content hash, so
-// entries never go stale). Lets a page reload reuse the local copy instead of
-// re-downloading from R2. All operations are best-effort: any failure (private
-// mode, quota, unsupported) degrades gracefully to a network fetch.
+// A small IndexedDB cache for source bytes, keyed by sourceId (the content hash,
+// so entries never go stale). Lets a page reload reuse the local copy instead of
+// re-downloading from R2. The File is stored directly, preserving its name and
+// content type, so EPUB and PDF round-trip without losing their kind. All
+// operations are best-effort: any failure (private mode, quota, unsupported)
+// degrades gracefully to a network fetch.
 
 const DB_NAME = "bookclub";
 const STORE = "books";
@@ -17,14 +17,21 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function getCachedBook(sourceId: string): Promise<File | null> {
+export async function getCachedSource(sourceId: string): Promise<File | null> {
   try {
     const db = await openDb();
     return await new Promise((resolve, reject) => {
       const req = db.transaction(STORE, "readonly").objectStore(STORE).get(sourceId);
       req.addEventListener("success", () => {
-        const blob = req.result as Blob | undefined;
-        resolve(blob ? new File([blob], `${sourceId}.epub`, { type: EPUB_CONTENT_TYPE }) : null);
+        const value = req.result as File | Blob | undefined;
+        if (!value) return resolve(null);
+        // A File round-trips as-is (name + type preserved). A legacy Blob entry
+        // (pre-PDF) is wrapped as an EPUB file, matching how it was stored.
+        resolve(
+          value instanceof File
+            ? value
+            : new File([value], `${sourceId}.epub`, { type: "application/epub+zip" }),
+        );
       });
       req.addEventListener("error", () => reject(req.error));
     });
@@ -33,7 +40,7 @@ export async function getCachedBook(sourceId: string): Promise<File | null> {
   }
 }
 
-export async function deleteCachedBook(sourceId: string): Promise<void> {
+export async function deleteCachedSource(sourceId: string): Promise<void> {
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
@@ -47,7 +54,7 @@ export async function deleteCachedBook(sourceId: string): Promise<void> {
   }
 }
 
-export async function putCachedBook(sourceId: string, file: File): Promise<void> {
+export async function putCachedSource(sourceId: string, file: File): Promise<void> {
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Highlight } from "../client/notes/highlights.ts";
+import { epubAnchor, type Highlight } from "../client/notes/highlights.ts";
 import type { Note, NoteAuthor } from "../shared/types/notes.ts";
 import {
   addNote,
@@ -26,11 +26,7 @@ function highlight(id: string): Highlight {
   return {
     id,
     sourceId: "book",
-    cfi: {
-      type: "FragmentSelector",
-      conformsTo: "http://www.idpf.org/epub/linking/cfi/epub-cfi.html",
-      value: "cfi-1",
-    },
+    anchor: epubAnchor("cfi-1"),
     quote: { type: "TextQuoteSelector", exact: "x", prefix: "", suffix: "" },
     createdAt: "2026-01-01T00:00:00.000Z",
   };
@@ -115,12 +111,12 @@ describe("editNote", () => {
 });
 
 describe("rebindHighlight", () => {
-  it("updates a single embedded highlight's cfi value", () => {
+  it("updates a single embedded highlight's anchor", () => {
     const base = addNote(emptyNoteState(), "book", ALICE, "n", [highlight("h1")], fakeStamp());
 
-    const next = rebindHighlight(base, "id-1", "h1", "cfi-fresh");
+    const next = rebindHighlight(base, "id-1", "h1", epubAnchor("cfi-fresh"));
 
-    expect((next.notes[0] as Note).highlights[0]?.cfi.value).toBe("cfi-fresh");
+    expect((next.notes[0] as Note).highlights[0]?.anchor).toEqual(epubAnchor("cfi-fresh"));
   });
 });
 

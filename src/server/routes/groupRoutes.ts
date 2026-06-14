@@ -1,9 +1,8 @@
 import type { Hono } from "hono";
-import { EPUB_CONTENT_TYPE } from "../services/books.ts";
 import type { Env } from "../env.ts";
 import {
   createGroup,
-  fetchBook,
+  fetchSource,
   inviteByEmail,
   inviteLink,
   listMyGroups,
@@ -11,7 +10,7 @@ import {
   renameBookTitle,
   renameGroupTitle,
   resolveGroupView,
-  uploadBook,
+  uploadSource,
   type WorkflowFailure,
 } from "../workflows/groupWorkflows.ts";
 import { readJson } from "../util/http.ts";
@@ -88,20 +87,20 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-  // Owner-only: upload the group's book. Bytes are stored in R2 by content hash
-  // (dedup) and the hash is bound to the group as its source (decision 13).
+  // Owner-only: upload the group's source (EPUB or PDF). Bytes are stored in R2
+  // by content hash (dedup) and bound to the group as its source (decision 13).
   app.put("/groups/:name/book", async (c) => {
-    const result = await uploadBook(c.env, c.req.raw, c.req.param("name"));
+    const result = await uploadSource(c.env, c.req.raw, c.req.param("name"));
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-  // Member-only: stream the group's bound book from R2. 404 until the owner has
-  // uploaded one.
+  // Member-only: stream the group's bound source from R2. 404 until the owner
+  // has uploaded one. The content type reflects the stored source kind.
   app.get("/groups/:name/book", async (c) => {
-    const result = await fetchBook(c.env, c.req.raw, c.req.param("name"));
+    const result = await fetchSource(c.env, c.req.raw, c.req.param("name"));
     if (!result.ok) return workflowError(result);
     return new Response(result.value.object.body, {
-      headers: { "Content-Type": EPUB_CONTENT_TYPE, "X-Source-Id": result.value.hash },
+      headers: { "Content-Type": result.value.contentType, "X-Source-Id": result.value.hash },
     });
   });
 }

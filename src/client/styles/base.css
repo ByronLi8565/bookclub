@@ -1,0 +1,69 @@
+:root {
+  --black: #000;
+  --white: #fff;
+  --gray: #777;
+  --red: #d60000;
+  --highlight: #ffe600;
+
+  --line: 3px solid var(--black);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* The app is a fixed full-screen shell; scrolling happens inside panes (note
+   list, reader), never on the page. Lock both axes so swipes and the layout
+   don't fight page scroll or rubber-band. */
+html,
+body {
+  overflow: hidden;
+  max-width: 100vw;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--white);
+  color: var(--black);
+}
+
+button {
+  font: inherit;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+button:disabled {
+  color: var(--gray);
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: var(--white);
+  color: var(--gray);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Dynamic viewport height so the layout (and the flush bottom tab bar) tracks
+     iOS Safari's collapsing toolbar instead of leaving a gap. */
+  height: 100dvh;
+}

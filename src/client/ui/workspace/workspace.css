@@ -1,0 +1,140 @@
+/* Settings button, sits at the right end of the workspace toolbar. */
+.settings-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+}
+
+.settings-button img {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.settings-item-head {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.settings-detail {
+  margin: 0 0 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+
+.settings-detail dt {
+  font-weight: 700;
+}
+
+.settings-detail dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.settings-detail-status {
+  margin: 0 0 12px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: var(--line);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 2px;
+  cursor: text;
+}
+
+.topbar-title-edit {
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: var(--line);
+  padding: 0 6px;
+  background: var(--white);
+}
+
+.picker {
+  border: var(--line);
+  padding: 6px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.picker input {
+  display: none;
+}
+
+.presence-indicator {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: var(--line);
+  padding: 4px 10px;
+  background: var(--white);
+  cursor: pointer;
+}
+
+.presence-count {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.presence-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--black);
+  border-radius: 50%;
+  background: #2ecc40;
+}
+
+.sync-badge {
+  border: var(--line);
+  padding: 4px 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.sync-badge--online {
+  background: var(--black);
+  color: var(--white);
+}
+
+.sync-badge--syncing {
+  background: var(--white);
+  color: var(--black);
+}
+
+.sync-badge--offline {
+  background: var(--red);
+  color: var(--white);
+}
+
+.topbar-home {
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
+}
+
+.topbar-invite {
+  font: inherit;
+  border: var(--line);
+  padding: 2px 10px;
+  background: var(--white);
+  cursor: pointer;
+}

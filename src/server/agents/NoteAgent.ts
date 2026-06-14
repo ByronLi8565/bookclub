@@ -7,7 +7,7 @@ import {
   getCurrentAgent,
 } from "agents";
 import { monotonicFactory } from "ulidx";
-import type { Highlight } from "../../shared/types/notes.ts";
+import type { Highlight, HighlightAnchor } from "../../shared/types/notes.ts";
 import type { GroupRole } from "../../shared/types/groups.ts";
 import type { Env } from "../env.ts";
 import { currentIdentity } from "../auth/cookies.ts";
@@ -16,6 +16,7 @@ import {
   addReply,
   editNote,
   emptyNoteState,
+  migrateNoteState,
   rebindHighlight,
   removeNote,
   type NoteStamp,
@@ -66,6 +67,10 @@ export class NoteAgent extends Agent<Env, NoteState> {
     const group = await getAgentByName(this.env.GroupAgent, this.name);
     const { isMember, role } = await group.membership(me.id);
     if (!isMember || role === null) return connection.close(1008, "forbidden");
+    // Migrate any legacy (cfi-only) highlights to the anchor model before the
+    // client subscribes; a no-op once state is already current.
+    const migrated = migrateNoteState(this.state);
+    if (migrated !== this.state) this.setState(migrated);
     connection.setState({ userId: me.id, name: me.name, role } satisfies ConnIdentity);
     this.broadcastPresence();
   }
@@ -123,7 +128,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
   }
 
   @callable()
-  rebindHighlight(noteId: string, highlightId: string, cfiValue: string): void {
-    this.setState(rebindHighlight(this.state, noteId, highlightId, cfiValue));
+  rebindHighlight(noteId: string, highlightId: string, anchor: HighlightAnchor): void {
+    this.setState(rebindHighlight(this.state, noteId, highlightId, anchor));
   }
 }

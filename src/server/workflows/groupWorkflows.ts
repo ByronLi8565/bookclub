@@ -1,8 +1,14 @@
 import { getAgentByName } from "agents";
 import { Effect } from "effect";
 import { monotonicFactory } from "ulidx";
-import type { GroupRole, GroupSummary, RosterEntry } from "../../shared/types/groups.ts";
-import { getBook, storeBook } from "../services/books.ts";
+import type {
+  GroupRole,
+  GroupSummary,
+  RosterEntry,
+  SourceMeta,
+} from "../../shared/types/groups.ts";
+import { currentSource } from "../../shared/sources.ts";
+import { getSource, storeSource } from "../services/sources.ts";
 import { sendInvite } from "../services/email.ts";
 import type { Env } from "../env.ts";
 import type { Identity } from "../agents/GroupAgent.ts";
@@ -83,6 +89,7 @@ type Group = {
   addSource(
     callerId: string,
     sourceId: string,
+    meta: SourceMeta,
   ):
     | { ok: true; summary: GroupSummary }
     | { ok: false; reason: "not_owner" | "not_found" }
@@ -316,7 +323,7 @@ export async function redeemInvite(
   );
 }
 
-export async function uploadBook(
+export async function uploadSource(
   env: Env,
   request: Request,
   rawName: string,
@@ -327,30 +334,38 @@ export async function uploadBook(
       const { group, summary } = yield* requireGroup(env, rawName);
       if (summary.ownerId !== me.id) return yield* Effect.fail(fail(403, "not_owner"));
       const bytes = yield* tryPromise(() => request.arrayBuffer());
-      if (bytes.byteLength === 0) return yield* Effect.fail(fail(400, "empty"));
-      const hash = yield* tryPromise(() => storeBook(env, bytes));
-      yield* tryPromise(async () => group.addSource(me.id, hash));
-      return { hash };
+      const contentType = request.headers.get("Content-Type");
+      const stored = yield* tryPromise(() => storeSource(env, bytes, contentType));
+      if (!stored.ok) {
+        return yield* Effect.fail(
+          stored.reason === "empty" ? fail(400, "empty") : fail(400, "unsupported_type"),
+        );
+      }
+      const { id, kind, contentType: storedType, size } = stored.source;
+      yield* tryPromise(async () =>
+        group.addSource(me.id, id, { kind, contentType: storedType, size }),
+      );
+      return { hash: id };
     }),
   );
 }
 
-export async function fetchBook(
+export async function fetchSource(
   env: Env,
   request: Request,
   rawName: string,
-): Promise<WorkflowResult<{ hash: string; object: R2ObjectBody }>> {
+): Promise<WorkflowResult<{ hash: string; contentType: string; object: R2ObjectBody }>> {
   return runWorkflow(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, rawName);
       const { isMember } = yield* tryPromise(async () => group.membership(me.id));
       if (!isMember) return yield* Effect.fail(fail(403, "forbidden"));
-      const hash = summary.sources[0];
-      if (!hash) return yield* Effect.fail(fail(404, "no_book"));
-      const object = yield* tryPromise(() => getBook(env, hash));
+      const source = currentSource(summary);
+      if (!source) return yield* Effect.fail(fail(404, "no_book"));
+      const object = yield* tryPromise(() => getSource(env, source.id));
       if (!object) return yield* Effect.fail(fail(404, "no_book"));
-      return { hash, object };
+      return { hash: source.id, contentType: source.contentType, object };
     }),
   );
 }

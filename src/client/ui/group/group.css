@@ -1,0 +1,177 @@
+.invite-link {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.invite-link input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  border: var(--line);
+  padding: 4px 8px;
+  background: var(--white);
+}
+
+.invite-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: var(--line);
+  background: var(--white);
+  cursor: pointer;
+}
+
+.invite-icon:hover:not(:disabled) {
+  background: var(--black);
+  color: var(--white);
+}
+
+.invite-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.invite-share {
+  margin-top: 16px;
+  border-top: var(--line);
+  padding-top: 12px;
+}
+
+.invite-people-head {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.invite-people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invite-people-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.invite-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: var(--line);
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.presence-pip {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--white);
+  border-radius: 50%;
+}
+
+.presence-pip--on {
+  background: #2ecc40;
+}
+
+.presence-pip--off {
+  background: var(--gray);
+}
+
+.invite-person-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.invite-person-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invite-person-email {
+  font-size: 11px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invite-person-role {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.person--offline {
+  opacity: 0.5;
+}
+
+.group-context {
+  padding: 8px 0 10px;
+  border-bottom: var(--line);
+  margin-bottom: 8px;
+}
+
+.group-book {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-book-title {
+  font-weight: 700;
+}
+
+.group-book-rename {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.6;
+}
+
+.group-book-rename:hover {
+  opacity: 1;
+}
+
+.group-book-edit {
+  display: flex;
+  gap: 6px;
+}
+
+.group-book-edit input {
+  font: inherit;
+  border: var(--line);
+  padding: 2px 8px;
+  background: var(--white);
+}
+
+.group-roster {
+  margin: 6px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
+}

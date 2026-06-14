@@ -2,10 +2,11 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
+import type { SourceRef } from "../../shared/types/sources.ts";
 import { renameGroup, type RosterEntry } from "../groups/api.ts";
 import { useNoteAgent } from "../notes/agent.ts";
 import { buildConversation } from "../notes/conversation.ts";
-import { captureHighlight, type Highlight } from "../notes/highlights.ts";
+import { captureHighlight, type Highlight, type HighlightAnchor } from "../notes/highlights.ts";
 import { effectiveHighlight, noteSnippet } from "../notes/render.ts";
 import { InviteModal } from "../ui/group/InviteModal.tsx";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
@@ -33,9 +34,9 @@ export interface WorkspaceProps {
   name: string; // the group's URL name (for invite/title APIs)
   groupName: string; // the group's display name
   groupId: string;
-  sourceId: string;
+  source: SourceRef; // the bound source (content hash + kind + content type)
   file: File | null;
-  // A member-set book title override, if any (else the epub metadata title).
+  // A member-set source title override, if any (else the source metadata title).
   bookTitleOverride: string | null;
   members: RosterEntry[];
   // The signed-in caller, used to gate edit/delete affordances (decision 7).
@@ -46,11 +47,12 @@ export function Workspace({
   name,
   groupName,
   groupId,
-  sourceId,
+  source,
   file,
   members,
   viewer,
 }: WorkspaceProps) {
+  const sourceId = source.id;
   const [inviting, setInviting] = useState(false);
   const [showingPresence, setShowingPresence] = useState(false);
   // Phone layout: which of the two swipeable pages is showing (decision: a
@@ -73,10 +75,11 @@ export function Workspace({
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
 
-  const onSelectRef = useRef<(cfi: string, range: Range) => void>(() => {});
+  const onSelectRef = useRef<(anchor: HighlightAnchor, range: Range) => void>(() => {});
   const view = useSourceView(
+    source,
     file,
-    (cfi, range) => onSelectRef.current(cfi, range),
+    (anchor, range) => onSelectRef.current(anchor, range),
     (dir) => setPane(dir === "left" ? "notes" : "reader"),
   );
 
@@ -86,24 +89,24 @@ export function Workspace({
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: view.ready, preventDefault: true });
   useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open });
 
-  // Which embedded highlights are currently painted on the rendition, mapped to
-  // the cfi they were drawn at, so the sync effect can diff against live state.
-  const drawnRef = useRef<Map<string, string>>(new Map());
+  // Which embedded highlights are currently painted on the reader, mapped to the
+  // anchor they were drawn at, so the sync effect can diff against live state.
+  const drawnRef = useRef<Map<string, HighlightAnchor>>(new Map());
 
   // Add Note: capture the highlight synchronously (never retain the live range),
   // paint it, and arm the compose slot. The note is created only on save.
-  onSelectRef.current = (cfi, range) => {
+  onSelectRef.current = (anchor, range) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
-    Effect.runPromise(captureHighlight(sid, cfi, range)).then((highlight) => {
+    Effect.runPromise(captureHighlight(sid, anchor, range)).then((highlight) => {
       // Replace any in-flight compose: erase its orphaned paint first.
       const prev = composingRef.current;
       if (prev) {
-        view.eraseHighlight(prev.cfi.value);
+        view.eraseHighlight(prev.id);
         drawnRef.current.delete(prev.id);
       }
-      view.drawHighlight(highlight.id, highlight.cfi.value, () => view.goTo(highlight.cfi.value));
-      drawnRef.current.set(highlight.id, highlight.cfi.value);
+      view.drawHighlight(highlight.id, highlight.anchor, () => view.goTo(highlight.anchor));
+      drawnRef.current.set(highlight.id, highlight.anchor);
       setComposing(highlight);
       // Pressing "Add Note" takes you to the notes page to write the note.
       setPane("notes");
@@ -119,7 +122,7 @@ export function Workspace({
   function onComposeCancel() {
     const highlight = composingRef.current;
     if (highlight) {
-      view.eraseHighlight(highlight.cfi.value);
+      view.eraseHighlight(highlight.id);
       drawnRef.current.delete(highlight.id);
     }
     setComposing(null);
@@ -155,8 +158,8 @@ export function Workspace({
     if (comp) desired.push({ noteId: null, highlight: comp });
 
     const painter: HighlightPainter = {
-      draw: (id, cfi) => view.drawHighlight(id, cfi, () => view.goTo(cfi)),
-      erase: (cfi) => view.eraseHighlight(cfi),
+      draw: (id, anchor) => view.drawHighlight(id, anchor, () => view.goTo(anchor)),
+      erase: (id) => view.eraseHighlight(id),
     };
 
     void updateHighlights(desired, drawnRef.current, {
@@ -219,7 +222,7 @@ export function Workspace({
     (note: Note) => {
       const hl = effectiveHighlight(note, byId);
       if (hl) {
-        goTo(hl.cfi.value);
+        goTo(hl.anchor);
         setPane("reader"); // follow the highlight to the reader page
       }
       flashNote(note.seq);
@@ -235,7 +238,7 @@ export function Workspace({
       if (!target) return;
       const hl = effectiveHighlight(target, byId);
       if (hl) {
-        goTo(hl.cfi.value);
+        goTo(hl.anchor);
         setPane("reader"); // a reference jumps the reader to the cited highlight
       }
       flashNote(seq);

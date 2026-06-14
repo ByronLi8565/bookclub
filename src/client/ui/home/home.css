@@ -1,0 +1,211 @@
+.home {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+}
+
+.home-card {
+  position: relative;
+  width: min(900px, 92vw);
+  height: min(560px, 82vh);
+  background: var(--white);
+  border: var(--line);
+  /* Stacked offset rectangles fake a block of pages on the lower-right edge,
+     finished with the original hard drop shadow. */
+  box-shadow:
+    5px 5px 0 0 var(--white),
+    5px 5px 0 3px var(--black),
+    10px 10px 0 0 var(--white),
+    10px 10px 0 3px var(--black),
+    15px 15px 0 0 var(--white),
+    15px 15px 0 3px var(--black),
+    20px 20px 0 0 var(--black);
+}
+
+/* The center spine: makes the card read like an open book. */
+.home-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: var(--line);
+  transform: translateX(-50%);
+}
+
+/* A red ribbon bookmark poking out of the top of the book. */
+.home-card::after {
+  content: "";
+  position: absolute;
+  top: -42px;
+  left: 90%;
+  width: 36px;
+  height: 70px;
+  background: var(--red);
+  border: var(--line);
+  border-radius: 4px 4px 8px 8px;
+  z-index: -1;
+}
+
+.home-corner {
+  position: absolute;
+}
+
+.home-corner--login {
+  top: 18px;
+  right: 22px;
+}
+
+.home-corner--credit {
+  bottom: 18px;
+  right: 22px;
+  font-weight: 700;
+}
+
+.home-main {
+  position: absolute;
+  left: 48px;
+  top: 52%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.home-title {
+  margin: 0 0 10px;
+  font-size: clamp(40px, 8vw, 72px);
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+.home-action {
+  font-size: 15px;
+}
+
+/* Black square back button in the top-left corner of a club card. */
+.home-back {
+  position: absolute;
+  top: 18px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  background: var(--black);
+  color: var(--white);
+  border: var(--line);
+}
+
+.home-back:hover {
+  background: var(--white);
+  color: var(--black);
+}
+
+/* The upload affordance reads as a clickable blue link. */
+.home-upload-link {
+  align-self: flex-start;
+  font-size: 15px;
+  color: #0000ee;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.home-create {
+  display: flex;
+  align-items: stretch;
+}
+
+.home-create input {
+  font: inherit;
+  border: var(--line);
+  border-radius: 0;
+  outline: none;
+  padding: 4px 10px;
+  background: var(--white);
+}
+
+.home-create-confirm {
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  line-height: 1;
+  width: 34px;
+  padding: 0;
+  /* Sit flush against the input, sharing the border edge. */
+  border-left: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-create-confirm:hover {
+  background: var(--white);
+  color: var(--black);
+}
+
+/* Keep the plus on its black square (and white) even while disabled. */
+.home-create-confirm:disabled,
+.home-create-confirm:disabled:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+.home-clubs {
+  margin-top: 8px;
+}
+
+.home-club-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-club-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-existing {
+  display: flex;
+  align-items: stretch;
+  border: var(--line);
+  padding: 0;
+}
+
+.home-existing-label {
+  align-self: center;
+  padding: 4px 10px;
+}
+
+/* The club picker sits to the right of the label, divided by the box's interior
+   separator. */
+.home-existing select {
+  font: inherit;
+  border: none;
+  border-left: var(--line);
+  padding: 4px 10px;
+  background: var(--white);
+  cursor: pointer;
+}
+
+/* Grayed out until signed in. */
+.home-existing:has(select:disabled) {
+  color: var(--gray);
+}
+
+.home-existing select:disabled {
+  color: var(--gray);
+  cursor: not-allowed;
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { cachedBookSize, refreshGroupBook } from "../../groups/bookAccess.ts";
+import { cachedSourceSize, refreshSource } from "../../groups/sourceAccess.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
@@ -38,7 +38,7 @@ export function SettingsModal({
 
   useEffect(() => {
     let cancelled = false;
-    void cachedBookSize(book.sourceId).then((size) => {
+    void cachedSourceSize(book.sourceId).then((size) => {
       if (cancelled) return;
       setCachedSize(size);
       setLoading(false);
@@ -50,7 +50,7 @@ export function SettingsModal({
 
   async function onRedownload(): Promise<void> {
     setBusy(true);
-    const result = await refreshGroupBook({ groupName: book.name, sourceId: book.sourceId });
+    const result = await refreshSource(book.name, book.sourceId);
     setBusy(false);
     if (result.ok) {
       spawnToast("Book redownloaded", "The local copy was refreshed from storage.", {

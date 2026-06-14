@@ -1,9 +1,13 @@
 import * as Effect from "effect/Effect";
-import type { Highlight, QuoteSelector } from "../../shared/types/notes.ts";
-import { cfiSelector } from "../../shared/types/notes.ts";
+import type { Highlight, HighlightAnchor, QuoteSelector } from "../../shared/types/notes.ts";
 
-export type { CfiSelector, Highlight, QuoteSelector } from "../../shared/types/notes.ts";
-export { cfiSelector } from "../../shared/types/notes.ts";
+export type {
+  Highlight,
+  HighlightAnchor,
+  PdfRect,
+  QuoteSelector,
+} from "../../shared/types/notes.ts";
+export { epubAnchor, pdfAnchor } from "../../shared/types/notes.ts";
 
 // Snap a selection out to whole words, so a sloppy drag still yields a clean
 // highlight. Only text-node endpoints are adjusted; element boundaries are left
@@ -32,9 +36,10 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
-// Position for the "Add Note" popup, given the selection rect (in the epub
-// iframe's viewport) and the iframe element's rect (in the top document). The
-// point is clamped into the visible visual viewport, which on iOS can be
+// Position for the "Add Note" popup, given the selection rect (in the reader
+// surface's viewport) and the frame element's rect (in the top document, for an
+// epub iframe; undefined when the text layer is in the top document). The point
+// is clamped into the visible visual viewport, which on iOS can be
 // offset/zoomed relative to the layout viewport, so the popup stays on-screen.
 export function popupPoint(rect: DOMRect, frame: DOMRect | undefined): { x: number; y: number } {
   const vv = window.visualViewport;
@@ -52,8 +57,10 @@ export function popupPoint(rect: DOMRect, frame: DOMRect | undefined): { x: numb
 // How much surrounding context to capture on each side of the exact text.
 const CONTEXT = 32;
 
-// Derive a QuoteSelector (exact + prefix + suffix) from a live DOM Range.
-function deriveQuote(range: Range): QuoteSelector {
+// Derive a QuoteSelector (exact + prefix + suffix) from a live DOM Range. Shared
+// by both reader adapters: epub spine documents and pdf text-layer documents are
+// both DOM, so the same context extraction applies.
+export function deriveQuote(range: Range): QuoteSelector {
   const doc = range.startContainer.ownerDocument;
   const root = doc?.body;
   if (!root) {
@@ -76,63 +83,43 @@ function deriveQuote(range: Range): QuoteSelector {
   };
 }
 
-// Turn a selection (cfi + live range) into a Highlight. The id is a local
-// placeholder; the server will assign the canonical ulid in a later step.
+// Turn a selection (a kind-specific anchor + the live range) into a Highlight.
+// The id is a local placeholder; the server assigns the canonical ulid later.
 export const captureHighlight = (
   sourceId: string,
-  cfi: string,
+  anchor: HighlightAnchor,
   range: Range,
 ): Effect.Effect<Highlight> =>
   Effect.sync(() => ({
     id: crypto.randomUUID(),
     sourceId,
-    cfi: cfiSelector(cfi),
+    anchor,
     quote: deriveQuote(range),
     createdAt: new Date().toISOString(),
   }));
 
-// One loaded spine item, presented to the rebind search.
-export interface SectionHandle {
-  document: Document;
-  cfiFromRange(range: Range): string | null;
+// One full-text search hit: its anchor plus a one-line snippet of surrounding
+// text for the search bar to show.
+export interface SearchMatch {
+  anchor: HighlightAnchor;
+  excerpt: string;
 }
 
-// Epub.js-facing capabilities needed by locate and full-text search.
+// The reader's anchor-oriented capabilities, implemented by each source adapter
+// (EPUB, PDF). Locating and searching are adapter-owned: the reconciler and the
+// search bar depend only on this narrow seam, never on cfi or page specifics.
 export interface SourceReader {
-  resolveCfi(cfi: string): Effect.Effect<Range | null>;
-  // Load every spine item in order, run `pick` against each, and concatenate the
-  // results across all sections. `pick` returns zero or more values per section
-  // (e.g. one cfi for a rebind, or every match for a search). The whole book is
-  // always scanned — callers wanting only the first hit take results[0].
-  findInSections<A>(pick: (section: SectionHandle) => A[]): Effect.Effect<A[]>;
+  // Resolve a highlight's anchor, rebinding via its quote fallback if the stored
+  // anchor no longer resolves. Null when it cannot be located at all.
+  locateHighlight(highlight: Highlight): Effect.Effect<HighlightAnchor | null>;
+  // Full-text search across the whole source, in reading order.
+  search(query: string): Effect.Effect<SearchMatch[]>;
 }
 
-export interface HighlightLocation {
-  cfi: string;
-}
-
-export const locateHighlight = (
-  h: Highlight,
-  reader: SourceReader,
-): Effect.Effect<HighlightLocation | null> =>
-  Effect.gen(function* () {
-    const range = yield* reader.resolveCfi(h.cfi.value);
-    if (range) return { cfi: h.cfi.value };
-
-    const fresh = yield* reader.findInSections((section) => {
-      const found = searchQuote(section.document, h.quote);
-      const cfi = found ? section.cfiFromRange(found) : null;
-      return cfi ? [cfi] : [];
-    });
-
-    const first = fresh[0];
-    return first ? { cfi: first } : null;
-  });
-
-// Search a document for a QuoteSelector, preferring the match whose
-// surrounding text agrees with the stored prefix/suffix. Returns a Range
-// or null if the exact text cannot be found at all.
-function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
+// Search a document for a QuoteSelector, preferring the match whose surrounding
+// text agrees with the stored prefix/suffix. Returns a Range or null if the
+// exact text cannot be found at all. Shared by both adapters' rebind paths.
+export function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
   const root = doc.body;
   if (!root) return null;
   const text = root.textContent ?? "";
@@ -150,7 +137,7 @@ function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
 }
 
 // Map character offsets within an element's textContent back to a DOM Range.
-function rangeFromOffsets(root: Node, start: number, end: number): Range | null {
+export function rangeFromOffsets(root: Node, start: number, end: number): Range | null {
   const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const range = root.ownerDocument!.createRange();
   let offset = 0;
@@ -171,13 +158,6 @@ function rangeFromOffsets(root: Node, start: number, end: number): Range | null 
     node = walker.nextNode();
   }
   return null;
-}
-
-// A single full-text search hit: where it is (cfi) plus a one-line snippet of
-// surrounding text for the search bar to show.
-export interface SearchMatch {
-  cfi: string;
-  excerpt: string;
 }
 
 // How much context to show on each side of a match in the excerpt.
@@ -213,8 +193,8 @@ export function scanText(text: string, query: string): TextMatch[] {
 }
 
 // Map the pure string matches back to DOM Ranges within a document, dropping any
-// that fail to resolve to a Range.
-function findAllRanges(doc: Document, query: string): { range: Range; excerpt: string }[] {
+// that fail to resolve to a Range. Shared by both adapters' full-text search.
+export function findAllRanges(doc: Document, query: string): { range: Range; excerpt: string }[] {
   const root = doc.body;
   if (!root) return [];
   const text = root.textContent ?? "";
@@ -223,15 +203,3 @@ function findAllRanges(doc: Document, query: string): { range: Range; excerpt: s
     return range ? [{ range, excerpt }] : [];
   });
 }
-
-// Full-text search across the whole book: every match, in reading order, as a
-// cfi + excerpt. Drives the reader's ctrl+f. Empty queries yield no matches.
-export const searchSource = (reader: SourceReader, query: string): Effect.Effect<SearchMatch[]> =>
-  query.trim() === ""
-    ? Effect.succeed([])
-    : reader.findInSections((section) =>
-        findAllRanges(section.document, query).flatMap(({ range, excerpt }) => {
-          const cfi = section.cfiFromRange(range);
-          return cfi ? [{ cfi, excerpt }] : [];
-        }),
-      );

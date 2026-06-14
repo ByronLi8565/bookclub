@@ -2,7 +2,7 @@ import { useAgent } from "agents/react";
 import { useEffect, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
 import type { NoteAgent, NoteState, OnlinePeer } from "../../server/agents/NoteAgent.ts";
-import type { Highlight } from "./highlights.ts";
+import type { Highlight, HighlightAnchor } from "./highlights.ts";
 import { spawnToast } from "../ui/shared/toast/store.ts";
 
 export type { OnlinePeer } from "../../server/agents/NoteAgent.ts";
@@ -19,7 +19,7 @@ export interface NoteSync {
   addReply: (sourceId: string, parent: string, body: string) => boolean;
   editNote: (id: string, body: string) => boolean;
   removeNote: (id: string) => boolean;
-  rebindHighlight: (noteId: string, highlightId: string, cfiValue: string) => boolean;
+  rebindHighlight: (noteId: string, highlightId: string, anchor: HighlightAnchor) => boolean;
 }
 
 // Connect to the per-group NoteAgent durable object (one instance per groupId,
@@ -79,8 +79,8 @@ export function useNoteAgent(groupId: string | null): NoteSync {
     addReply: (sourceId, parent, body) => fire(() => stub.addReply(sourceId, parent, body)),
     editNote: (id, body) => fire(() => stub.editNote(id, body)),
     removeNote: (id) => fire(() => stub.removeNote(id)),
-    rebindHighlight: (noteId, highlightId, cfiValue) =>
-      fire(() => stub.rebindHighlight(noteId, highlightId, cfiValue)),
+    rebindHighlight: (noteId, highlightId, anchor) =>
+      fire(() => stub.rebindHighlight(noteId, highlightId, anchor)),
   };
 }
 

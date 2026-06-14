@@ -5,7 +5,8 @@ import type {
   Membership,
   RosterEntry,
 } from "../../shared/types/groups.ts";
-import { EPUB_CONTENT_TYPE } from "../../server/services/books.ts";
+import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
+import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../shared/types/sources.ts";
 
 export type {
   GroupRole,
@@ -16,12 +17,19 @@ export type {
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-export interface FetchedBook {
+export interface FetchedSource {
   sourceId: string | null;
+  contentType: string;
   file: File;
 }
 
 const GroupRole = Schema.Union([Schema.Literal("owner"), Schema.Literal("member")]);
+
+const SourceMeta = Schema.Struct({
+  kind: Schema.Union([Schema.Literal("epub"), Schema.Literal("pdf")]),
+  contentType: Schema.String,
+  size: Schema.Number,
+});
 
 const GroupSummary = Schema.Struct({
   groupId: Schema.String,
@@ -30,6 +38,7 @@ const GroupSummary = Schema.Struct({
   ownerId: Schema.String,
   sources: Schema.mutable(Schema.Array(Schema.String)),
   bookTitles: Schema.Record(Schema.String, Schema.String),
+  sourceMeta: Schema.Record(Schema.String, SourceMeta),
   memberCount: Schema.Number,
 });
 
@@ -176,11 +185,20 @@ export async function renameBook(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Owner-only: upload the group's book (PUT /groups/:name/book).
-export async function uploadBook(name: string, file: File): Promise<ApiResult<string>> {
+// Owner-only: upload the group's source — EPUB or PDF (PUT /groups/:name/book).
+// The pre-upload health report rides along in a header (Option A): the client
+// gates on it; the server validates the file's magic bytes independently.
+export async function uploadSource(
+  name: string,
+  file: File,
+  health: SourceHealth,
+): Promise<ApiResult<string>> {
   const r = await fetch(`/groups/${name}/book`, {
     method: "PUT",
-    headers: { "Content-Type": EPUB_CONTENT_TYPE },
+    headers: {
+      "Content-Type": file.type || EPUB_CONTENT_TYPE,
+      "X-Source-Health": encodeURIComponent(JSON.stringify(health)),
+    },
     body: file,
   });
   if (!r.ok) return { ok: false, error: await readError(r) };
@@ -188,15 +206,19 @@ export async function uploadBook(name: string, file: File): Promise<ApiResult<st
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
 }
 
-// Fetch the group's book bytes (GET /groups/:name/book). Returns null when no
-// book has been uploaded yet (or access is refused).
-export async function fetchBook(name: string): Promise<FetchedBook | null> {
+// Fetch the group's source bytes (GET /groups/:name/book). Returns null when no
+// source has been uploaded yet (or access is refused). The filename extension
+// reflects the content type so the reader adapter can be chosen from the File.
+export async function fetchSource(name: string): Promise<FetchedSource | null> {
   const r = await fetch(`/groups/${name}/book`);
   if (!r.ok) return null;
   const sourceId = r.headers.get("X-Source-Id");
+  const contentType = r.headers.get("Content-Type") ?? EPUB_CONTENT_TYPE;
+  const kind = sourceKindFor(contentType) ?? "epub";
   const blob = await r.blob();
   return {
     sourceId,
-    file: new File([blob], `${sourceId ?? name}.epub`, { type: EPUB_CONTENT_TYPE }),
+    contentType,
+    file: new File([blob], `${sourceId ?? name}.${extensionFor(kind)}`, { type: contentType }),
   };
 }

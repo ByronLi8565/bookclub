@@ -1,5 +1,10 @@
 import { Agent, getAgentByName } from "agents";
-import type { GroupRole, GroupSummary, RosterEntry } from "../../shared/types/groups.ts";
+import type {
+  GroupRole,
+  GroupSummary,
+  RosterEntry,
+  SourceMeta,
+} from "../../shared/types/groups.ts";
 import type { Env } from "../env.ts";
 import { REGISTRY_ID } from "./GroupRegistry.ts";
 import type { NormalizedName } from "../util/names.ts";
@@ -26,7 +31,10 @@ export interface GroupState {
   displayName: string;
   ownerId: string;
   members: Record<string, Member>; // by userId
-  sources: string[]; // book content hashes bound to this group
+  sources: string[]; // source content hashes bound to this group
+  // Per-source metadata (kind/contentType/size), by sourceId. Legacy groups
+  // predate this map; summary accessors default missing entries to EPUB.
+  sourceMeta: Record<string, SourceMeta>;
   invites: Record<string, Invite>; // by token (email-bound, single-use)
   // The reusable open invite token; "" until the owner mints one. Any signed-in
   // user can redeem it (decision: open invite links), and it survives redemption.
@@ -85,6 +93,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
     ownerId: "",
     members: {},
     sources: [],
+    sourceMeta: {},
     invites: {},
     openInvite: "",
     bookTitles: {},
@@ -110,6 +119,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
         [owner.id]: { role: "owner", name: owner.name, email: owner.email, joinedAt: now },
       },
       sources: [],
+      sourceMeta: {},
       invites: {},
       openInvite: "",
       bookTitles: {},
@@ -229,14 +239,20 @@ export class GroupAgent extends Agent<Env, GroupState> {
     await this.indexFor(user.email);
   }
 
-  // Owner-only: bind a book content hash to this group (decision 13, owner-only
-  // upload). Idempotent.
-  addSource(callerId: string, sourceId: string): AddSourceResult {
+  // Owner-only: bind a source (by content hash) to this group, recording its
+  // metadata (decision 13, owner-only upload). Idempotent on the hash, but
+  // metadata is refreshed so a re-upload can correct it.
+  addSource(callerId: string, sourceId: string, meta: SourceMeta): AddSourceResult {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
     if (callerId !== this.state.ownerId) return { ok: false, reason: "not_owner" };
-    if (!this.state.sources.includes(sourceId)) {
-      this.setState({ ...this.state, sources: [...this.state.sources, sourceId] });
-    }
+    const sources = this.state.sources.includes(sourceId)
+      ? this.state.sources
+      : [...this.state.sources, sourceId];
+    this.setState({
+      ...this.state,
+      sources,
+      sourceMeta: { ...this.state.sourceMeta, [sourceId]: meta },
+    });
     return { ok: true, summary: this.summary() };
   }
 
@@ -259,6 +275,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
       ownerId: this.state.ownerId,
       sources: this.state.sources,
       bookTitles: this.state.bookTitles,
+      sourceMeta: this.state.sourceMeta,
       memberCount: Object.keys(this.state.members).length,
     };
   }

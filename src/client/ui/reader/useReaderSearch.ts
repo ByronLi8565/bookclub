@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { searchSource, type SearchMatch, type SourceReader } from "../../notes/highlights.ts";
+import type { HighlightAnchor, SearchMatch, SourceReader } from "../../notes/highlights.ts";
 
 // The reader's ctrl+f state machine. The search bar (Reader) renders it and the
 // Mod+F hotkey (Workspace) drives `openSearch`. Jump-to-match: there is no
@@ -28,9 +28,9 @@ const DEBOUNCE_MS = 250;
 interface Deps {
   reader: SourceReader;
   ready: boolean;
-  goTo: (cfi: string) => void;
-  drawUnderline: (cfi: string) => void;
-  eraseUnderline: (cfi: string) => void;
+  goTo: (anchor: HighlightAnchor) => void;
+  drawUnderline: (anchor: HighlightAnchor) => void;
+  eraseUnderline: (anchor: HighlightAnchor) => void;
 }
 
 export function useReaderSearch({
@@ -46,8 +46,8 @@ export function useReaderSearch({
   const [active, setActive] = useState(-1);
   const [searching, setSearching] = useState(false);
 
-  // The cfi currently underlined, so we can erase it before painting the next.
-  const paintedRef = useRef<string | null>(null);
+  // The anchor currently underlined, so we can erase it before painting the next.
+  const paintedRef = useRef<HighlightAnchor | null>(null);
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null);
   const debounceRef = useRef<number | undefined>(undefined);
 
@@ -65,9 +65,9 @@ export function useReaderSearch({
       const match = list[index];
       setActive(match ? index : -1);
       if (!match) return;
-      goTo(match.cfi);
-      drawUnderline(match.cfi);
-      paintedRef.current = match.cfi;
+      goTo(match.anchor);
+      drawUnderline(match.anchor);
+      paintedRef.current = match.anchor;
     },
     [clearPaint, goTo, drawUnderline],
   );
@@ -96,7 +96,7 @@ export function useReaderSearch({
       setSearching(true);
       debounceRef.current = window.setTimeout(() => {
         const run = Effect.gen(function* () {
-          const found = yield* searchSource(reader, q);
+          const found = yield* reader.search(q);
           setMatches(found);
           setSearching(false);
           showMatch(found, 0);

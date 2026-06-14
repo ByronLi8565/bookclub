@@ -1,0 +1,250 @@
+.note-panel {
+  padding: 18px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.note-panel h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.note-panel .empty {
+  opacity: 0.6;
+}
+
+.note-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.note-panel .note {
+  display: flex;
+  flex-direction: column;
+  border: var(--line);
+}
+
+.note-panel .note--deleted {
+  opacity: 0.75;
+}
+
+.note-panel .note-head {
+  display: flex;
+}
+
+/* The note's seq as a filled black square in the top-left corner of its head. */
+.note-panel .note-seq {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 34px;
+  padding: 0 6px;
+  background: var(--white);
+  color: var(--black);
+  font-weight: 700;
+  border-right: var(--line);
+}
+
+.note-panel .quote {
+  flex: 1;
+  border: none;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-panel .replies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 16px;
+  padding-left: 12px;
+  border-left: var(--line);
+}
+
+/* The inline reply editor sits one level in, lining up under the note it
+   replies to where the new reply will land. */
+.note-panel .reply-compose {
+  margin-left: 16px;
+  padding-left: 12px;
+  border-left: var(--line);
+}
+
+.note-panel .reply,
+.note-panel .edit,
+.note-panel .delete {
+  border: none;
+  border-left: var(--line);
+}
+
+.note-panel .delete-wrap {
+  position: relative;
+  display: flex;
+  border-left: var(--line);
+}
+
+.note-panel .delete-wrap .delete {
+  border-left: none;
+}
+
+.delete-confirm {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: -6px;
+  z-index: 4;
+  min-width: 136px;
+  padding: 12px;
+  border: var(--line);
+  background: var(--white);
+  box-shadow: 5px 5px 0 var(--black);
+  text-align: center;
+}
+
+.delete-confirm p {
+  margin: 0 0 8px;
+  font-weight: 700;
+  text-transform: lowercase;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.delete-confirm-actions button {
+  border: none;
+  padding: 0 4px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.note-panel .edit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note-panel .edit img {
+  width: 14px;
+  height: 14px;
+}
+
+.note-panel .edit:hover img {
+  filter: invert(1);
+}
+
+.note-panel .note-head + .note-body {
+  border-top: var(--line);
+}
+
+.note-body {
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.note-body p {
+  margin: 0 0 8px;
+}
+
+.note-body p:last-child {
+  margin-bottom: 0;
+}
+
+.note-body blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--black);
+  opacity: 0.8;
+}
+
+/* `[[n]]` cross-reference chip, shared by the read view (button) and the editor
+   (token text node). Inline, monospace, sits on the baseline of the text. */
+.note-ref {
+  display: inline-block;
+  padding: 0 4px;
+  border: 2px solid var(--black);
+  border-radius: 4px;
+  background: var(--white);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.note-ref:hover {
+  background: var(--black);
+  color: var(--white);
+}
+
+/* Brief flash when a reference scrolls its target note into view. */
+.note.flash {
+  animation: note-flash 1.2s ease-out;
+}
+
+@keyframes note-flash {
+  from {
+    background: var(--highlight);
+  }
+
+  to {
+    background: var(--white);
+  }
+}
+
+.note-editor {
+  display: flex;
+  flex-direction: column;
+}
+
+.note-editor-input {
+  padding: 8px 10px;
+  min-height: 64px;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.note-editor-input .bc-bold {
+  font-weight: 700;
+}
+
+.note-editor-input .bc-italic {
+  font-style: italic;
+}
+
+.note-editor-input .bc-quote {
+  padding-left: 10px;
+  border-left: 3px solid var(--black);
+  opacity: 0.8;
+}
+
+.note-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px;
+  border-top: var(--line);
+}
+
+.note-editor-actions .primary {
+  font-weight: 700;
+}

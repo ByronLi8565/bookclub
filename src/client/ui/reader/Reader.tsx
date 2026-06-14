@@ -111,7 +111,7 @@ export function Reader({
           {loading ? (
             <Loading className="loading--reader" />
           ) : (
-            !hasFile && <p className="reader-empty">Open an EPUB to begin.</p>
+            !hasFile && <p className="reader-empty">Open a book to begin.</p>
           )}
         </div>
         {ready && !view.location?.atStart && (
