@@ -1,6 +1,8 @@
 import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
+import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
+import type { AuthAgent } from "./src/server/AuthAgent.ts";
 import type { NoteAgent } from "./src/server/NoteAgent.ts";
 
 export default Alchemy.Stack(
@@ -11,7 +13,12 @@ export default Alchemy.Stack(
       url: true,
       compatibility: { flags: ["nodejs_compat"] },
       assets: { htmlHandling: "auto-trailing-slash", notFoundHandling: "single-page-application" },
-      bindings: { NoteAgent: Cloudflare.DurableObjectNamespace<NoteAgent>("NoteAgent") },
+      bindings: {
+        NoteAgent: Cloudflare.DurableObjectNamespace<NoteAgent>("NoteAgent"),
+        AuthAgent: Cloudflare.DurableObjectNamespace<AuthAgent>("AuthAgent"),
+        // Resolved from the deploy environment; never committed in plaintext.
+        SESSION_HMAC_SECRET: Config.redacted("SESSION_HMAC_SECRET"),
+      },
     });
 
     return { url: site.url };

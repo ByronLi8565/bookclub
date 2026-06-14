@@ -11,6 +11,9 @@ export default defineConfig({
   // traffic (http + websocket) to `wrangler dev`, which hosts the NoteAgent
   // durable object. In production the deployed worker serves both itself.
   server: {
-    proxy: { "/agents": { target: "http://localhost:8787", ws: true, changeOrigin: true } },
+    proxy: {
+      "/agents": { target: "http://localhost:8787", ws: true, changeOrigin: true },
+      "/auth": { target: "http://localhost:8787", changeOrigin: true },
+    },
   },
 });

@@ -8,6 +8,16 @@
   "main": "src/server/worker.ts",
   "compatibility_date": "2026-03-17",
   "compatibility_flags": ["nodejs_compat"],
-  "durable_objects": { "bindings": [{ "name": "NoteAgent", "class_name": "NoteAgent" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NoteAgent"] }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "NoteAgent", "class_name": "NoteAgent" },
+      { "name": "AuthAgent", "class_name": "AuthAgent" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NoteAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["AuthAgent"] },
+  ],
+  // Dev-only secret; the deployed worker gets SESSION_HMAC_SECRET from alchemy.
+  "vars": { "SESSION_HMAC_SECRET": "dev-insecure-session-secret-change-me" },
 }
