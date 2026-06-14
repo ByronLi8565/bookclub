@@ -11,6 +11,9 @@ export default Alchemy.Stack(
   "bookclub",
   { providers: Cloudflare.providers(), state: Cloudflare.state() },
   Effect.gen(function* () {
+    // EPUB storage, keyed by content hash (dedup across groups).
+    const books = yield* Cloudflare.R2Bucket("BOOKS", { name: "bookclub-books" });
+
     const site = yield* Cloudflare.Vite("bookclub", {
       url: true,
       domain: "bookclub.byron.land",
@@ -23,6 +26,7 @@ export default Alchemy.Stack(
         AuthAgent: Cloudflare.DurableObjectNamespace<AuthAgent>("AuthAgent"),
         GroupAgent: Cloudflare.DurableObjectNamespace<GroupAgent>("GroupAgent"),
         GroupRegistry: Cloudflare.DurableObjectNamespace<GroupRegistry>("GroupRegistry"),
+        BOOKS: books,
         // Resolved from the deploy environment; never committed in plaintext.
         SESSION_HMAC_SECRET: Config.redacted("SESSION_HMAC_SECRET"),
         // Login-code delivery. EMAIL_FROM must be a verified Email Routing

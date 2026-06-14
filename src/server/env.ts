@@ -14,6 +14,8 @@ export interface Env {
   // name registry that maps URL names to groupIds.
   GroupAgent: DurableObjectNamespace<GroupAgent>;
   GroupRegistry: DurableObjectNamespace<GroupRegistry>;
+  // EPUB bytes, keyed by content hash (dedup across groups).
+  BOOKS: R2Bucket;
   SESSION_HMAC_SECRET: string;
   // Email sending. `EMAIL` is the Cloudflare send_email binding; `EMAIL_FROM` is
   // the verified sender address. Both are absent in local dev (codes are logged).

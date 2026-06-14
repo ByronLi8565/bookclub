@@ -3,6 +3,7 @@ import { Hono, type Context } from "hono";
 import { monotonicFactory } from "ulidx";
 import type { Env } from "./env.ts";
 import { REGISTRY_ID } from "./GroupRegistry.ts";
+import { EPUB_CONTENT_TYPE, getBook, storeBook } from "./books.ts";
 import { currentIdentity, SESSION_COOKIE } from "./identity.ts";
 import { sendInvite } from "./email.ts";
 import { parseName } from "./names.ts";
@@ -147,6 +148,45 @@ app.post("/groups/:name/join", async (c) => {
     return c.json({ error: result.reason }, 403);
   }
   return c.json({ group: result.summary });
+});
+
+// Owner-only: upload the group's book. Bytes are stored in R2 by content hash
+// (dedup) and the hash is bound to the group as its source (decision 13).
+app.put("/groups/:name/book", async (c) => {
+  const me = await currentIdentity(c.req.raw, c.env);
+  if (!me) return c.json({ error: "unauthenticated" }, 401);
+  const group = await resolveGroup(c.env, c.req.param("name"));
+  if (!group) return c.json({ error: "not_found" }, 404);
+  const summary = await group.getSummary();
+  if (!summary) return c.json({ error: "not_found" }, 404);
+  if (summary.ownerId !== me.id) return c.json({ error: "not_owner" }, 403);
+
+  const bytes = await c.req.arrayBuffer();
+  if (bytes.byteLength === 0) return c.json({ error: "empty" }, 400);
+  const hash = await storeBook(c.env, bytes);
+  await group.addSource(me.id, hash);
+  return c.json({ hash });
+});
+
+// Member-only: stream the group's bound book from R2. 404 until the owner has
+// uploaded one.
+app.get("/groups/:name/book", async (c) => {
+  const me = await currentIdentity(c.req.raw, c.env);
+  if (!me) return c.json({ error: "unauthenticated" }, 401);
+  const group = await resolveGroup(c.env, c.req.param("name"));
+  if (!group) return c.json({ error: "not_found" }, 404);
+  const summary = await group.getSummary();
+  if (!summary) return c.json({ error: "not_found" }, 404);
+  const { isMember } = await group.membership(me.id);
+  if (!isMember) return c.json({ error: "forbidden" }, 403);
+
+  const hash = summary.sources[0];
+  if (!hash) return c.json({ error: "no_book" }, 404);
+  const object = await getBook(c.env, hash);
+  if (!object) return c.json({ error: "no_book" }, 404);
+  return new Response(object.body, {
+    headers: { "Content-Type": EPUB_CONTENT_TYPE, "X-Source-Id": hash },
+  });
 });
 
 // Connect gate (decision 6): the NoteAgent is keyed by groupId, so the :name
