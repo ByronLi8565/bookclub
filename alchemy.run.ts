@@ -2,10 +2,10 @@ import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
-import type { AuthAgent } from "./src/server/AuthAgent.ts";
-import type { GroupAgent } from "./src/server/GroupAgent.ts";
-import type { GroupRegistry } from "./src/server/GroupRegistry.ts";
-import type { NoteAgent } from "./src/server/NoteAgent.ts";
+import type { AuthAgent } from "./src/server/agents/AuthAgent.ts";
+import type { GroupAgent } from "./src/server/agents/GroupAgent.ts";
+import type { GroupRegistry } from "./src/server/agents/GroupRegistry.ts";
+import type { NoteAgent } from "./src/server/agents/NoteAgent.ts";
 
 export default Alchemy.Stack(
   "bookclub",

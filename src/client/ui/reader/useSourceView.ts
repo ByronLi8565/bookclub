@@ -2,12 +2,18 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSwipeable } from "react-swipeable";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
 import type Section from "epubjs/types/section";
-import { expandToWordBoundaries, popupPoint, type SourceReader } from "../../highlights.ts";
+import {
+  expandToWordBoundaries,
+  popupPoint,
+  type SectionHandle,
+  type SourceReader,
+} from "../../notes/highlights.ts";
 import type Navigation from "epubjs/types/navigation";
+import { useReaderSearch, type ReaderSearch } from "./useReaderSearch.ts";
 
 function firstChapterHref(nav: Navigation): string | undefined {
   return nav.landmark?.("bodymatter")?.href ?? nav.toc?.[0]?.href;
@@ -50,6 +56,8 @@ export interface SourceView {
     atEnd: boolean;
   } | null;
   reader: SourceReader;
+  // Full-text (ctrl+f) search over the book.
+  search: ReaderSearch;
 }
 
 export function useSourceView(
@@ -262,6 +270,18 @@ export function useSourceView(
     (cfi: string) => onView((v) => v.rendition.annotations.remove(cfi, "highlight")),
     [onView],
   );
+  // Search uses the "underline" annotation type, a separate keyspace from note
+  // highlights, so painting/erasing a search match can never disturb a note's
+  // highlight even at an identical cfi range.
+  const drawUnderline = useCallback(
+    (cfi: string) =>
+      onView((v) => v.rendition.annotations.underline(cfi, {}, () => {}, "bc-search")),
+    [onView],
+  );
+  const eraseUnderline = useCallback(
+    (cfi: string) => onView((v) => v.rendition.annotations.remove(cfi, "underline")),
+    [onView],
+  );
 
   const dismissSelection = useCallback(() => {
     pendingRef.current?.clear();
@@ -274,43 +294,49 @@ export function useSourceView(
     dismissSelection();
   }, [dismissSelection]);
 
-  // Run an effect against the live book, or yield `fallback` if not ready.
-  const withBook = <A>(fallback: A, f: (book: Book) => Effect.Effect<A>): Effect.Effect<A> =>
-    Effect.flatMap(Ref.get(viewRef.current), (view) =>
-      Option.isSome(view) ? f(view.value.book) : Effect.succeed(fallback),
-    );
-
-  const reader: SourceReader = {
-    resolveCfi: (cfi) =>
-      withBook(null, (book) =>
-        Effect.tryPromise(() => book.getRange(cfi)).pipe(
-          Effect.map((range) => range ?? null),
-          Effect.orElseSucceed(() => null),
+  // The reader only closes over the stable `viewRef`, so it's built once. A
+  // stable identity matters: useReaderSearch keys its effects off it.
+  const reader = useMemo<SourceReader>(() => {
+    // Run an effect against the live book, or yield `fallback` if not ready.
+    const withBook = <A>(fallback: A, f: (book: Book) => Effect.Effect<A>): Effect.Effect<A> =>
+      Effect.flatMap(Ref.get(viewRef.current), (view) =>
+        Option.isSome(view) ? f(view.value.book) : Effect.succeed(fallback),
+      );
+    return {
+      resolveCfi: (cfi) =>
+        withBook(null, (book) =>
+          Effect.tryPromise(() => book.getRange(cfi)).pipe(
+            Effect.map((range) => range ?? null),
+            Effect.orElseSucceed(() => null),
+          ),
         ),
-      ),
-    findInSections: (pick) =>
-      withBook(null, (book) =>
-        Effect.gen(function* () {
-          const items = (book.spine as unknown as { spineItems: { index: number }[] }).spineItems;
-          for (const { index } of items) {
-            const result = yield* Effect.acquireUseRelease(
-              Effect.promise(async () => {
-                const section: Section = book.spine.get(index);
-                const document = await section.load(book.load.bind(book));
-                return { section, document };
-              }),
-              ({ section, document }) =>
-                Effect.sync(() =>
-                  pick({ document, cfiFromRange: (r) => section.cfiFromRange(r) ?? null }),
-                ),
-              ({ section }) => Effect.sync(() => section.unload()),
-            );
-            if (result) return result;
-          }
-          return null;
-        }),
-      ),
-  };
+      findInSections: <A>(pick: (section: SectionHandle) => A[]) =>
+        withBook<A[]>([], (book) =>
+          Effect.gen(function* () {
+            const items = (book.spine as unknown as { spineItems: { index: number }[] }).spineItems;
+            const results: A[] = [];
+            for (const { index } of items) {
+              const found = yield* Effect.acquireUseRelease(
+                Effect.promise(async () => {
+                  const section: Section = book.spine.get(index);
+                  const document = await section.load(book.load.bind(book));
+                  return { section, document };
+                }),
+                ({ section, document }) =>
+                  Effect.sync(() =>
+                    pick({ document, cfiFromRange: (r) => section.cfiFromRange(r) ?? null }),
+                  ),
+                ({ section }) => Effect.sync(() => section.unload()),
+              );
+              results.push(...found);
+            }
+            return results;
+          }),
+        ),
+    };
+  }, []);
+
+  const search = useReaderSearch({ reader, ready, goTo, drawUnderline, eraseUnderline });
 
   return {
     containerRef,
@@ -328,5 +354,6 @@ export function useSourceView(
     dismissSelection,
     location,
     reader,
+    search,
   };
 }

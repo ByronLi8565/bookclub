@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { SourceView } from "./useSourceView.ts";
 
 // Reader shell around the SourceView iframe. `floatingNote` renders the desktop
@@ -13,7 +13,13 @@ export function Reader({
   hasFile: boolean;
   floatingNote?: boolean;
 }) {
-  const { fontSize, setFontSize, ready, selection } = view;
+  const { fontSize, setFontSize, ready, selection, search } = view;
+
+  // Focus the search input when the bar opens so the caller can type at once.
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (search.open) searchInputRef.current?.focus();
+  }, [search.open]);
 
   // Dismiss the Add Note popup on any click outside it
   const { dismissSelection } = view;
@@ -49,6 +55,54 @@ export function Reader({
           +
         </button>
       </div>
+      {search.open && (
+        <div className="reader-search">
+          <input
+            ref={searchInputRef}
+            className="reader-search-input"
+            type="text"
+            placeholder="FIND IN BOOK"
+            value={search.query}
+            onChange={(e) => search.setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (e.shiftKey) search.prev();
+                else search.next();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                search.closeSearch();
+              }
+            }}
+          />
+          <span className="reader-search-count">
+            {search.searching
+              ? "…"
+              : search.matches.length === 0
+                ? search.query.trim() === ""
+                  ? ""
+                  : "0 / 0"
+                : `${search.active + 1} / ${search.matches.length}`}
+          </span>
+          <button
+            onClick={search.prev}
+            disabled={search.matches.length === 0}
+            aria-label="Previous match"
+          >
+            ↑
+          </button>
+          <button
+            onClick={search.next}
+            disabled={search.matches.length === 0}
+            aria-label="Next match"
+          >
+            ↓
+          </button>
+          <button onClick={search.closeSearch} aria-label="Close search">
+            ✕
+          </button>
+        </div>
+      )}
       <div className="reader-stage">
         <div className="reader-surface" ref={view.containerRef}>
           {!hasFile && <p className="reader-empty">Open an EPUB to begin.</p>}

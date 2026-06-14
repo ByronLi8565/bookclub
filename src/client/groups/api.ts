@@ -1,30 +1,18 @@
 import * as Schema from "effect/Schema";
-import { EPUB_CONTENT_TYPE } from "../../server/books.ts";
+import type {
+  GroupRole,
+  GroupSummary,
+  Membership,
+  RosterEntry,
+} from "../../shared/types/groups.ts";
+import { EPUB_CONTENT_TYPE } from "../../server/services/books.ts";
 
-// The client-side view of a group, mirroring the server's GroupSummary.
-export interface GroupSummary {
-  groupId: string;
-  name: string;
-  displayName: string;
-  ownerId: string;
-  sources: string[];
-  bookTitles: Record<string, string>;
-  memberCount: number;
-}
-
-export type GroupRole = "owner" | "member";
-
-export interface Membership {
-  isMember: boolean;
-  role: GroupRole | null;
-}
-
-export interface RosterEntry {
-  id: string;
-  name: string;
-  email: string;
-  role: GroupRole;
-}
+export type {
+  GroupRole,
+  GroupSummary,
+  Membership,
+  RosterEntry,
+} from "../../shared/types/groups.ts";
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string };
 

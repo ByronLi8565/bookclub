@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import { locateHighlight, type Highlight, type SourceReader } from "../../highlights.ts";
+import { locateHighlight, type Highlight, type SourceReader } from "../../notes/highlights.ts";
 
 // A highlight the rendition should currently be painting, tagged with the note
 // that owns it (or null for the in-flight composing highlight, which has no note

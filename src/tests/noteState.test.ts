@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Highlight } from "../client/highlights.ts";
-import type { Note, NoteAuthor } from "../client/notes.ts";
+import type { Highlight } from "../client/notes/highlights.ts";
+import type { Note, NoteAuthor } from "../shared/types/notes.ts";
 import {
   addNote,
   addReply,
@@ -10,7 +10,7 @@ import {
   removeNote,
   type NoteStamp,
   type NoteState,
-} from "../server/noteState.ts";
+} from "../server/state/noteState.ts";
 
 // A deterministic stamp: ids count up (n1, n2, ...) and time is fixed unless set.
 function fakeStamp(now = "2026-01-01T00:00:00.000Z"): NoteStamp {

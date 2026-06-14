@@ -1,16 +1,16 @@
 import { getAgentByName, routeAgentRequest } from "agents";
 import { Hono, type Context } from "hono";
-import type { User as AuthUser } from "./AuthAgent.ts";
+import type { User as AuthUser } from "./agents/AuthAgent.ts";
 import type { Env } from "./env.ts";
-import { registerGroupRoutes } from "./groupRoutes.ts";
-import { clearedCookie, currentIdentity, sessionCookie } from "./identity.ts";
-import { normalizeEmail, readJson } from "./http.ts";
-import { signSession, SESSION_TTL_MS } from "./session.ts";
+import { registerGroupRoutes } from "./routes/groupRoutes.ts";
+import { clearedCookie, currentIdentity, sessionCookie } from "./auth/cookies.ts";
+import { normalizeEmail, readJson } from "./util/http.ts";
+import { signSession, SESSION_TTL_MS } from "./auth/session.ts";
 
-export { NoteAgent } from "./NoteAgent.ts";
-export { AuthAgent } from "./AuthAgent.ts";
-export { GroupAgent } from "./GroupAgent.ts";
-export { GroupRegistry } from "./GroupRegistry.ts";
+export { NoteAgent } from "./agents/NoteAgent.ts";
+export { AuthAgent } from "./agents/AuthAgent.ts";
+export { GroupAgent } from "./agents/GroupAgent.ts";
+export { GroupRegistry } from "./agents/GroupRegistry.ts";
 
 // The worker is a Hono app. Route order matters: explicit /auth/* routes are
 // matched first; the catch-all then hands websocket + rpc traffic to the agents

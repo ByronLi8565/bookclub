@@ -1,7 +1,7 @@
-import type { AuthAgent } from "./AuthAgent.ts";
-import type { GroupAgent } from "./GroupAgent.ts";
-import type { GroupRegistry } from "./GroupRegistry.ts";
-import type { NoteAgent } from "./NoteAgent.ts";
+import type { AuthAgent } from "./agents/AuthAgent.ts";
+import type { GroupAgent } from "./agents/GroupAgent.ts";
+import type { GroupRegistry } from "./agents/GroupRegistry.ts";
+import type { NoteAgent } from "./agents/NoteAgent.ts";
 
 // The worker's runtime bindings. The DO namespaces are declared in
 // alchemy.run.ts (deploy) and wrangler.jsonc (dev); `ASSETS` serves the

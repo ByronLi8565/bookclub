@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
-import { cfiSelector, type Highlight, type SourceReader } from "../client/highlights.ts";
+import { cfiSelector, type Highlight, type SourceReader } from "../client/notes/highlights.ts";
 import {
   updateHighlights,
   type HighlightPainter,
@@ -21,7 +21,7 @@ function fakePainter() {
 function fakeReader(resolvable: Set<string>): SourceReader {
   return {
     resolveCfi: (cfi) => Effect.succeed(resolvable.has(cfi) ? ({} as Range) : null),
-    findInSections: () => Effect.succeed(null),
+    findInSections: () => Effect.succeed([]),
   };
 }
 
@@ -78,7 +78,7 @@ describe("updateHighlights", () => {
         located++;
         return Effect.succeed({} as Range);
       },
-      findInSections: () => Effect.succeed(null),
+      findInSections: () => Effect.succeed([]),
     };
 
     await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
@@ -100,7 +100,7 @@ describe("updateHighlights", () => {
     // Stored cfi no longer resolves; the quote search relocates it to cfi-fresh.
     const reader: SourceReader = {
       resolveCfi: () => Effect.succeed(null),
-      findInSections: () => Effect.succeed("cfi-fresh"),
+      findInSections: <A>() => Effect.succeed(["cfi-fresh"] as A[]),
     };
 
     await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
@@ -121,7 +121,7 @@ describe("updateHighlights", () => {
     const rebinds: string[] = [];
     const reader: SourceReader = {
       resolveCfi: () => Effect.succeed(null),
-      findInSections: () => Effect.succeed(null),
+      findInSections: () => Effect.succeed([]),
     };
 
     await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
@@ -142,7 +142,7 @@ describe("updateHighlights", () => {
     const rebinds: string[] = [];
     const reader: SourceReader = {
       resolveCfi: () => Effect.succeed(null),
-      findInSections: () => Effect.succeed("cfi-fresh"),
+      findInSections: <A>() => Effect.succeed(["cfi-fresh"] as A[]),
     };
 
     await updateHighlights([{ noteId: null, highlight: highlight("draft", "cfi-old") }], drawn, {
@@ -189,7 +189,7 @@ describe("updateHighlights", () => {
           cancelled = true;
           return {} as Range;
         }),
-      findInSections: () => Effect.succeed(null),
+      findInSections: () => Effect.succeed([]),
     };
 
     await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {

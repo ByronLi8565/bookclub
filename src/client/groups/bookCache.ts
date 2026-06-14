@@ -1,4 +1,4 @@
-import { EPUB_CONTENT_TYPE } from "../../server/books.ts";
+import { EPUB_CONTENT_TYPE } from "../../server/services/books.ts";
 
 // A small IndexedDB cache for book bytes, keyed by sourceId (the content hash, so
 // entries never go stale). Lets a page reload reuse the local copy instead of

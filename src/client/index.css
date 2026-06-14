@@ -1,23 +1,23 @@
 :root {
-    --black: #000;
-    --white: #fff;
-    --gray: #777;
-    --red: #d60000;
-    --highlight: #ffe600;
+  --black: #000;
+  --white: #fff;
+  --gray: #777;
+  --red: #d60000;
+  --highlight: #ffe600;
 
-    --line: 3px solid var(--black);
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  --line: 3px solid var(--black);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 * {
-    box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 html,
 body,
 #root {
-    height: 100%;
-    margin: 0;
+  height: 100%;
+  margin: 0;
 }
 
 /* The app is a fixed full-screen shell; scrolling happens inside panes (note
@@ -25,1327 +25,1366 @@ body,
    don't fight page scroll or rubber-band. */
 html,
 body {
-    overflow: hidden;
-    max-width: 100vw;
-    overscroll-behavior: none;
+  overflow: hidden;
+  max-width: 100vw;
+  overscroll-behavior: none;
 }
 
 body {
-    background: var(--white);
-    color: var(--black);
+  background: var(--white);
+  color: var(--black);
 }
 
 button {
-    font: inherit;
-    background: var(--white);
-    color: var(--black);
-    border: var(--line);
-    padding: 4px 10px;
-    cursor: pointer;
+  font: inherit;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
 }
 
 button:hover {
-    background: var(--black);
-    color: var(--white);
+  background: var(--black);
+  color: var(--white);
 }
 
 button:disabled {
-    color: var(--gray);
-    cursor: not-allowed;
+  color: var(--gray);
+  cursor: not-allowed;
 }
 
 button:disabled:hover {
-    background: var(--white);
-    color: var(--gray);
+  background: var(--white);
+  color: var(--gray);
 }
 
 .app {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    /* Dynamic viewport height so the layout (and the flush bottom tab bar) tracks
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Dynamic viewport height so the layout (and the flush bottom tab bar) tracks
      iOS Safari's collapsing toolbar instead of leaving a gap. */
-    height: 100dvh;
+  height: 100dvh;
 }
 
 /* Settings button, sits at the right end of the workspace toolbar. */
 .settings-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    background: var(--white);
-    color: var(--black);
-    border: var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
 }
 
 .settings-button img {
-    width: 18px;
-    height: 18px;
-    display: block;
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .settings-item-head {
-    margin: 0 0 8px;
-    font-size: 16px;
+  margin: 0 0 8px;
+  font-size: 16px;
 }
 
 .settings-detail {
-    margin: 0 0 12px;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 12px;
+  margin: 0 0 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
 }
 
 .settings-detail dt {
-    font-weight: 700;
+  font-weight: 700;
 }
 
 .settings-detail dd {
-    margin: 0;
-    word-break: break-word;
+  margin: 0;
+  word-break: break-word;
 }
 
 .settings-detail-status {
-    margin: 0 0 12px;
+  margin: 0 0 12px;
 }
 
 .topbar {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 12px 16px;
-    border-bottom: var(--line);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: var(--line);
 }
 
 .topbar h1 {
-    margin: 0;
-    font-size: 20px;
-    letter-spacing: 2px;
-    cursor: text;
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 2px;
+  cursor: text;
 }
 
 .topbar-title-edit {
-    font: inherit;
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    border: var(--line);
-    padding: 0 6px;
-    background: var(--white);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  border: var(--line);
+  padding: 0 6px;
+  background: var(--white);
 }
 
 .picker {
-    border: var(--line);
-    padding: 6px 12px;
-    cursor: pointer;
-    text-transform: uppercase;
+  border: var(--line);
+  padding: 6px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
 }
 
 .picker input {
-    display: none;
+  display: none;
 }
 
 .presence-indicator {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: var(--line);
-    padding: 4px 10px;
-    background: var(--white);
-    cursor: pointer;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: var(--line);
+  padding: 4px 10px;
+  background: var(--white);
+  cursor: pointer;
 }
 
 .presence-count {
-    font-size: 14px;
-    font-weight: 700;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .presence-dot {
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--black);
-    border-radius: 50%;
-    background: #2ecc40;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--black);
+  border-radius: 50%;
+  background: #2ecc40;
 }
 
 .sync-badge {
-    border: var(--line);
-    padding: 4px 8px;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+  border: var(--line);
+  padding: 4px 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .sync-badge--online {
-    background: var(--black);
-    color: var(--white);
+  background: var(--black);
+  color: var(--white);
 }
 
 .sync-badge--syncing {
-    background: var(--white);
-    color: var(--black);
+  background: var(--white);
+  color: var(--black);
 }
 
 .sync-badge--offline {
-    background: var(--red);
-    color: var(--white);
+  background: var(--red);
+  color: var(--white);
 }
 
 .split {
-    flex: 1;
-    display: flex;
-    min-height: 0;
+  flex: 1;
+  display: flex;
+  min-height: 0;
 }
 
 .split-pane {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .split-pane--grow {
-    flex: 1;
+  flex: 1;
 }
 
 .split-divider {
-    width: 0;
-    border-left: var(--line);
-    cursor: col-resize;
-    flex: 0 0 auto;
-    touch-action: none;
+  width: 0;
+  border-left: var(--line);
+  cursor: col-resize;
+  flex: 0 0 auto;
+  touch-action: none;
 }
 
 .split-divider:hover {
-    border-left-color: var(--black);
-    box-shadow: 0 0 0 2px var(--black);
+  border-left-color: var(--black);
+  box-shadow: 0 0 0 2px var(--black);
 }
 
 .split-overlay {
-    position: fixed;
-    inset: 0;
-    cursor: col-resize;
-    z-index: 10;
+  position: fixed;
+  inset: 0;
+  cursor: col-resize;
+  z-index: 10;
 }
 
 /* Phone layout: two full-width pages on a swipeable horizontal track, with a
    segmented tab bar pinned at the bottom. */
 .pager {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .pager-track {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    transition: transform 0.25s ease;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  transition: transform 0.25s ease;
 }
 
 .pager-page {
-    flex: 0 0 100%;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .pager-tabs {
-    display: flex;
-    border-top: var(--line);
-    border-bottom: var(--line);
-    padding-bottom: env(safe-area-inset-bottom);
+  display: flex;
+  border-top: var(--line);
+  border-bottom: var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .pager-tabs button {
-    flex: 1;
-    border: none;
-    min-height: 44px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    background: var(--white);
-    color: var(--black);
+  flex: 1;
+  border: none;
+  min-height: 44px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  background: var(--white);
+  color: var(--black);
 }
 
 .pager-tabs button[aria-pressed="true"] {
-    background: var(--black);
-    color: var(--white);
+  background: var(--black);
+  color: var(--white);
 }
 
 /* The selection action that replaces the tabs while text is highlighted. */
 .pager-add-note {
-    background: var(--highlight);
-    font-weight: 700;
+  background: var(--highlight);
+  font-weight: 700;
 }
 
 .reader {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
 }
 
 .reader-empty {
-    margin: auto;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.6;
+  margin: auto;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
 }
 
 .reader-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    border-bottom: var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: var(--line);
 }
 
 .reader-bar .spacer {
-    flex: 1;
+  flex: 1;
 }
 
 .reader-bar .font-size {
-    min-width: 48px;
-    text-align: center;
+  min-width: 48px;
+  text-align: center;
 }
 
 .reader-bar .reader-title {
-    font-weight: 700;
-    max-width: 40%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  font-weight: 700;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reader-bar .page-count {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.reader-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: var(--line);
+}
+
+.reader-search-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 4px 8px;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+}
+
+.reader-search-input:focus {
+  outline: none;
+  background: var(--highlight);
+}
+
+.reader-search-count {
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+  text-align: center;
+  opacity: 0.7;
 }
 
 .reader-stage {
-    flex: 1;
-    min-height: 0;
-    position: relative;
+  flex: 1;
+  min-height: 0;
+  position: relative;
 }
 
 .reader-surface {
-    height: 100%;
-    min-height: 0;
-    position: relative;
+  height: 100%;
+  min-height: 0;
+  position: relative;
 }
 
 .reader-surface .reader-empty {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
 }
 
 .reader-page-turn {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    z-index: 2;
-    width: clamp(44px, 7vw, 84px);
-    border: none;
-    background: transparent;
-    padding: 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: clamp(44px, 7vw, 84px);
+  border: none;
+  background: transparent;
+  padding: 0;
 }
 
 .reader-page-turn:hover {
-    background: transparent;
+  background: transparent;
 }
 
 .reader-page-turn:focus-visible {
-    outline: 2px solid var(--black);
-    outline-offset: -6px;
+  outline: 2px solid var(--black);
+  outline-offset: -6px;
 }
 
 .reader-page-turn--prev {
-    left: 0;
+  left: 0;
 }
 
 .reader-page-turn--next {
-    right: 0;
+  right: 0;
 }
 
 /* Wider page-turn hit zones on touch, where taps are less precise. */
 @media (pointer: coarse) {
-    .reader-page-turn {
-        width: 64px;
-    }
+  .reader-page-turn {
+    width: 64px;
+  }
 }
 
 .note-panel {
-    padding: 18px;
-    overflow-y: auto;
-    flex: 1;
+  padding: 18px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .note-panel h2 {
-    margin: 0 0 12px;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .note-panel .empty {
-    opacity: 0.6;
+  opacity: 0.6;
 }
 
 .note-panel ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .note-panel .note {
-    display: flex;
-    flex-direction: column;
-    border: var(--line);
+  display: flex;
+  flex-direction: column;
+  border: var(--line);
 }
 
 .note-panel .note--deleted {
-    opacity: 0.75;
+  opacity: 0.75;
 }
 
 .note-panel .note-head {
-    display: flex;
+  display: flex;
 }
 
 /* The note's seq as a filled black square in the top-left corner of its head. */
 .note-panel .note-seq {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    align-self: stretch;
-    min-width: 34px;
-    padding: 0 6px;
-    background: var(--white);
-    color: var(--black);
-    font-weight: 700;
-    border-right: var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 34px;
+  padding: 0 6px;
+  background: var(--white);
+  color: var(--black);
+  font-weight: 700;
+  border-right: var(--line);
 }
 
 .note-panel .quote {
-    flex: 1;
-    border: none;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  flex: 1;
+  border: none;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .note-thread {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .note-panel .replies {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-left: 16px;
-    padding-left: 12px;
-    border-left: var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 16px;
+  padding-left: 12px;
+  border-left: var(--line);
 }
 
 /* The inline reply editor sits one level in, lining up under the note it
    replies to where the new reply will land. */
 .note-panel .reply-compose {
-    margin-left: 16px;
-    padding-left: 12px;
-    border-left: var(--line);
+  margin-left: 16px;
+  padding-left: 12px;
+  border-left: var(--line);
 }
 
 .note-panel .reply,
 .note-panel .edit,
 .note-panel .delete {
-    border: none;
-    border-left: var(--line);
+  border: none;
+  border-left: var(--line);
 }
 
 .note-panel .delete-wrap {
-    position: relative;
-    display: flex;
-    border-left: var(--line);
+  position: relative;
+  display: flex;
+  border-left: var(--line);
 }
 
 .note-panel .delete-wrap .delete {
-    border-left: none;
+  border-left: none;
 }
 
 .delete-confirm {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: -6px;
-    z-index: 4;
-    min-width: 136px;
-    padding: 12px;
-    border: var(--line);
-    background: var(--white);
-    box-shadow: 5px 5px 0 var(--black);
-    text-align: center;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: -6px;
+  z-index: 4;
+  min-width: 136px;
+  padding: 12px;
+  border: var(--line);
+  background: var(--white);
+  box-shadow: 5px 5px 0 var(--black);
+  text-align: center;
 }
 
 .delete-confirm p {
-    margin: 0 0 8px;
-    font-weight: 700;
-    text-transform: lowercase;
+  margin: 0 0 8px;
+  font-weight: 700;
+  text-transform: lowercase;
 }
 
 .delete-confirm-actions {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 700;
 }
 
 .delete-confirm-actions button {
-    border: none;
-    padding: 0 4px;
-    font-size: 20px;
-    line-height: 1;
+  border: none;
+  padding: 0 4px;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .note-panel .edit {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .note-panel .edit img {
-    width: 14px;
-    height: 14px;
+  width: 14px;
+  height: 14px;
 }
 
 .note-panel .edit:hover img {
-    filter: invert(1);
+  filter: invert(1);
 }
 
 .note-panel .note-head + .note-body {
-    border-top: var(--line);
+  border-top: var(--line);
 }
 
 .note-body {
-    padding: 8px 10px;
-    font-size: 14px;
-    line-height: 1.5;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .note-body p {
-    margin: 0 0 8px;
+  margin: 0 0 8px;
 }
 
 .note-body p:last-child {
-    margin-bottom: 0;
+  margin-bottom: 0;
 }
 
 .note-body blockquote {
-    margin: 0 0 8px;
-    padding-left: 10px;
-    border-left: 3px solid var(--black);
-    opacity: 0.8;
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--black);
+  opacity: 0.8;
 }
 
 /* `[[n]]` cross-reference chip, shared by the read view (button) and the editor
    (token text node). Inline, monospace, sits on the baseline of the text. */
 .note-ref {
-    display: inline-block;
-    padding: 0 4px;
-    border: 2px solid var(--black);
-    border-radius: 4px;
-    background: var(--white);
-    font: inherit;
-    font-weight: 700;
-    line-height: 1.2;
-    cursor: pointer;
-    white-space: nowrap;
+  display: inline-block;
+  padding: 0 4px;
+  border: 2px solid var(--black);
+  border-radius: 4px;
+  background: var(--white);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .note-ref:hover {
-    background: var(--black);
-    color: var(--white);
+  background: var(--black);
+  color: var(--white);
 }
 
 /* Brief flash when a reference scrolls its target note into view. */
 .note.flash {
-    animation: note-flash 1.2s ease-out;
+  animation: note-flash 1.2s ease-out;
 }
 
 @keyframes note-flash {
-    from {
-        background: var(--highlight);
-    }
+  from {
+    background: var(--highlight);
+  }
 
-    to {
-        background: var(--white);
-    }
+  to {
+    background: var(--white);
+  }
 }
 
 .note-editor {
-    display: flex;
-    flex-direction: column;
+  display: flex;
+  flex-direction: column;
 }
 
 .note-editor-input {
-    padding: 8px 10px;
-    min-height: 64px;
-    outline: none;
-    font-size: 14px;
-    line-height: 1.5;
+  padding: 8px 10px;
+  min-height: 64px;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .note-editor-input .bc-bold {
-    font-weight: 700;
+  font-weight: 700;
 }
 
 .note-editor-input .bc-italic {
-    font-style: italic;
+  font-style: italic;
 }
 
 .note-editor-input .bc-quote {
-    padding-left: 10px;
-    border-left: 3px solid var(--black);
-    opacity: 0.8;
+  padding-left: 10px;
+  border-left: 3px solid var(--black);
+  opacity: 0.8;
 }
 
 .note-editor-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    padding: 6px;
-    border-top: var(--line);
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px;
+  border-top: var(--line);
 }
 
 .note-editor-actions .primary {
-    font-weight: 700;
+  font-weight: 700;
 }
 
 .bc-highlight {
-    fill: var(--highlight);
-    fill-opacity: 0.4;
-    /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
+  fill: var(--highlight);
+  fill-opacity: 0.4;
+  /* Multiply keeps the tint flat where a highlight's rects overlap (e.g. when a
      larger font reflows it across more lines) and keeps the text readable. */
-    mix-blend-mode: multiply;
+  mix-blend-mode: multiply;
+}
+
+/* Search hits are underlined (epub.js draws them as SVG lines), a separate
+   annotation type from note highlights so the two never collide. */
+.bc-search {
+  stroke: var(--red);
+  stroke-width: 2px;
 }
 
 .add-note {
-    position: fixed;
-    transform: translate(-50%, 8px);
-    z-index: 10;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    font-size: 12px;
-    min-height: 44px;
-    padding: 0 16px;
-    background: var(--white);
-    border: var(--line);
-    box-shadow: 4px 4px 0 var(--black);
-    touch-action: manipulation;
+  position: fixed;
+  transform: translate(-50%, 8px);
+  z-index: 10;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--white);
+  border: var(--line);
+  box-shadow: 4px 4px 0 var(--black);
+  touch-action: manipulation;
 }
 
 .home-loading {
-    height: 100%;
-    display: grid;
-    place-items: center;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.6;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
 }
 
 .spinner-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .spinner {
-    display: inline-block;
-    width: 18px;
-    height: 18px;
-    border: 3px solid var(--black);
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 3px solid var(--black);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
 
 .spinner-label {
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
 }
 
 @keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .home {
-    height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 40px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 40px;
 }
 
 .home-card {
-    position: relative;
-    width: min(900px, 92vw);
-    height: min(560px, 82vh);
-    background: var(--white);
-    border: var(--line);
-    /* Stacked offset rectangles fake a block of pages on the lower-right edge,
+  position: relative;
+  width: min(900px, 92vw);
+  height: min(560px, 82vh);
+  background: var(--white);
+  border: var(--line);
+  /* Stacked offset rectangles fake a block of pages on the lower-right edge,
      finished with the original hard drop shadow. */
-    box-shadow:
-        5px 5px 0 0 var(--white),
-        5px 5px 0 3px var(--black),
-        10px 10px 0 0 var(--white),
-        10px 10px 0 3px var(--black),
-        15px 15px 0 0 var(--white),
-        15px 15px 0 3px var(--black),
-        20px 20px 0 0 var(--black);
+  box-shadow:
+    5px 5px 0 0 var(--white),
+    5px 5px 0 3px var(--black),
+    10px 10px 0 0 var(--white),
+    10px 10px 0 3px var(--black),
+    15px 15px 0 0 var(--white),
+    15px 15px 0 3px var(--black),
+    20px 20px 0 0 var(--black);
 }
 
 /* The center spine: makes the card read like an open book. */
 .home-card::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    border-left: var(--line);
-    transform: translateX(-50%);
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  border-left: var(--line);
+  transform: translateX(-50%);
 }
 
 /* A red ribbon bookmark poking out of the top of the book. */
 .home-card::after {
-    content: "";
-    position: absolute;
-    top: -42px;
-    left: 90%;
-    width: 36px;
-    height: 70px;
-    background: var(--red);
-    border: var(--line);
-    border-radius: 4px 4px 8px 8px;
-    z-index: -1;
+  content: "";
+  position: absolute;
+  top: -42px;
+  left: 90%;
+  width: 36px;
+  height: 70px;
+  background: var(--red);
+  border: var(--line);
+  border-radius: 4px 4px 8px 8px;
+  z-index: -1;
 }
 
 .home-corner {
-    position: absolute;
+  position: absolute;
 }
 
 .home-corner--login {
-    top: 18px;
-    right: 22px;
+  top: 18px;
+  right: 22px;
 }
 
 .home-corner--credit {
-    bottom: 18px;
-    right: 22px;
-    font-weight: 700;
+  bottom: 18px;
+  right: 22px;
+  font-weight: 700;
 }
 
 .home-main {
-    position: absolute;
-    left: 48px;
-    top: 52%;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 14px;
+  position: absolute;
+  left: 48px;
+  top: 52%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
 }
 
 .home-title {
-    margin: 0 0 10px;
-    font-size: clamp(40px, 8vw, 72px);
-    line-height: 1;
-    letter-spacing: -1px;
+  margin: 0 0 10px;
+  font-size: clamp(40px, 8vw, 72px);
+  line-height: 1;
+  letter-spacing: -1px;
 }
 
 .home-action {
-    font-size: 15px;
+  font-size: 15px;
 }
 
 /* Black square back button in the top-left corner of a club card. */
 .home-back {
-    position: absolute;
-    top: 18px;
-    left: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    font-size: 22px;
-    font-weight: 700;
-    line-height: 1;
-    text-decoration: none;
-    background: var(--black);
-    color: var(--white);
-    border: var(--line);
+  position: absolute;
+  top: 18px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  background: var(--black);
+  color: var(--white);
+  border: var(--line);
 }
 
 .home-back:hover {
-    background: var(--white);
-    color: var(--black);
+  background: var(--white);
+  color: var(--black);
 }
 
 /* The upload affordance reads as a clickable blue link. */
 .home-upload-link {
-    align-self: flex-start;
-    font-size: 15px;
-    color: #0000ee;
-    text-decoration: underline;
-    cursor: pointer;
+  align-self: flex-start;
+  font-size: 15px;
+  color: #0000ee;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .home-create {
-    display: flex;
-    align-items: stretch;
+  display: flex;
+  align-items: stretch;
 }
 
 .home-create input {
-    font: inherit;
-    border: var(--line);
-    border-radius: 0;
-    outline: none;
-    padding: 4px 10px;
-    background: var(--white);
+  font: inherit;
+  border: var(--line);
+  border-radius: 0;
+  outline: none;
+  padding: 4px 10px;
+  background: var(--white);
 }
 
 .home-create-confirm {
-    background: var(--black);
-    color: var(--white);
-    font-weight: 700;
-    line-height: 1;
-    width: 34px;
-    padding: 0;
-    /* Sit flush against the input, sharing the border edge. */
-    border-left: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  line-height: 1;
+  width: 34px;
+  padding: 0;
+  /* Sit flush against the input, sharing the border edge. */
+  border-left: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .home-create-confirm:hover {
-    background: var(--white);
-    color: var(--black);
+  background: var(--white);
+  color: var(--black);
 }
 
 /* Keep the plus on its black square (and white) even while disabled. */
 .home-create-confirm:disabled,
 .home-create-confirm:disabled:hover {
-    background: var(--black);
-    color: var(--white);
+  background: var(--black);
+  color: var(--white);
 }
 
 .home-clubs {
-    margin-top: 8px;
+  margin-top: 8px;
 }
 
 .home-club-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .home-club-list li {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .topbar-home {
-    font-weight: 700;
-    text-decoration: none;
-    color: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
 }
 
 .home-existing {
-    display: flex;
-    align-items: stretch;
-    border: var(--line);
-    padding: 0;
+  display: flex;
+  align-items: stretch;
+  border: var(--line);
+  padding: 0;
 }
 
 .home-existing-label {
-    align-self: center;
-    padding: 4px 10px;
+  align-self: center;
+  padding: 4px 10px;
 }
 
 /* The club picker sits to the right of the label, divided by the box's interior
    separator. */
 .home-existing select {
-    font: inherit;
-    border: none;
-    border-left: var(--line);
-    padding: 4px 10px;
-    background: var(--white);
-    cursor: pointer;
+  font: inherit;
+  border: none;
+  border-left: var(--line);
+  padding: 4px 10px;
+  background: var(--white);
+  cursor: pointer;
 }
 
 /* Grayed out until signed in. */
 .home-existing:has(select:disabled) {
-    color: var(--gray);
+  color: var(--gray);
 }
 
 .home-existing select:disabled {
-    color: var(--gray);
-    cursor: not-allowed;
+  color: var(--gray);
+  cursor: not-allowed;
 }
 
 .login {
-    text-align: right;
+  text-align: right;
 }
 
 .login--authed {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .login-email {
-    font-weight: 700;
+  font-weight: 700;
 }
 
 .login-link {
-    border: none;
-    background: none;
-    padding: 0;
-    font: inherit;
-    text-decoration: underline;
-    cursor: pointer;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .login-link:hover {
-    background: none;
-    color: var(--black);
-    text-decoration: none;
+  background: none;
+  color: var(--black);
+  text-decoration: none;
 }
 
 .login-error {
-    margin: 8px 0 0;
-    color: var(--red);
-    font-size: 12px;
+  margin: 8px 0 0;
+  color: var(--red);
+  font-size: 12px;
 }
 
 .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    display: grid;
-    place-items: center;
-    background: rgb(0 0 0 / 35%);
-    padding: 20px;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 35%);
+  padding: 20px;
 }
 
 .modal {
-    width: min(380px, 100%);
-    background: var(--white);
-    border: var(--line);
-    box-shadow: 8px 8px 0 var(--black);
+  width: min(380px, 100%);
+  background: var(--white);
+  border: var(--line);
+  box-shadow: 8px 8px 0 var(--black);
 }
 
 .modal-head {
-    display: flex;
-    align-items: stretch;
-    border-bottom: var(--line);
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--line);
 }
 
 .modal-head strong {
-    flex: 1;
-    padding: 8px 12px;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .modal-head button {
-    border: none;
-    border-left: var(--line);
-    padding: 0 12px;
+  border: none;
+  border-left: var(--line);
+  padding: 0 12px;
 }
 
 .modal-body {
-    padding: 16px;
+  padding: 16px;
 }
 
 .modal-body form {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
 .modal-body input {
-    font: inherit;
-    border: var(--line);
-    padding: 8px 10px;
-    width: 100%;
+  font: inherit;
+  border: var(--line);
+  padding: 8px 10px;
+  width: 100%;
 }
 
 .modal-body .primary {
-    font-weight: 700;
+  font-weight: 700;
 }
 
 .modal-note {
-    margin: 0;
-    font-size: 12px;
-    opacity: 0.7;
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .modal-success {
-    margin: 0;
-    font-weight: 700;
-    text-align: center;
+  margin: 0;
+  font-weight: 700;
+  text-align: center;
 }
 
 .modal--invite {
-    width: min(460px, 100%);
+  width: min(460px, 100%);
 }
 
 .invite-link {
-    display: flex;
-    gap: 6px;
-    align-items: stretch;
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
 }
 
 .invite-link input {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    font-size: 12px;
-    border: var(--line);
-    padding: 4px 8px;
-    background: var(--white);
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  border: var(--line);
+  padding: 4px 8px;
+  background: var(--white);
 }
 
 .invite-icon {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    flex: 0 0 auto;
-    padding: 0;
-    border: var(--line);
-    background: var(--white);
-    cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: var(--line);
+  background: var(--white);
+  cursor: pointer;
 }
 
 .invite-icon:hover:not(:disabled) {
-    background: var(--black);
-    color: var(--white);
+  background: var(--black);
+  color: var(--white);
 }
 
 .invite-icon:disabled {
-    opacity: 0.4;
-    cursor: default;
+  opacity: 0.4;
+  cursor: default;
 }
 
 .invite-share {
-    margin-top: 16px;
-    border-top: var(--line);
-    padding-top: 12px;
+  margin-top: 16px;
+  border-top: var(--line);
+  padding-top: 12px;
 }
 
 .invite-people-head {
-    margin: 0 0 8px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.6;
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
 }
 
 .invite-people-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .invite-people-list li {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .invite-avatar {
-    position: relative;
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    flex: 0 0 auto;
-    border: var(--line);
-    background: var(--black);
-    color: var(--white);
-    font-weight: 700;
-    font-size: 13px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: var(--line);
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  font-size: 13px;
 }
 
 .presence-pip {
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    width: 10px;
-    height: 10px;
-    border: 2px solid var(--white);
-    border-radius: 50%;
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--white);
+  border-radius: 50%;
 }
 
 .presence-pip--on {
-    background: #2ecc40;
+  background: #2ecc40;
 }
 
 .presence-pip--off {
-    background: var(--gray);
+  background: var(--gray);
 }
 
 .invite-person-text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .invite-person-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .invite-person-email {
-    font-size: 11px;
-    opacity: 0.55;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  font-size: 11px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .invite-person-role {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 0.6;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
 }
 
 .person--offline {
-    opacity: 0.5;
+  opacity: 0.5;
 }
 
 .topbar-invite {
-    font: inherit;
-    border: var(--line);
-    padding: 2px 10px;
-    background: var(--white);
-    cursor: pointer;
+  font: inherit;
+  border: var(--line);
+  padding: 2px 10px;
+  background: var(--white);
+  cursor: pointer;
 }
 
 .group-context {
-    padding: 8px 0 10px;
-    border-bottom: var(--line);
-    margin-bottom: 8px;
+  padding: 8px 0 10px;
+  border-bottom: var(--line);
+  margin-bottom: 8px;
 }
 
 .group-book {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .group-book-title {
-    font-weight: 700;
+  font-weight: 700;
 }
 
 .group-book-rename {
-    border: none;
-    background: none;
-    cursor: pointer;
-    padding: 0;
-    opacity: 0.6;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.6;
 }
 
 .group-book-rename:hover {
-    opacity: 1;
+  opacity: 1;
 }
 
 .group-book-edit {
-    display: flex;
-    gap: 6px;
+  display: flex;
+  gap: 6px;
 }
 
 .group-book-edit input {
-    font: inherit;
-    border: var(--line);
-    padding: 2px 8px;
-    background: var(--white);
+  font: inherit;
+  border: var(--line);
+  padding: 2px 8px;
+  background: var(--white);
 }
 
 .group-roster {
-    margin: 6px 0 0;
-    font-size: 12px;
-    opacity: 0.7;
+  margin: 6px 0 0;
+  font-size: 12px;
+  opacity: 0.7;
 }
 
 .toast-viewport {
-    position: fixed;
-    right: 18px;
-    bottom: 18px;
-    z-index: 30;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 10px;
-    max-width: min(420px, calc(100vw - 36px));
-    pointer-events: none;
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 36px));
+  pointer-events: none;
 }
 
 .toast {
-    --toast-duration: 2000ms;
-    display: flex;
-    flex-direction: column;
-    max-width: 100%;
-    border: var(--line);
-    background: var(--white);
-    box-shadow: 6px 6px 0 var(--black);
-    animation: toast-fade var(--toast-duration) linear forwards;
-    pointer-events: auto;
+  --toast-duration: 2000ms;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  border: var(--line);
+  background: var(--white);
+  box-shadow: 6px 6px 0 var(--black);
+  animation: toast-fade var(--toast-duration) linear forwards;
+  pointer-events: auto;
 }
 
 .toast-head {
-    display: flex;
-    align-items: stretch;
-    border-bottom: var(--line);
+  display: flex;
+  align-items: stretch;
+  border-bottom: var(--line);
 }
 
 .toast-head strong {
-    flex: 1;
-    padding: 6px 10px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+  flex: 1;
+  padding: 6px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .toast-head button {
-    border: none;
-    border-left: var(--line);
-    padding: 0 8px;
-    text-transform: uppercase;
+  border: none;
+  border-left: var(--line);
+  padding: 0 8px;
+  text-transform: uppercase;
 }
 
 .toast--error .toast-head {
-    background: var(--red);
-    color: var(--white);
+  background: var(--red);
+  color: var(--white);
 }
 
 .toast--error .toast-head button {
-    background: var(--red);
-    color: var(--white);
+  background: var(--red);
+  color: var(--white);
 }
 
 .toast--error .toast-head button:hover {
-    background: var(--white);
-    color: var(--red);
+  background: var(--white);
+  color: var(--red);
 }
 
 .toast p {
-    margin: 0;
-    padding: 10px 12px;
-    overflow-wrap: anywhere;
-    font-size: 12px;
-    line-height: 1.4;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 @keyframes toast-fade {
-    0%,
-    78% {
-        opacity: 1;
-        transform: translateY(0);
-    }
+  0%,
+  78% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 
-    100% {
-        opacity: 0;
-        transform: translateY(8px);
-    }
+  100% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 /* Tighten the topbar so its controls fit a phone width. */
 @media (max-width: 720px) {
-    .topbar {
-        gap: 8px;
-        padding: 10px 12px;
-    }
+  .topbar {
+    gap: 8px;
+    padding: 10px 12px;
+  }
 
-    /* Let the title take the slack so invite/presence/settings sit at the right. */
-    .topbar h1,
-    .topbar-title-edit {
-        font-size: 16px;
-        letter-spacing: 1px;
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
+  /* Let the title take the slack so invite/presence/settings sit at the right. */
+  .topbar h1,
+  .topbar-title-edit {
+    font-size: 16px;
+    letter-spacing: 1px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-    .reader-bar .reader-title {
-        max-width: 50%;
-    }
+  .reader-bar .reader-title {
+    max-width: 50%;
+  }
 
-    /* Declutter the phone view: drop the progress readout, and swap the sync
+  /* Declutter the phone view: drop the progress readout, and swap the sync
        badge for the presence indicator (the people list). */
-    .reader-bar .page-count,
-    .sync-badge {
-        display: none;
-    }
+  .reader-bar .page-count,
+  .sync-badge {
+    display: none;
+  }
 
-    /* Landing page: simplify the book illustration for a narrow screen — drop the
+  /* Landing page: simplify the book illustration for a narrow screen — drop the
      stacked-page shadow and center spine, center the card and its content, and
      move the bookmark to the left edge. */
-    .home {
-        padding: 24px;
-    }
+  .home {
+    padding: 24px;
+    transform: translateX(-8px);
+  }
 
-    .home-card {
-        box-shadow: 8px 8px 0 var(--black);
-        margin-right: 48px;
-    }
+  .home-card {
+    box-shadow: 8px 8px 0 var(--black);
+  }
 
-    .home-card::before {
-        display: none;
-    }
+  .home-card::before {
+    display: none;
+  }
 
-    .home-card::after {
-        left: 10%;
-    }
+  .home-card::after {
+    left: 10%;
+  }
 
-    .home-main {
-        left: -10px;
-        right: 0;
-        align-items: center;
-        text-align: center;
-        padding: 0 24px;
-    }
+  .home-main {
+    left: -10px;
+    right: 0;
+    align-items: center;
+    text-align: center;
+    padding: 0 24px;
+  }
 }

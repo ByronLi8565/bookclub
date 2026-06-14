@@ -4,7 +4,7 @@ import {
   REFERENCE_IMPORT,
   REFERENCE_PATTERN,
   REFERENCE_TYPING,
-} from "../client/references.ts";
+} from "../shared/references.ts";
 
 describe("extractReferences", () => {
   it("returns every referenced seq in order, keeping duplicates", () => {
