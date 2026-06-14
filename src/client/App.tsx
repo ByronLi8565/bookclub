@@ -18,6 +18,7 @@ export default function App() {
   // Notes are owned by the durable object; this is its live broadcast state.
   const agent = useNoteAgent(sourceId);
   const notes = agent.notes;
+  const canWriteNotes = agent.syncStatus === "online";
 
   // The armed highlight being composed into a new note (painted, awaiting save).
   const [composing, setComposing] = useState<Highlight | null>(null);
@@ -252,6 +253,7 @@ export default function App() {
         right={
           <NotePanel
             notes={notes}
+            canWrite={canWriteNotes}
             composing={composing !== null}
             composeInitialBody={composeInitialBody}
             onComposeSave={onComposeSave}

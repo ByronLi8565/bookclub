@@ -45,7 +45,17 @@ export interface NoteActions {
 
 // One note: its head and body (or an inline edit editor), followed by an inline
 // reply editor when this note is the reply target.
-function NoteRow({ note, actions, refs }: { note: Note; actions: NoteActions; refs: NoteRefs }) {
+function NoteRow({
+  note,
+  actions,
+  refs,
+  canWrite,
+}: {
+  note: Note;
+  actions: NoteActions;
+  refs: NoteRefs;
+  canWrite: boolean;
+}) {
   // A note can jump if it (or an ancestor, for replies) carries a highlight.
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
@@ -79,6 +89,7 @@ function NoteRow({ note, actions, refs }: { note: Note; actions: NoteActions; re
           onSave={(body) => actions.onEditSave(note, body)}
           onCancel={actions.onEditCancel}
           validSeqs={refs.validSeqs}
+          canSubmit={canWrite}
         />
       </div>
     );
@@ -125,6 +136,7 @@ function NoteRow({ note, actions, refs }: { note: Note; actions: NoteActions; re
                 aria-label="delete"
                 title="Delete"
                 aria-expanded={confirmingDelete}
+                disabled={!canWrite}
               >
                 ✕
               </button>
@@ -147,6 +159,7 @@ function NoteRow({ note, actions, refs }: { note: Note; actions: NoteActions; re
                         actions.onDelete(note);
                       }}
                       aria-label="confirm delete"
+                      disabled={!canWrite}
                     >
                       ✓
                     </button>
@@ -168,6 +181,7 @@ function NoteRow({ note, actions, refs }: { note: Note; actions: NoteActions; re
             onSave={(body) => actions.onReplySave(note.id, body)}
             onCancel={actions.onReplyCancel}
             validSeqs={refs.validSeqs}
+            canSubmit={canWrite}
           />
         </div>
       )}
@@ -182,12 +196,14 @@ function Replies({
   childrenMap,
   actions,
   refs,
+  canWrite,
   depth,
 }: {
   parent: Note;
   childrenMap: Map<string, Note[]>;
   actions: NoteActions;
   refs: NoteRefs;
+  canWrite: boolean;
   depth: number;
 }) {
   const children = (childrenMap.get(parent.id) ?? []).toSorted((a, b) =>
@@ -197,12 +213,13 @@ function Replies({
 
   const content = children.map((child) => (
     <Fragment key={child.id}>
-      <NoteRow note={child} actions={actions} refs={refs} />
+      <NoteRow note={child} actions={actions} refs={refs} canWrite={canWrite} />
       <Replies
         parent={child}
         childrenMap={childrenMap}
         actions={actions}
         refs={refs}
+        canWrite={canWrite}
         depth={depth + 1}
       />
     </Fragment>
@@ -217,16 +234,25 @@ export function NoteThread({
   childrenMap,
   actions,
   refs,
+  canWrite,
 }: {
   root: Note;
   childrenMap: Map<string, Note[]>;
   actions: NoteActions;
   refs: NoteRefs;
+  canWrite: boolean;
 }) {
   return (
     <li className="note-thread">
-      <NoteRow note={root} actions={actions} refs={refs} />
-      <Replies parent={root} childrenMap={childrenMap} actions={actions} refs={refs} depth={1} />
+      <NoteRow note={root} actions={actions} refs={refs} canWrite={canWrite} />
+      <Replies
+        parent={root}
+        childrenMap={childrenMap}
+        actions={actions}
+        refs={refs}
+        canWrite={canWrite}
+        depth={1}
+      />
     </li>
   );
 }

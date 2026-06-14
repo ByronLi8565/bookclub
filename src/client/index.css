@@ -33,6 +33,16 @@ button:hover {
   color: #fff;
 }
 
+button:disabled {
+  color: #777;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: #fff;
+  color: #777;
+}
+
 .app {
   display: flex;
   flex-direction: column;

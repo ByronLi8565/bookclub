@@ -5,6 +5,7 @@ import { NoteThread, type NoteActions, type NoteRefs } from "./NoteThread.tsx";
 // Right-pane list of note threads.
 export function NotePanel({
   notes,
+  canWrite,
   composing,
   composeInitialBody,
   onComposeSave,
@@ -13,6 +14,7 @@ export function NotePanel({
   refs,
 }: {
   notes: Note[];
+  canWrite: boolean;
   composing: boolean;
   composeInitialBody: string;
   onComposeSave: (body: string) => void;
@@ -45,6 +47,7 @@ export function NotePanel({
             childrenMap={childrenMap}
             actions={actions}
             refs={refs}
+            canWrite={canWrite}
           />
         ))}
         {composing && (
@@ -55,6 +58,7 @@ export function NotePanel({
               onSave={onComposeSave}
               onCancel={onComposeCancel}
               validSeqs={refs.validSeqs}
+              canSubmit={canWrite}
             />
           </li>
         )}

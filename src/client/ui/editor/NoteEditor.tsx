@@ -49,6 +49,7 @@ function buildInitialState(initialBody: string, transformers: Transformer[]) {
 function Chrome({
   containerRef,
   submitLabel,
+  canSubmit,
   onSubmit,
   onCancel,
   transformers,
@@ -56,6 +57,7 @@ function Chrome({
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   submitLabel: string;
+  canSubmit: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
   transformers: Transformer[];
@@ -64,9 +66,10 @@ function Chrome({
   const [editor] = useLexicalComposerContext();
 
   const submit = useCallback(() => {
+    if (!canSubmit) return;
     const body = editor.getEditorState().read(() => $convertToMarkdownString(transformers));
     onSubmit(body.trim());
-  }, [editor, onSubmit, transformers]);
+  }, [canSubmit, editor, onSubmit, transformers]);
 
   // Ctrl/Cmd+B and +I format; Ctrl/Cmd+Enter publishes. Scoped to this editor's
   // container so multiple open editors don't fire each other's shortcuts.
@@ -91,7 +94,7 @@ function Chrome({
           explicit (Cmd+B/I / markdown on save) as before. */}
       <MarkdownShortcutPlugin transformers={[referenceTransformer]} />
       <div className="note-editor-actions">
-        <button type="button" className="primary" onClick={submit}>
+        <button type="button" className="primary" onClick={submit} disabled={!canSubmit}>
           {submitLabel}
         </button>
         <button type="button" onClick={onCancel}>
@@ -108,12 +111,14 @@ export function NoteEditor({
   onSave,
   onCancel,
   validSeqs,
+  canSubmit = true,
 }: {
   initialBody: string;
   submitLabel: string;
   onSave: (body: string) => void;
   onCancel: () => void;
   validSeqs: Set<number>;
+  canSubmit?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Read the valid seqs fresh on each transform so peer-added notes count, while
@@ -138,6 +143,7 @@ export function NoteEditor({
         <Chrome
           containerRef={containerRef}
           submitLabel={submitLabel}
+          canSubmit={canSubmit}
           onSubmit={onSave}
           onCancel={onCancel}
           transformers={transformers}
