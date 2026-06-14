@@ -234,6 +234,9 @@ export default function App() {
           />
         </label>
         {sourceId && (
+          <span className={`sync-badge sync-badge--${agent.syncStatus}`}>{agent.syncStatus}</span>
+        )}
+        {sourceId && (
           <button
             type="button"
             className="source-id"

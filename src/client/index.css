@@ -76,6 +76,29 @@ button:hover {
   opacity: 1;
 }
 
+.sync-badge {
+  border: var(--line);
+  padding: 4px 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.sync-badge--online {
+  background: #000;
+  color: #fff;
+}
+
+.sync-badge--syncing {
+  background: #fff;
+  color: #000;
+}
+
+.sync-badge--offline {
+  background: #d60000;
+  color: #fff;
+}
+
 .split {
   flex: 1;
   display: flex;

@@ -9,6 +9,7 @@ import { spawnToast } from "./ui/toast.tsx";
 // which arrives as a fresh `notes` value on the next render.
 export interface NoteSync {
   notes: Note[];
+  syncStatus: "syncing" | "online" | "offline";
   addNote: (body: string, highlights: Highlight[]) => boolean;
   addReply: (parent: string, body: string) => boolean;
   editNote: (id: string, body: string) => boolean;
@@ -40,6 +41,13 @@ export function useNoteAgent(sourceId: string | null): NoteSync {
 
   return {
     notes: sourceId ? (agent.state?.notes ?? []) : [],
+    syncStatus: syncStatus(
+      sourceId,
+      agent.readyState,
+      agent.CONNECTING,
+      agent.OPEN,
+      agent.identified,
+    ),
     addNote: (body, highlights) => fire(() => stub.addNote(body, highlights)),
     addReply: (parent, body) => fire(() => stub.addReply(parent, body)),
     editNote: (id, body) => fire(() => stub.editNote(id, body)),
@@ -47,4 +55,17 @@ export function useNoteAgent(sourceId: string | null): NoteSync {
     rebindHighlight: (noteId, highlightId, cfiValue) =>
       fire(() => stub.rebindHighlight(noteId, highlightId, cfiValue)),
   };
+}
+
+function syncStatus(
+  sourceId: string | null,
+  readyState: number,
+  connectingState: number,
+  openState: number,
+  identified: boolean,
+): NoteSync["syncStatus"] {
+  if (!sourceId) return "syncing";
+  if (readyState === openState) return identified ? "online" : "syncing";
+  if (readyState === connectingState) return "syncing";
+  return "offline";
 }
