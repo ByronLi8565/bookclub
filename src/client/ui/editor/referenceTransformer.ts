@@ -1,4 +1,5 @@
 import type { TextMatchTransformer } from "@lexical/markdown";
+import { REFERENCE_IMPORT, REFERENCE_TYPING } from "../../references.ts";
 import { $createReferenceNode, $isReferenceNode, ReferenceNode } from "./ReferenceNode.ts";
 
 // Round-trips `[[n]]` <-> ReferenceNode for both markdown import/export and live
@@ -9,9 +10,9 @@ export function createReferenceTransformer(getValidSeqs: () => Set<number>): Tex
   return {
     dependencies: [ReferenceNode],
     export: (node) => ($isReferenceNode(node) ? `[[${node.getSeq()}]]` : null),
-    importRegExp: /\[\[(\d+)\]\]/u,
-    // Trailing $ + trigger "]" so the live shortcut fires as the closing ]] is typed.
-    regExp: /\[\[(\d+)\]\]$/u,
+    importRegExp: REFERENCE_IMPORT,
+    // Anchored variant + trigger "]" so the live shortcut fires as the closing ]] is typed.
+    regExp: REFERENCE_TYPING,
     replace: (textNode, match) => {
       const seq = Number(match[1]);
       if (!getValidSeqs().has(seq)) return;
