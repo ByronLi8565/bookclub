@@ -19,14 +19,13 @@ import {
   renderPageThumbnail,
 } from "./pdf.ts";
 
-// PDF metadata dictionary fields we surface, all optional in the spec.
+// PDF metadata fields we surface.
 interface PdfInfo {
   Title?: string;
   Author?: string;
 }
 
-// A PDF with a usable text layer supports everything; an image-only PDF supports
-// none of the text-based capabilities and is rejected.
+// Capabilities for a PDF with a usable text layer.
 const TEXT_CAPABILITIES: SourceCapabilities = {
   selectableText: true,
   textAnchors: true,
@@ -36,15 +35,10 @@ const TEXT_CAPABILITIES: SourceCapabilities = {
 };
 
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
-// Below this fraction of pages carrying text, warn about low coverage.
 const LOW_COVERAGE = 0.8;
-// Fraction of replacement chars above which extraction looks unreliable.
 const BAD_ENCODING = 0.02;
 
-// Health-check a PDF with the same parser the reader uses. Confirms it parses,
-// is not encrypted, and has an extractable text layer with usable geometry.
-// Every page is scanned (not sampled): inspection is rare and runs once at
-// upload, so accuracy is worth the wait — `onProgress` drives a progress bar.
+// Health-check a PDF by parsing every page and verifying the text layer.
 export async function inspectPdf(
   file: File,
   onProgress?: InspectionProgress,
@@ -85,8 +79,6 @@ export async function inspectPdf(
     let totalChars = 0;
     let replacementChars = 0;
 
-    // Scan every page. Release each page after reading it so a very large
-    // document doesn't accumulate the whole text layer in memory.
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
       const page = await doc.getPage(pageNum);
       const items = await pageTextItems(page);
@@ -101,7 +93,6 @@ export async function inspectPdf(
       onProgress?.(pageNum / numPages);
     }
 
-    // No text on any page: image-only / scanned. Cannot anchor notes.
     if (pagesWithText === 0) {
       return {
         health: healthError([
@@ -110,7 +101,6 @@ export async function inspectPdf(
         metadata,
       };
     }
-    // Text exists but lacks geometry: cannot build rect anchors.
     if (pagesWithGeometry === 0) {
       return {
         health: healthError([

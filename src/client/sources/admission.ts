@@ -6,10 +6,7 @@ import { inspectPdf } from "./pdfHealth.ts";
 
 export type { InspectionProgress, SourceMetadata, SourceInspectionResult } from "./inspection.ts";
 
-// Pre-upload source health, run client-side before the file is sent (Option A).
-// The UI renders the result: `ok` uploads immediately, `warn` asks for
-// confirmation, `error` refuses. The health check uses the same parser/anchor
-// path the runtime reader uses, so it tests the interface real highlights need.
+// Client-side pre-upload health check result.
 export type SourceInspection =
   | {
       ok: true;

@@ -3,13 +3,11 @@ import * as Effect from "effect/Effect";
 
 export class HashError extends Data.TaggedError("HashError")<{ cause: unknown }> {}
 
-// SHA-256 a byte buffer and return its lower-case hex digest.
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Content-address a file or blob: sha256(bytes) -> source id.
 export const hashFile = (file: Blob): Effect.Effect<string, HashError> =>
   Effect.tryPromise({
     try: async () => sha256Hex(await file.arrayBuffer()),

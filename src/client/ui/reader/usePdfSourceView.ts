@@ -410,7 +410,7 @@ export function usePdfSourceView(
         clear: () => sel.removeAllRanges(),
       };
       paintComposing(rects);
-      setSelection(popupPoint(range.getBoundingClientRect(), undefined));
+      setSelection(popupPoint(range.getBoundingClientRect()));
     };
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);

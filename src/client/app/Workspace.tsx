@@ -223,21 +223,21 @@ export function Workspace({
     setReplyingTo((id) => (id === note.id ? null : id));
   }
 
-  // The threaded view of the flat note list: roots, replies, and the id/seq
-  // lookups used for anchor inheritance, jump targets, and chip hovers. Built
-  // once per note-state change.
   const conversation = useMemo(() => buildConversation(notes), [notes]);
-  const { byId, bySeq } = conversation;
+  const { byId } = conversation;
+  const allConversation = useMemo(() => buildConversation(agent.notes), [agent.notes]);
+  const { byId: allById, bySeq: allBySeq } = allConversation;
   const noteRefs = useMemo<NoteRefs>(
     () => ({
-      validSeqs: new Set(bySeq.keys()),
+      validSeqs: new Set(allBySeq.keys()),
       byId,
-      refs: new Map([...bySeq].map(([seq, n]) => [seq, noteSnippet(n)] as const)),
+      refs: new Map([...allBySeq].map(([seq, n]) => [seq, noteSnippet(n)] as const)),
     }),
-    [byId, bySeq],
+    [byId, allBySeq],
   );
 
   const { goTo } = view;
+  const [pendingReferenceSeq, setPendingReferenceSeq] = useState<number | null>(null);
 
   // Scroll the panel to a note and flash it. Shared by every "go to this note"
   // path (jumping from the note itself, or following a `[[n]]` reference) so the
@@ -265,20 +265,43 @@ export function Workspace({
     [byId, goTo, flashNote],
   );
 
-  // Click a `[[n]]` chip: jump the reader to note n's (inherited) highlight and
-  // flash it in the panel.
+  useEffect(() => {
+    if (pendingReferenceSeq === null) return;
+    const target = allBySeq.get(pendingReferenceSeq);
+    if (!target) {
+      setPendingReferenceSeq(null);
+      return;
+    }
+    if (target.sourceId !== sourceId || !view.ready) return;
+    const hl = effectiveHighlight(target, allById);
+    if (hl) {
+      goTo(hl.anchor);
+      setPane("reader");
+    } else {
+      setPane("notes");
+    }
+    requestAnimationFrame(() => flashNote(target.seq));
+    setPendingReferenceSeq(null);
+  }, [pendingReferenceSeq, allBySeq, allById, sourceId, view.ready, goTo, flashNote]);
+
   const onReference = useCallback(
     (seq: number) => {
-      const target = bySeq.get(seq);
+      const target = allBySeq.get(seq);
       if (!target) return;
-      const hl = effectiveHighlight(target, byId);
+      if (target.sourceId !== sourceId) {
+        setPendingReferenceSeq(seq);
+        onSelectBook(target.sourceId);
+        setPane("reader");
+        return;
+      }
+      const hl = effectiveHighlight(target, allById);
       if (hl) {
         goTo(hl.anchor);
         setPane("reader"); // a reference jumps the reader to the cited highlight
       }
       flashNote(seq);
     },
-    [bySeq, byId, goTo, flashNote],
+    [allBySeq, allById, sourceId, onSelectBook, goTo, flashNote],
   );
 
   // Seed a new note's body with the highlighted passage as a blockquote, then a
