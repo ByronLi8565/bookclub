@@ -11,7 +11,7 @@ function lowerDecorators(): Plugin {
   return {
     name: "bookclub:lower-decorators",
     enforce: "pre",
-    async transform(code, id) {
+    transform(code, id) {
       if (!id.endsWith(".ts") || !code.includes("@callable")) return null;
       return transformWithEsbuild(code, id, { loader: "ts", target: "es2022" });
     },
