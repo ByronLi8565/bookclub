@@ -1,9 +1,6 @@
 import type { Note } from "./notes.ts";
 
-// A flat note list assembled into the thread structure the UI renders: roots
-// (top-level notes plus orphaned replies), each note's replies, and id/seq
-// lookups. Ordering (oldest first) and orphan reparenting live here so the
-// render components don't recompute them inline.
+// Handles ordering (oldest first) and orphan reparenting for threaded notes
 export interface Conversation {
   roots: Note[];
   childrenOf: (id: string) => Note[];
