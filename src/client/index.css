@@ -489,6 +489,132 @@ button:disabled:hover {
   box-shadow: 4px 4px 0 #000;
 }
 
+.home-loading {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.home {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+}
+
+.home-card {
+  position: relative;
+  width: min(900px, 92vw);
+  height: min(560px, 82vh);
+  border: var(--line);
+  box-shadow: 8px 8px 0 #000;
+}
+
+.home-corner {
+  position: absolute;
+}
+
+.home-corner--login {
+  top: 18px;
+  right: 22px;
+}
+
+.home-corner--credit {
+  bottom: 18px;
+  right: 22px;
+  font-weight: 700;
+}
+
+.home-main {
+  position: absolute;
+  left: 48px;
+  top: 52%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.home-title {
+  margin: 0 0 10px;
+  font-size: clamp(40px, 8vw, 72px);
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+.home-action {
+  font-size: 15px;
+}
+
+.home-existing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.home-existing select {
+  font: inherit;
+  border: none;
+  border-left: var(--line);
+  padding: 2px 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.login {
+  text-align: right;
+}
+
+.login--authed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-email {
+  font-weight: 700;
+}
+
+.login-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.login-link:hover {
+  background: none;
+  color: #000;
+  text-decoration: none;
+}
+
+.login--form form {
+  display: flex;
+  gap: 6px;
+}
+
+.login input {
+  font: inherit;
+  border: var(--line);
+  padding: 4px 8px;
+  width: 180px;
+}
+
+.login-error {
+  margin: 6px 0 0;
+  color: #d60000;
+  font-size: 12px;
+}
+
 .toast-viewport {
   position: fixed;
   right: 18px;

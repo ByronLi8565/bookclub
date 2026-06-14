@@ -2,6 +2,9 @@
 .alchemy
 node_modules
 
+# vite build output
+dist
+
 # wrangler local dev state
 .wrangler
 
