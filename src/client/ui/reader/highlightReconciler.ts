@@ -38,9 +38,11 @@ export async function updateHighlights(
   }
 
   for (const { noteId, highlight } of desired) {
+    if (deps.isCancelled()) return;
     if (drawn.has(highlight.id)) continue;
     const located = await Effect.runPromise(locateHighlight(highlight, deps.reader));
-    if (!located) continue;
+    // State may have changed during the await (e.g. a book switch); drop stale results.
+    if (deps.isCancelled() || !located) continue;
     // A cfi that drifted is rebound back into shared state, but only for a real
     // note: the composing highlight (noteId null) isn't in shared state yet.
     if (located.cfi !== highlight.cfi.value && noteId !== null) {

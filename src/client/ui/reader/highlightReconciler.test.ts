@@ -111,4 +111,92 @@ describe("updateHighlights", () => {
     expect(draws).toEqual([{ id: "h1", cfi: "cfi-fresh" }]);
     expect(drawn.get("h1")).toBe("cfi-fresh");
   });
+
+  it("skips a highlight that cannot be located", async () => {
+    const { painter, draws } = fakePainter();
+    const drawn = new Map<string, string>();
+    const rebinds: string[] = [];
+    const reader: SourceReader = {
+      resolveCfi: () => Effect.succeed(null),
+      findInSections: () => Effect.succeed(null),
+    };
+
+    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
+      reader,
+      painter,
+      rebind: (_n, id) => void rebinds.push(id),
+      isCancelled: notCancelled,
+    });
+
+    expect(draws).toEqual([]);
+    expect(rebinds).toEqual([]);
+    expect(drawn.has("h1")).toBe(false);
+  });
+
+  it("never rebinds the composing highlight, even when its cfi drifts", async () => {
+    const { painter, draws } = fakePainter();
+    const drawn = new Map<string, string>();
+    const rebinds: string[] = [];
+    const reader: SourceReader = {
+      resolveCfi: () => Effect.succeed(null),
+      findInSections: () => Effect.succeed("cfi-fresh"),
+    };
+
+    await updateHighlights([{ noteId: null, highlight: highlight("draft", "cfi-old") }], drawn, {
+      reader,
+      painter,
+      rebind: (_n, id) => void rebinds.push(id),
+      isCancelled: notCancelled,
+    });
+
+    expect(rebinds).toEqual([]);
+    expect(draws).toEqual([{ id: "draft", cfi: "cfi-fresh" }]);
+  });
+
+  it("stops drawing once cancelled", async () => {
+    const { painter, draws } = fakePainter();
+    const drawn = new Map<string, string>();
+
+    await updateHighlights(
+      [
+        { noteId: "n1", highlight: highlight("h1", "cfi-1") },
+        { noteId: "n2", highlight: highlight("h2", "cfi-2") },
+      ],
+      drawn,
+      {
+        reader: fakeReader(new Set(["cfi-1", "cfi-2"])),
+        painter,
+        rebind: noRebind,
+        // Cancel once the first highlight has been painted.
+        isCancelled: () => draws.length > 0,
+      },
+    );
+
+    expect(draws).toEqual([{ id: "h1", cfi: "cfi-1" }]);
+  });
+
+  it("does not draw a result that arrived after cancellation", async () => {
+    const { painter, draws } = fakePainter();
+    const drawn = new Map<string, string>();
+    let cancelled = false;
+    // Locating flips the cancel flag, simulating a book switch mid-await.
+    const reader: SourceReader = {
+      resolveCfi: () =>
+        Effect.sync(() => {
+          cancelled = true;
+          return {} as Range;
+        }),
+      findInSections: () => Effect.succeed(null),
+    };
+
+    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
+      reader,
+      painter,
+      rebind: noRebind,
+      isCancelled: () => cancelled,
+    });
+
+    expect(draws).toEqual([]);
+    expect(drawn.has("h1")).toBe(false);
+  });
 });
