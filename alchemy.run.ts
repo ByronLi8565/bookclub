@@ -3,6 +3,8 @@ import * as Cloudflare from "alchemy/Cloudflare";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import type { AuthAgent } from "./src/server/AuthAgent.ts";
+import type { GroupAgent } from "./src/server/GroupAgent.ts";
+import type { GroupRegistry } from "./src/server/GroupRegistry.ts";
 import type { NoteAgent } from "./src/server/NoteAgent.ts";
 
 export default Alchemy.Stack(
@@ -19,6 +21,8 @@ export default Alchemy.Stack(
       env: {
         NoteAgent: Cloudflare.DurableObjectNamespace<NoteAgent>("NoteAgent"),
         AuthAgent: Cloudflare.DurableObjectNamespace<AuthAgent>("AuthAgent"),
+        GroupAgent: Cloudflare.DurableObjectNamespace<GroupAgent>("GroupAgent"),
+        GroupRegistry: Cloudflare.DurableObjectNamespace<GroupRegistry>("GroupRegistry"),
         // Resolved from the deploy environment; never committed in plaintext.
         SESSION_HMAC_SECRET: Config.redacted("SESSION_HMAC_SECRET"),
         // Login-code delivery. EMAIL_FROM must be a verified Email Routing

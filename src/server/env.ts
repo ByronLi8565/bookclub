@@ -1,4 +1,6 @@
 import type { AuthAgent } from "./AuthAgent.ts";
+import type { GroupAgent } from "./GroupAgent.ts";
+import type { GroupRegistry } from "./GroupRegistry.ts";
 import type { NoteAgent } from "./NoteAgent.ts";
 
 // The worker's runtime bindings. The DO namespaces are declared in
@@ -8,6 +10,10 @@ import type { NoteAgent } from "./NoteAgent.ts";
 export interface Env {
   NoteAgent: DurableObjectNamespace<NoteAgent>;
   AuthAgent: DurableObjectNamespace<AuthAgent>;
+  // Group membership (one instance per groupId) and the global, single-instance
+  // name registry that maps URL names to groupIds.
+  GroupAgent: DurableObjectNamespace<GroupAgent>;
+  GroupRegistry: DurableObjectNamespace<GroupRegistry>;
   SESSION_HMAC_SECRET: string;
   // Email sending. `EMAIL` is the Cloudflare send_email binding; `EMAIL_FROM` is
   // the verified sender address. Both are absent in local dev (codes are logged).

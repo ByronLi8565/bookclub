@@ -31,3 +31,32 @@ export async function sendLoginCode(env: Env, email: string, code: string): Prom
   }
   console.log(`[auth] login code for ${email}: ${code}`);
 }
+
+// Deliver a group invite link to a prospective member. Same delivery seam as
+// the login code: real send when configured, otherwise logged in local dev.
+export async function sendInvite(
+  env: Env,
+  email: string,
+  groupDisplayName: string,
+  link: string,
+): Promise<void> {
+  if (env.EMAIL && env.EMAIL_FROM) {
+    await env.EMAIL.send({
+      from: env.EMAIL_FROM,
+      to: email,
+      subject: `You're invited to "${groupDisplayName}" on bookclub`,
+      text:
+        `You've been invited to join the "${groupDisplayName}" book club.\n\n` +
+        `Open this link to join:\n${link}\n\n` +
+        `If you didn't expect this invite, ignore this email.`,
+      html:
+        `<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#000;font-size:14px;line-height:1.5;">` +
+        `<p style="margin:0;">You've been invited to join the "${groupDisplayName}" book club.</p>` +
+        `<p style="margin:12px 0;"><a href="${link}">${link}</a></p>` +
+        `<p style="margin:0;">If you didn't expect this invite, ignore this email.</p>` +
+        `</div>`,
+    });
+    return;
+  }
+  console.log(`[invite] ${groupDisplayName} invite for ${email}: ${link}`);
+}

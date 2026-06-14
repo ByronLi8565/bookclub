@@ -12,11 +12,14 @@
     "bindings": [
       { "name": "NoteAgent", "class_name": "NoteAgent" },
       { "name": "AuthAgent", "class_name": "AuthAgent" },
+      { "name": "GroupAgent", "class_name": "GroupAgent" },
+      { "name": "GroupRegistry", "class_name": "GroupRegistry" },
     ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["NoteAgent"] },
     { "tag": "v2", "new_sqlite_classes": ["AuthAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["GroupAgent", "GroupRegistry"] },
   ],
   // Dev-only secret; the deployed worker gets SESSION_HMAC_SECRET from alchemy.
   // No EMAIL/EMAIL_FROM binding in dev on purpose: with the send_email binding

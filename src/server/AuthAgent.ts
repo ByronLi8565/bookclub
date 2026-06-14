@@ -125,6 +125,19 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return this.state.user;
   }
 
+  // Append a group to this user's reverse index (called by GroupAgent on create
+  // and invite-redeem). Idempotent; no-op if the user record doesn't exist yet.
+  addGroup(groupId: string): void {
+    const user = this.state.user;
+    if (!user || user.groupIds.includes(groupId)) return;
+    this.setState({ ...this.state, user: { ...user, groupIds: [...user.groupIds, groupId] } });
+  }
+
+  // The groups this user belongs to (powers the home list).
+  getGroupIds(): string[] {
+    return this.state.user?.groupIds ?? [];
+  }
+
   private upsertUser(email: string, displayName?: string): User {
     const existing = this.state.user;
     if (existing) {
