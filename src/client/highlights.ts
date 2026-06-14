@@ -60,6 +60,23 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
+// Position for the "Add Note" popup, given the selection rect (in the epub
+// iframe's viewport) and the iframe element's rect (in the top document). The
+// point is clamped into the visible visual viewport, which on iOS can be
+// offset/zoomed relative to the layout viewport, so the popup stays on-screen.
+export function popupPoint(rect: DOMRect, frame: DOMRect | undefined): { x: number; y: number } {
+  const vv = window.visualViewport;
+  const ox = vv?.offsetLeft ?? 0;
+  const oy = vv?.offsetTop ?? 0;
+  const m = 48;
+  const x = (frame?.left ?? 0) + rect.left + rect.width / 2;
+  const y = (frame?.top ?? 0) + rect.bottom;
+  return {
+    x: Math.min(ox + (vv?.width ?? window.innerWidth) - m, Math.max(ox + m, x)),
+    y: Math.min(oy + (vv?.height ?? window.innerHeight) - m, Math.max(oy + m, y)),
+  };
+}
+
 // How much surrounding context to capture on each side of the exact text.
 const CONTEXT = 32;
 

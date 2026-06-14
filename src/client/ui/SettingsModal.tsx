@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchBook } from "../groups/api.ts";
-import { deleteCachedBook, getCachedBook, putCachedBook } from "../groups/bookCache.ts";
+import { cachedBookSize, refreshGroupBook } from "../groups/bookAccess.ts";
 import { spawnToast } from "./toast.tsx";
 
 // Identifies the book a settings dialog can manage: its content-hash sourceId
@@ -38,9 +37,9 @@ export function SettingsModal({
 
   useEffect(() => {
     let cancelled = false;
-    void getCachedBook(book.sourceId).then((file) => {
+    void cachedBookSize(book.sourceId).then((size) => {
       if (cancelled) return;
-      setCachedSize(file ? file.size : null);
+      setCachedSize(size);
       setLoading(false);
     });
     return () => {
@@ -50,18 +49,15 @@ export function SettingsModal({
 
   async function onRedownload(): Promise<void> {
     setBusy(true);
-    await deleteCachedBook(book.sourceId);
-    const file = await fetchBook(book.name);
-    if (file) {
-      await putCachedBook(book.sourceId, file);
-      setBusy(false);
+    const result = await refreshGroupBook({ groupName: book.name, sourceId: book.sourceId });
+    setBusy(false);
+    if (result.ok) {
       spawnToast("Book redownloaded", "The local copy was refreshed from storage.", {
         type: "info",
       });
       // Reload so the workspace re-reads the freshly cached bytes.
       location.reload();
     } else {
-      setBusy(false);
       setCachedSize(null);
       spawnToast("Redownload failed", "Couldn't fetch the book from storage.", { type: "error" });
     }

@@ -9,7 +9,7 @@ dist
 .wrangler
 
 # agents dump
-docs/*
+docs
 
 # bombadil
 .bombadil

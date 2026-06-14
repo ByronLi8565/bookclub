@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Session } from "../auth/useSession.ts";
+import { fetchGroup, redeemInvite, type GroupSummary, type RosterEntry } from "../groups/api.ts";
 import {
-  fetchBook,
-  fetchGroup,
-  redeemInvite,
-  uploadBook,
-  type GroupSummary,
-  type RosterEntry,
-} from "../groups/api.ts";
-import { getCachedBook, putCachedBook } from "../groups/bookCache.ts";
+  loadCurrentGroupBook,
+  uploadCurrentGroupBook,
+  type LoadedGroupBook,
+} from "../groups/bookAccess.ts";
 import { Workspace } from "../Workspace.tsx";
 import { Login, LoginModal } from "./Login.tsx";
 import { Spinner } from "./Spinner.tsx";
@@ -21,7 +18,13 @@ type View =
   | { k: "notfound" }
   | { k: "refused" }
   | { k: "nobook"; group: GroupSummary; isOwner: boolean }
-  | { k: "ready"; group: GroupSummary; file: File; isOwner: boolean; members: RosterEntry[] };
+  | {
+      k: "ready";
+      group: GroupSummary;
+      book: LoadedGroupBook;
+      isOwner: boolean;
+      members: RosterEntry[];
+    };
 
 // Pull a one-shot invite token off the URL and strip it so a refresh or a failed
 // redeem doesn't keep re-triggering.
@@ -79,21 +82,10 @@ export function GroupView({
       }
 
       const isOwner = resolved.group.ownerId === userId;
-      if (resolved.group.sources.length === 0) {
-        setView({ k: "nobook", group: resolved.group, isOwner });
-        return;
-      }
-      // Prefer a locally cached copy (keyed by content hash); only hit R2 on a
-      // miss, then cache the bytes for next time.
-      const sourceId = resolved.group.sources[0];
-      let file = await getCachedBook(sourceId);
-      if (!file) {
-        file = await fetchBook(name);
-        if (file) void putCachedBook(sourceId, file);
-      }
+      const book = await loadCurrentGroupBook(resolved.group);
       if (cancelled) return;
-      if (file)
-        setView({ k: "ready", group: resolved.group, file, isOwner, members: resolved.members });
+      if (book)
+        setView({ k: "ready", group: resolved.group, book, isOwner, members: resolved.members });
       else setView({ k: "nobook", group: resolved.group, isOwner });
     })();
 
@@ -135,9 +127,9 @@ export function GroupView({
       name={view.group.name}
       groupName={view.group.displayName}
       groupId={view.group.groupId}
-      sourceId={view.group.sources[0]}
-      file={view.file}
-      bookTitleOverride={view.group.bookTitles[view.group.sources[0]] ?? null}
+      sourceId={view.book.sourceId}
+      file={view.book.file}
+      bookTitleOverride={view.group.bookTitles[view.book.sourceId] ?? null}
       members={view.members}
       viewer={{ userId: userId ?? "", isOwner: view.isOwner }}
     />
@@ -202,10 +194,8 @@ function NoBook({
 
   async function onPick(file: File): Promise<void> {
     setBusy(true);
-    const result = await uploadBook(name, file);
+    const result = await uploadCurrentGroupBook(name, file);
     if (result.ok) {
-      // Seed the local cache with the just-uploaded bytes so the reload is instant.
-      void putCachedBook(result.value, file);
       onUploaded();
     } else {
       setBusy(false);

@@ -6,6 +6,7 @@ import { captureHighlight, type Highlight } from "./highlights.ts";
 import { renameGroup, type RosterEntry } from "./groups/api.ts";
 import { effectiveHighlight, noteSnippet, type Note } from "./notes.ts";
 import { InviteModal } from "./ui/InviteModal.tsx";
+import { MobilePager, type Pane } from "./ui/MobilePager.tsx";
 import { NotePanel } from "./ui/NotePanel.tsx";
 import { PresenceModal } from "./ui/PresenceModal.tsx";
 import type { NoteRefs, NoteViewer } from "./ui/NoteThread.tsx";
@@ -19,6 +20,7 @@ import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
 import { showSyncStatusToast } from "./ui/syncStatus.ts";
 import { spawnToast, ToastViewport } from "./ui/toast.tsx";
+import { useIsMobile } from "./ui/useIsMobile.ts";
 import { WorkspaceHeader } from "./ui/WorkspaceHeader.tsx";
 import { useNoteAgent } from "./useNoteAgent.ts";
 
@@ -50,6 +52,10 @@ export function Workspace({
 }: WorkspaceProps) {
   const [inviting, setInviting] = useState(false);
   const [showingPresence, setShowingPresence] = useState(false);
+  // Phone layout: which of the two swipeable pages is showing (decision: a
+  // selection jumps to notes; a jump/reference returns to the reader).
+  const isMobile = useIsMobile();
+  const [pane, setPane] = useState<Pane>("reader");
   // Local override so a rename shows immediately (propagation is refetch-only).
   const [displayName, setDisplayName] = useState(groupName);
   // Notes are owned by the durable object; this is its live broadcast state.
@@ -67,7 +73,11 @@ export function Workspace({
   sourceIdRef.current = sourceId;
 
   const onSelectRef = useRef<(cfi: string, range: Range) => void>(() => {});
-  const view = useSourceView(file, (cfi, range) => onSelectRef.current(cfi, range));
+  const view = useSourceView(
+    file,
+    (cfi, range) => onSelectRef.current(cfi, range),
+    (dir) => setPane(dir === "left" ? "notes" : "reader"),
+  );
 
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
@@ -91,6 +101,8 @@ export function Workspace({
       view.drawHighlight(highlight.id, highlight.cfi.value, () => view.goTo(highlight.cfi.value));
       drawnRef.current.set(highlight.id, highlight.cfi.value);
       setComposing(highlight);
+      // Pressing "Add Note" takes you to the notes page to write the note.
+      setPane("notes");
     });
   };
 
@@ -202,7 +214,10 @@ export function Workspace({
   const onJump = useCallback(
     (note: Note) => {
       const hl = effectiveHighlight(note, byId);
-      if (hl) goTo(hl.cfi.value);
+      if (hl) {
+        goTo(hl.cfi.value);
+        setPane("reader"); // follow the highlight to the reader page
+      }
       flashNote(note.seq);
     },
     [byId, goTo, flashNote],
@@ -215,7 +230,10 @@ export function Workspace({
       const target = bySeq.get(seq);
       if (!target) return;
       const hl = effectiveHighlight(target, byId);
-      if (hl) goTo(hl.cfi.value);
+      if (hl) {
+        goTo(hl.cfi.value);
+        setPane("reader"); // a reference jumps the reader to the cited highlight
+      }
       flashNote(seq);
     },
     [bySeq, byId, goTo, flashNote],
@@ -246,9 +264,9 @@ export function Workspace({
         onSyncClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
         book={{ sourceId, name }}
       />
-      <SplitPane
-        left={<Reader view={view} hasFile />}
-        right={
+      {(() => {
+        const reader = <Reader view={view} hasFile floatingNote={!isMobile} />;
+        const notePanel = (
           <NotePanel
             conversation={conversation}
             canWrite={canWriteNotes}
@@ -272,8 +290,20 @@ export function Workspace({
               onReplyCancel: () => setReplyingTo(null),
             }}
           />
-        }
-      />
+        );
+        return isMobile ? (
+          <MobilePager
+            pane={pane}
+            onPane={setPane}
+            reader={reader}
+            notes={notePanel}
+            selecting={view.selection !== null}
+            onAddNote={view.commitSelection}
+          />
+        ) : (
+          <SplitPane left={reader} right={notePanel} />
+        );
+      })()}
       {inviting && (
         <InviteModal name={name} displayName={displayName} onClose={() => setInviting(false)} />
       )}

@@ -3,9 +3,10 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSwipeable } from "react-swipeable";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
 import type Section from "epubjs/types/section";
-import { expandToWordBoundaries, type SourceReader } from "../../highlights.ts";
+import { expandToWordBoundaries, popupPoint, type SourceReader } from "../../highlights.ts";
 import type Navigation from "epubjs/types/navigation";
 
 function firstChapterHref(nav: Navigation): string | undefined {
@@ -18,10 +19,11 @@ interface LiveView {
   rendition: Rendition;
 }
 
-// A rendered epub.js view exposes its highlight pane for re-rendering.
+// A rendered epub.js view: its highlight pane (re-render) and Contents (selection).
 interface ResizableView {
   on: (e: string, cb: () => void) => void;
   pane?: { render: () => void };
+  contents?: Contents;
 }
 
 export interface SourceView {
@@ -53,11 +55,25 @@ export interface SourceView {
 export function useSourceView(
   file: File | null,
   onSelect: (cfi: string, range: Range) => void,
+  onSwipe?: (dir: "left" | "right") => void,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const onSwipeRef = useRef(onSwipe);
+  onSwipeRef.current = onSwipe;
   const [title, setTitle] = useState<string | null>(null);
+
+  // Detect horizontal swipes inside the epub iframe by attaching react-swipeable
+  // to the iframe body (it can't bubble to our React tree). The ref is stashed so
+  // the per-view `rendered` handler can attach it to each spine iframe.
+  const swipe = useSwipeable({
+    onSwipedLeft: () => onSwipeRef.current?.("left"),
+    onSwipedRight: () => onSwipeRef.current?.("right"),
+    delta: 60,
+  });
+  const swipeRef = useRef(swipe.ref);
+  swipeRef.current = swipe.ref;
 
   // Single source of truth: a usable rendition exists iff the reader is ready.
   const viewRef = useRef(Effect.runSync(Ref.make(Option.none<LiveView>())));
@@ -92,29 +108,50 @@ export function useSourceView(
     // `spread: "auto"` gives a two-page spread on a wide pane, like a real book.
     const rendition = book.renderTo(el, { width: "100%", height: "100%", spread: "auto" });
 
-    // When a view resizes, re-render its highlight pane on the next frame.
-    rendition.on("rendered", (_section: unknown, view: ResizableView) => {
-      view.on("resized", () => requestAnimationFrame(() => view.pane?.render()));
-    });
+    // Keep text selectable on touch (iOS long-press); our stylesheet can't reach the iframe.
+    rendition.themes.default({ body: { "-webkit-user-select": "text", "user-select": "text" } });
 
-    // Don't commit on selection; snap to word boundaries and surface an
-    // "Add Note" button. The highlight is created only when it's pressed.
-    rendition.on("selected", (cfiRange: string, contents: Contents) => {
-      const raw = contents.range(cfiRange);
-      if (!raw || raw.collapsed) return;
-      const range = expandToWordBoundaries(raw);
-      const cfi = contents.cfiFromRange(range);
-      const rect = range.getBoundingClientRect();
+    // Snap a live selection to word boundaries and surface the "Add Note" button.
+    // `lastText` dedupes the poll below so we only re-render when it changes.
+    let lastText = "";
+    const onSelection = (contents: Contents) => {
+      const sel = contents.window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) return;
+      const text = sel.toString();
+      if (text === lastText) return;
+      lastText = text;
+      const range = expandToWordBoundaries(sel.getRangeAt(0));
       const frame = contents.window.frameElement?.getBoundingClientRect();
       pendingRef.current = {
-        cfi,
+        cfi: contents.cfiFromRange(range),
         range,
-        clear: () => contents.window.getSelection()?.removeAllRanges(),
+        clear: () => sel.removeAllRanges(),
       };
-      setSelection({
-        x: (frame?.left ?? 0) + rect.left + rect.width / 2,
-        y: (frame?.top ?? 0) + rect.bottom,
+      setSelection(popupPoint(range.getBoundingClientRect(), frame));
+    };
+    const clearSelection = () => {
+      if (lastText === "") return;
+      lastText = "";
+      pendingRef.current = null;
+      setSelection(null);
+    };
+
+    // iOS never fires `selectionchange` inside the (sandboxed srcdoc) epub iframe,
+    // so we poll the live selection instead. The text itself is readable, just not
+    // event-driven; this is the one reliable cross-platform detection path.
+    const poll = window.setInterval(() => {
+      const views = rendition.getContents() as unknown as Contents[];
+      const active = views.find((c) => {
+        const s = c.window.getSelection();
+        return s !== null && !s.isCollapsed && s.toString().trim() !== "";
       });
+      if (active) onSelection(active);
+      else clearSelection();
+    }, 300);
+
+    rendition.on("rendered", (_section: unknown, view: ResizableView) => {
+      view.on("resized", () => requestAnimationFrame(() => view.pane?.render()));
+      if (view.contents) swipeRef.current(view.contents.document.body);
     });
 
     const showLocation = () => {
@@ -190,6 +227,7 @@ export function useSourceView(
 
     return () => {
       if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+      clearInterval(poll);
       resizeObserver.disconnect();
       Effect.runFork(Fiber.interrupt(fiber));
       publish(Option.none());
