@@ -41,7 +41,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
   editNote(id: string, body: string): void {
     this.setState({
       notes: this.state.notes.map((note) =>
-        note.id === id
+        note.id === id && note.deletedAt === null
           ? { ...note, body, editedAt: new Date().toISOString(), version: note.version + 1 }
           : note,
       ),
@@ -50,7 +50,33 @@ export class NoteAgent extends Agent<Env, NoteState> {
 
   @callable()
   removeNote(id: string): void {
-    this.setState({ notes: this.state.notes.filter((note) => note.id !== id) });
+    const hasChildren = this.state.notes.some((note) => note.parent === id);
+    if (!hasChildren) {
+      this.setState({ notes: this.state.notes.filter((note) => note.id !== id) });
+      return;
+    }
+
+    const deletedAt = new Date().toISOString();
+    const deletedAtLabel = new Date(deletedAt).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    this.setState({
+      notes: this.state.notes.map((note) =>
+        note.id === id
+          ? {
+              ...note,
+              body: `*This note was deleted on ${deletedAtLabel}*`,
+              highlights: [],
+              editedAt: deletedAt,
+              deletedAt,
+              version: note.version + 1,
+            }
+          : note,
+      ),
+    });
   }
 
   // Rebind a single embedded highlight's cfi after a client re-located it.
@@ -82,6 +108,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
       highlights,
       createdAt: new Date().toISOString(),
       editedAt: null,
+      deletedAt: null,
       version: 1,
     };
   }

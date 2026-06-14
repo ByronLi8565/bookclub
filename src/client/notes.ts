@@ -17,6 +17,7 @@ export interface Note {
   highlights: Highlight[]; // embedded anchors; empty for replies
   createdAt: string; // server clock; display + ordering fallback
   editedAt: string | null;
+  deletedAt: string | null;
   version: number; // bumped on edit; groundwork for baseVersion conflicts
 }
 

@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import editIcon from "../../../assets/edit.svg";
 import type { Note } from "../notes.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
@@ -38,8 +38,23 @@ export interface NoteActions {
 // reply editor when this note is the reply target.
 function NoteRow({ note, actions }: { note: Note; actions: NoteActions }) {
   const quote = note.highlights[0]?.quote.exact ?? "";
+  const deleted = note.deletedAt !== null;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmRef = useRef<HTMLDivElement | null>(null);
 
-  if (actions.editingId === note.id) {
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !confirmRef.current?.contains(target)) {
+        setConfirmingDelete(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [confirmingDelete]);
+
+  if (!deleted && actions.editingId === note.id) {
     return (
       <div className="note editing">
         <div className="note-head">
@@ -59,24 +74,62 @@ function NoteRow({ note, actions }: { note: Note; actions: NoteActions }) {
 
   return (
     <>
-      <div className="note">
+      <div className={deleted ? "note note--deleted" : "note"}>
         <div className="note-head">
           <button className="quote" onClick={() => actions.onJump(note)} disabled={!quote}>
             {noteTitle(note)}
           </button>
-          <button className="reply" onClick={() => actions.onReply(note)} aria-label="reply">
-            ↩
-          </button>
-          <button className="edit" onClick={() => actions.onEdit(note)} aria-label="edit">
-            <img src={editIcon} alt="" aria-hidden="true" />
-          </button>
-          <button className="delete" onClick={() => actions.onDelete(note)} aria-label="delete">
-            ✕
-          </button>
+          {!deleted && (
+            <button className="reply" onClick={() => actions.onReply(note)} aria-label="reply">
+              ↩
+            </button>
+          )}
+          {!deleted && (
+            <button className="edit" onClick={() => actions.onEdit(note)} aria-label="edit">
+              <img src={editIcon} alt="" aria-hidden="true" />
+            </button>
+          )}
+          {!deleted && (
+            <div className="delete-wrap" ref={confirmRef}>
+              <button
+                className="delete"
+                onClick={() => setConfirmingDelete(true)}
+                aria-label="delete"
+                aria-expanded={confirmingDelete}
+              >
+                ✕
+              </button>
+              {confirmingDelete && (
+                <div className="delete-confirm" role="dialog" aria-label="Confirm delete">
+                  <p>really delete?</p>
+                  <div className="delete-confirm-actions">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      aria-label="cancel delete"
+                    >
+                      ✕
+                    </button>
+                    <span>|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmingDelete(false);
+                        actions.onDelete(note);
+                      }}
+                      aria-label="confirm delete"
+                    >
+                      ✓
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {note.body && <NoteBodyView body={note.body} />}
       </div>
-      {actions.replyingTo === note.id && (
+      {!deleted && actions.replyingTo === note.id && (
         <div className="note reply-compose">
           <NoteEditor
             initialBody=""
