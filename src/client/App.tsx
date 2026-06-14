@@ -9,6 +9,7 @@ import type { NoteRefs } from "./ui/NoteThread.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import { useSourceView } from "./ui/reader/useSourceView.ts";
 import { SplitPane } from "./ui/SplitPane.tsx";
+import { spawnToast, ToastViewport } from "./ui/toast.tsx";
 import { useNoteAgent } from "./useNoteAgent.ts";
 
 export default function App() {
@@ -235,7 +236,16 @@ export default function App() {
             }}
           />
         </label>
-        {sourceId && <code className="source-id">{sourceId.slice(0, 12)}…</code>}
+        {sourceId && (
+          <button
+            type="button"
+            className="source-id"
+            onClick={() => spawnToast("Book hash", sourceId, { type: "info" })}
+            aria-label="show full book hash"
+          >
+            {sourceId.slice(0, 12)}...
+          </button>
+        )}
       </header>
       <SplitPane
         left={<Reader view={view} hasFile={!!file} />}
@@ -263,6 +273,7 @@ export default function App() {
           />
         }
       />
+      <ToastViewport />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useAgent } from "agents/react";
 import type { NoteAgent, NoteState } from "../server/NoteAgent.ts";
 import type { Highlight } from "./highlights.ts";
 import type { Note } from "./notes.ts";
+import { spawnToast } from "./ui/toast.tsx";
 
 // The synced notes for the open book plus the mutation calls that write them.
 // Mutations are fire-and-forget: the durable object broadcasts the new state,
@@ -22,16 +23,27 @@ export interface NoteSync {
 export function useNoteAgent(sourceId: string | null): NoteSync {
   const agent = useAgent<NoteAgent, NoteState>({ agent: "note-agent", name: sourceId ?? "idle" });
   const { stub } = agent;
-  const fire = (p: Promise<unknown>) =>
-    void p.catch((error: unknown) => console.error("note agent call failed", error));
+  const fire = (call: () => Promise<unknown>) => {
+    if (agent.readyState !== agent.OPEN) {
+      spawnToast("Offline", "Couldn't save that change. Reconnect and try again.", {
+        type: "error",
+        durationMs: 4000,
+      });
+      return;
+    }
+
+    void call().catch((error: unknown) => {
+      console.error("note agent call failed", error);
+    });
+  };
 
   return {
     notes: sourceId ? (agent.state?.notes ?? []) : [],
-    addNote: (body, highlights) => fire(stub.addNote(body, highlights)),
-    addReply: (parent, body) => fire(stub.addReply(parent, body)),
-    editNote: (id, body) => fire(stub.editNote(id, body)),
-    removeNote: (id) => fire(stub.removeNote(id)),
+    addNote: (body, highlights) => fire(() => stub.addNote(body, highlights)),
+    addReply: (parent, body) => fire(() => stub.addReply(parent, body)),
+    editNote: (id, body) => fire(() => stub.editNote(id, body)),
+    removeNote: (id) => fire(() => stub.removeNote(id)),
     rebindHighlight: (noteId, highlightId, cfiValue) =>
-      fire(stub.rebindHighlight(noteId, highlightId, cfiValue)),
+      fire(() => stub.rebindHighlight(noteId, highlightId, cfiValue)),
   };
 }
