@@ -52,6 +52,23 @@
   position: absolute;
 }
 
+.home-info-button {
+  position: fixed;
+  top: 28px;
+  right: 28px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 50%;
+}
+
 .home-corner--login {
   top: 18px;
   right: 22px;
@@ -208,4 +225,71 @@
 .home-existing select:disabled {
   color: var(--gray);
   cursor: not-allowed;
+}
+
+.home-info-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: rgb(255 255 255 / 84%);
+}
+
+.home-info-panel {
+  width: min(900px, 92vw);
+  max-height: min(720px, 86vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--white);
+  border: var(--line);
+  box-shadow: var(--shadow-lg);
+}
+
+.home-info-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: var(--line);
+}
+
+.home-info-head h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.home-info-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.home-info-empty {
+  margin: 0;
+  opacity: var(--muted-opacity);
+}
+
+.home-info-card {
+  border: var(--line);
+  background: var(--white);
+}
+
+.home-info-card-head {
+  padding: 10px;
+  border-bottom: var(--line);
+}
+
+.home-info-card-head h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.home-info-card-head div {
+  font-size: var(--font-xs);
+  opacity: var(--subtle-opacity);
 }

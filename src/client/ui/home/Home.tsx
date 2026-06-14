@@ -2,10 +2,14 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import type { Session } from "../../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
+import { infoCards } from "../../info/infoCards.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
+import { NoteBodyView } from "../notes/editor/NoteBodyView.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
+
+const EMPTY_REFS = new Map<number, string>();
 
 // Friendly copy for the name-validation error codes from the server.
 const NAME_ERRORS: Record<string, string> = {
@@ -29,6 +33,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviting, setInviting] = useState<GroupSummary | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -65,6 +70,15 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   return (
     <div className="home">
       <div className="home-card">
+        <button
+          type="button"
+          className="home-info-button"
+          aria-label="open info"
+          onClick={() => setInfoOpen(true)}
+        >
+          i
+        </button>
+
         <div className="home-corner home-corner--login">
           <Login session={session} onSignIn={() => setLoginOpen(true)} />
         </div>
@@ -149,6 +163,8 @@ export function Home({ session }: { session: Session }): React.ReactElement {
         <div className="home-corner home-corner--credit">a project by Byron Li</div>
       </div>
 
+      {infoOpen && <InfoScreen onClose={() => setInfoOpen(false)} />}
+
       {loginOpen && <LoginModal session={session} onClose={() => setLoginOpen(false)} />}
       {inviting && (
         <InviteModal
@@ -157,6 +173,44 @@ export function Home({ session }: { session: Session }): React.ReactElement {
           onClose={() => setInviting(null)}
         />
       )}
+    </div>
+  );
+}
+
+function InfoScreen({ onClose }: { onClose: () => void }): React.ReactElement {
+  return (
+    <div
+      className="home-info-screen"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="home-info-title"
+    >
+      <div className="home-info-panel">
+        <div className="home-info-head">
+          <h2 id="home-info-title">info</h2>
+          <button type="button" onClick={onClose} aria-label="close info">
+            close
+          </button>
+        </div>
+
+        <div className="home-info-cards">
+          {infoCards.length === 0 ? (
+            <p className="home-info-empty">no info cards yet</p>
+          ) : (
+            infoCards.map((card) => (
+              <article className="home-info-card" key={card.path}>
+                <header className="home-info-card-head">
+                  <h3>{card.title}</h3>
+                  <div>
+                    {card.author} - {card.date}
+                  </div>
+                </header>
+                <NoteBodyView body={card.body} refs={EMPTY_REFS} onReference={() => {}} />
+              </article>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }
