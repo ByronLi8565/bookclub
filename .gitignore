@@ -8,8 +8,9 @@ dist
 # wrangler local dev state
 .wrangler
 
-# agents dump
-docs/
+# agents dump (but keep architecture decision records)
+docs/*
+!docs/adr/
 
 # bombadil
 .bombadil

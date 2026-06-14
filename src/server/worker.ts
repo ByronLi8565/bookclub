@@ -1,19 +1,17 @@
 import { getAgentByName, routeAgentRequest } from "agents";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { monotonicFactory } from "ulidx";
 import type { Env } from "./env.ts";
-import type { Identity } from "./GroupAgent.ts";
 import { REGISTRY_ID } from "./GroupRegistry.ts";
+import { currentIdentity, SESSION_COOKIE } from "./identity.ts";
 import { sendInvite } from "./email.ts";
 import { parseName } from "./names.ts";
-import { signSession, verifySession, SESSION_TTL_MS } from "./session.ts";
+import { signSession, SESSION_TTL_MS } from "./session.ts";
 
 export { NoteAgent } from "./NoteAgent.ts";
 export { AuthAgent } from "./AuthAgent.ts";
 export { GroupAgent } from "./GroupAgent.ts";
 export { GroupRegistry } from "./GroupRegistry.ts";
-
-const SESSION_COOKIE = "bc_session";
 
 const ulid = monotonicFactory();
 
@@ -62,11 +60,9 @@ app.post("/auth/signout", (c) => {
 });
 
 app.get("/auth/me", async (c) => {
-  const token = readSessionCookie(c.req.raw);
-  if (!token) return c.json({ error: "unauthenticated" }, 401);
-  const claims = await verifySession(token, c.env.SESSION_HMAC_SECRET);
-  if (!claims) return c.json({ error: "unauthenticated" }, 401);
-  return c.json({ user: { id: claims.userId, email: claims.email, name: claims.name } });
+  const me = await currentIdentity(c.req.raw, c.env);
+  if (!me) return c.json({ error: "unauthenticated" }, 401);
+  return c.json({ user: { id: me.id, email: me.email, name: me.name } });
 });
 
 // List the groups the signed-in user belongs to (the home list).
@@ -153,6 +149,24 @@ app.post("/groups/:name/join", async (c) => {
   return c.json({ group: result.summary });
 });
 
+// Connect gate (decision 6): the NoteAgent is keyed by groupId, so the :name
+// segment of its agent route is a groupId. Reject the websocket/rpc unless the
+// caller has a valid session AND is a member of that group — non-members never
+// reach the agent and never receive its broadcasts.
+const noteGate = async (c: Context<{ Bindings: Env }>): Promise<Response> => {
+  const me = await currentIdentity(c.req.raw, c.env);
+  if (!me) return c.text("unauthenticated", 401);
+  const groupId = c.req.param("groupId");
+  if (!groupId) return c.text("not found", 404);
+  const group = await getAgentByName(c.env.GroupAgent, groupId);
+  const { isMember } = await group.membership(me.id);
+  if (!isMember) return c.text("forbidden", 403);
+  const agentResponse = await routeAgentRequest(c.req.raw, c.env);
+  return agentResponse ?? c.text("not found", 404);
+};
+app.all("/agents/note-agent/:groupId", noteGate);
+app.all("/agents/note-agent/:groupId/*", noteGate);
+
 // Everything else: agent (websocket + rpc) traffic, then the client assets.
 app.all("*", async (c) => {
   const agentResponse = await routeAgentRequest(c.req.raw, c.env);
@@ -168,16 +182,6 @@ app.all("*", async (c) => {
 });
 
 export default app;
-
-// Validate the session cookie and return the caller's identity, or null. This is
-// the server-side source of truth for who a request is (never client-supplied).
-async function currentIdentity(request: Request, env: Env): Promise<Identity | null> {
-  const tokenValue = readSessionCookie(request);
-  if (!tokenValue) return null;
-  const claims = await verifySession(tokenValue, env.SESSION_HMAC_SECRET);
-  if (!claims) return null;
-  return { id: claims.userId, name: claims.name, email: claims.email };
-}
 
 // Resolve a URL name to its GroupAgent stub via the registry, or null if the
 // name shape is illegal or unclaimed.
@@ -214,14 +218,4 @@ function sessionCookie(token: string): string {
 
 function clearedCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
-}
-
-function readSessionCookie(request: Request): string | null {
-  const header = request.headers.get("Cookie");
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const [name, ...rest] = part.trim().split("=");
-    if (name === SESSION_COOKIE) return rest.join("=");
-  }
-  return null;
 }

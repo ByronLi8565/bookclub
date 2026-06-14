@@ -1,6 +1,8 @@
-import { Agent, callable, getCurrentAgent } from "agents";
+import { Agent, callable, type Connection, type ConnectionContext, getAgentByName } from "agents";
 import { monotonicFactory } from "ulidx";
 import type { Highlight } from "../client/highlights.ts";
+import type { GroupRole } from "./GroupAgent.ts";
+import { currentIdentity } from "./identity.ts";
 import {
   addNote,
   addReply,
@@ -19,17 +21,38 @@ export type { NoteState } from "./noteState.ts";
 // single-threaded durable object still get strictly increasing, sortable ids.
 const ulid = monotonicFactory();
 
-// Keyed by sourceId (book hash): everyone with the same book annotates the same
-// agent instance. The durable object is the source of truth for note identity,
-// timestamps, and versions; clients send only the content of a change. All the
-// note lifecycle rules live in the pure transitions in noteState.ts; this class
-// just decodes a callable, applies one, and broadcasts the result via setState.
+// The server-authoritative identity stamped on each connection at connect time
+// (ADR 0001). Read in mutations to attribute and authorize changes (Phase C).
+export interface ConnIdentity {
+  userId: string;
+  name: string;
+  role: GroupRole;
+}
+
+// Keyed by groupId (decision 6): one agent instance per group holds the notes
+// for all of the group's books, so `seq` and `[[n]]` are group-global. The
+// durable object is the source of truth for note identity, timestamps, and
+// versions; clients send only the content of a change. All the note lifecycle
+// rules live in the pure transitions in noteState.ts; this class just decodes a
+// callable, applies one, and broadcasts the result via setState.
 export class NoteAgent extends Agent<Env, NoteState> {
   initialState: NoteState = emptyNoteState();
 
   // Server-authored fields for new/changed notes; deterministic logic lives in
   // noteState.ts and reads these through the NoteStamp seam.
   private stamp: NoteStamp = { id: () => ulid(), now: () => new Date().toISOString() };
+
+  // Defense-in-depth behind the worker's connect gate: re-validate the session
+  // off the handshake cookie and confirm membership, then stamp the identity on
+  // the connection so mutations can read it (ADR 0001). Close on failure.
+  async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
+    const me = await currentIdentity(ctx.request, this.env);
+    if (!me) return connection.close(1008, "unauthenticated");
+    const group = await getAgentByName(this.env.GroupAgent, this.name);
+    const { isMember, role } = await group.membership(me.id);
+    if (!isMember || role === null) return connection.close(1008, "forbidden");
+    connection.setState({ userId: me.id, name: me.name, role } satisfies ConnIdentity);
+  }
 
   @callable()
   addNote(body: string, highlights: Highlight[]): void {
@@ -54,17 +77,5 @@ export class NoteAgent extends Agent<Env, NoteState> {
   @callable()
   rebindHighlight(noteId: string, highlightId: string, cfiValue: string): void {
     this.setState(rebindHighlight(this.state, noteId, highlightId, cfiValue));
-  }
-
-  // TEMP spike: prove a @callable can see its originating connection.
-  @callable()
-  __whoami(): { hasConnection: boolean; connectionId: string | null; state: unknown } {
-    const { connection } = getCurrentAgent();
-    if (connection) connection.setState({ stamped: "server-only" });
-    return {
-      hasConnection: connection !== undefined,
-      connectionId: connection?.id ?? null,
-      state: connection?.state ?? null,
-    };
   }
 }
