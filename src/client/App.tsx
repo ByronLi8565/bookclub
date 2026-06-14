@@ -62,8 +62,7 @@ export default function App() {
   function onComposeSave(body: string) {
     const highlight = composingRef.current;
     if (!sourceIdRef.current || !highlight) return;
-    agent.addNote(body, [highlight]);
-    setComposing(null);
+    if (agent.addNote(body, [highlight])) setComposing(null);
   }
 
   function onComposeCancel() {
@@ -76,8 +75,7 @@ export default function App() {
   }
 
   function onEditSave(note: Note, body: string) {
-    agent.editNote(note.id, body);
-    setEditingId(null);
+    if (agent.editNote(note.id, body)) setEditingId(null);
   }
 
   function onReplySave(parentId: string, body: string) {
@@ -86,8 +84,7 @@ export default function App() {
       setReplyingTo(null);
       return;
     }
-    agent.addReply(parentId, body);
-    setReplyingTo(null);
+    if (agent.addReply(parentId, body)) setReplyingTo(null);
   }
 
   // Keep the rendition's painted highlights in sync with the live note state:
@@ -158,7 +155,7 @@ export default function App() {
 
   function onDelete(note: Note) {
     // Erasing the paint is handled by the sync effect once the note leaves state.
-    agent.removeNote(note.id);
+    if (!agent.removeNote(note.id)) return;
     setEditingId((id) => (id === note.id ? null : id));
     setReplyingTo((id) => (id === note.id ? null : id));
   }

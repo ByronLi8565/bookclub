@@ -9,11 +9,11 @@ import { spawnToast } from "./ui/toast.tsx";
 // which arrives as a fresh `notes` value on the next render.
 export interface NoteSync {
   notes: Note[];
-  addNote: (body: string, highlights: Highlight[]) => void;
-  addReply: (parent: string, body: string) => void;
-  editNote: (id: string, body: string) => void;
-  removeNote: (id: string) => void;
-  rebindHighlight: (noteId: string, highlightId: string, cfiValue: string) => void;
+  addNote: (body: string, highlights: Highlight[]) => boolean;
+  addReply: (parent: string, body: string) => boolean;
+  editNote: (id: string, body: string) => boolean;
+  removeNote: (id: string) => boolean;
+  rebindHighlight: (noteId: string, highlightId: string, cfiValue: string) => boolean;
 }
 
 // Connect to the per-book NoteAgent durable object (one instance per sourceId)
@@ -29,12 +29,13 @@ export function useNoteAgent(sourceId: string | null): NoteSync {
         type: "error",
         durationMs: 4000,
       });
-      return;
+      return false;
     }
 
     void call().catch((error: unknown) => {
       console.error("note agent call failed", error);
     });
+    return true;
   };
 
   return {
