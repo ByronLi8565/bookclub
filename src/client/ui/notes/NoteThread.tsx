@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import editIcon from "../../../../assets/edit.svg";
+import editIcon from "@assets/edit.svg";
 import { effectiveHighlight, type Note } from "../../notes/render.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";

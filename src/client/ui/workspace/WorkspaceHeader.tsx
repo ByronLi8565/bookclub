@@ -1,5 +1,5 @@
 import { useState } from "react";
-import settingsIcon from "../../../../assets/settings.svg";
+import settingsIcon from "@assets/settings.svg";
 import { SettingsModal } from "./SettingsModal.tsx";
 
 type BookRef = { sourceId: string; name: string };

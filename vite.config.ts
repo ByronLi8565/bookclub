@@ -20,6 +20,12 @@ function lowerDecorators(): Plugin {
 
 export default defineConfig({
   plugins: [lowerDecorators(), react()],
+  resolve: {
+    alias: {
+      "@": new URL("./src", import.meta.url).pathname,
+      "@assets": new URL("./assets", import.meta.url).pathname,
+    },
+  },
   environments: { ssr: { build: { rollupOptions: { input: "src/server/worker.ts" } } } },
   // Local dev: this server serves the client with HMR and forwards agent
   // traffic (http + websocket) to `wrangler dev`, which hosts the durable
