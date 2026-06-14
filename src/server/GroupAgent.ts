@@ -38,11 +38,12 @@ export interface GroupState {
   createdAt: string;
 }
 
-// A member in the roster: their id plus a display snapshot. The email is omitted
-// (only the owner's invite flow needs it).
+// A member in the roster: their id plus a display snapshot. Members-only, so the
+// email is included for the presence/people lists.
 export interface RosterEntry {
   id: string;
   name: string;
+  email: string;
   role: GroupRole;
 }
 
@@ -203,6 +204,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return Object.entries(this.state.members).map(([id, m]) => ({
       id,
       name: m.name,
+      email: m.email,
       role: m.role,
     }));
   }

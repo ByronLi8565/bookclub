@@ -92,31 +92,6 @@ export function InviteModal({
             </button>
           </form>
 
-          <p className="modal-note">Or share a link anyone can use to join:</p>
-          <div className="invite-link">
-            <input type="text" readOnly value={shownLink} aria-label="invite link" />
-            <button
-              type="button"
-              className="invite-icon"
-              onClick={() => void onCopy()}
-              disabled={!link}
-              aria-label="copy link"
-              title={copied ? "Copied" : "Copy link"}
-            >
-              {copied ? <CheckIcon /> : <CopyIcon />}
-            </button>
-            <button
-              type="button"
-              className="invite-icon"
-              onClick={() => void onRotate()}
-              disabled={busy}
-              aria-label="regenerate link"
-              title="Regenerate link"
-            >
-              <RotateIcon />
-            </button>
-          </div>
-
           <div className="invite-people">
             <p className="invite-people-head">People with access</p>
             <ul className="invite-people-list">
@@ -128,6 +103,33 @@ export function InviteModal({
                 </li>
               ))}
             </ul>
+          </div>
+
+          <div className="invite-share">
+            <p className="modal-note">Or share a link anyone can use to join:</p>
+            <div className="invite-link">
+              <input type="text" readOnly value={shownLink} aria-label="invite link" />
+              <button
+                type="button"
+                className="invite-icon"
+                onClick={() => void onCopy()}
+                disabled={!link}
+                aria-label="copy link"
+                title={copied ? "Copied" : "Copy link"}
+              >
+                {copied ? <CheckIcon /> : <CopyIcon />}
+              </button>
+              <button
+                type="button"
+                className="invite-icon"
+                onClick={() => void onRotate()}
+                disabled={busy}
+                aria-label="regenerate link"
+                title="Regenerate link"
+              >
+                <RotateIcon />
+              </button>
+            </div>
           </div>
         </div>
       </div>

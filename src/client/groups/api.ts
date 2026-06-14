@@ -21,6 +21,7 @@ export interface Membership {
 export interface RosterEntry {
   id: string;
   name: string;
+  email: string;
   role: GroupRole;
 }
 
@@ -49,7 +50,12 @@ export async function createGroup(name: string): Promise<ApiResult<GroupSummary>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) {
+    // For an invalid name the worker returns the precise rule in `reason`
+    // (bad_charset, too_long, …); prefer it over the generic `error`.
+    const body = (await r.json().catch(() => null)) as { error?: string; reason?: string } | null;
+    return { ok: false, error: body?.reason ?? body?.error ?? `http_${r.status}` };
+  }
   return { ok: true, value: ((await r.json()) as { group: GroupSummary }).group };
 }
 

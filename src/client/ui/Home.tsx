@@ -4,15 +4,17 @@ import type { Session } from "../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../groups/api.ts";
 import { InviteModal } from "./InviteModal.tsx";
 import { Login, LoginModal } from "./Login.tsx";
+import { spawnToast } from "./toast.tsx";
 
 // Friendly copy for the name-validation error codes from the server.
 const NAME_ERRORS: Record<string, string> = {
-  empty: "Enter a name.",
-  too_short: "That name is too short.",
-  too_long: "That name is too long (32 max).",
-  bad_charset: "Use letters, numbers, and hyphens only.",
-  reserved: "That name is reserved.",
-  name_taken: "That name is already taken.",
+  empty: "Enter a name for your club.",
+  too_short: "That name is too short — use at least 2 characters.",
+  too_long: "That name is too long — 32 characters max.",
+  bad_charset:
+    "Club names go in the URL, so use only lowercase letters, numbers, and single hyphens (no spaces or symbols).",
+  reserved: "That name is reserved — pick another.",
+  name_taken: "That name is already taken — pick another.",
 };
 
 // The landing page (`/`). Signed in: create a club and jump into the ones you
@@ -46,7 +48,9 @@ export function Home({ session }: { session: Session }): React.ReactElement {
     setError(null);
     const result = await createGroup(name);
     if (!result.ok) {
-      setError(NAME_ERRORS[result.error] ?? "Couldn't create that club.");
+      const message = NAME_ERRORS[result.error] ?? "Couldn't create that club. Try again.";
+      setError(message);
+      spawnToast("Invalid club name", message, { type: "error", durationMs: 6000 });
       return;
     }
     navigate(`/${result.value.name}`);

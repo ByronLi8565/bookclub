@@ -55,6 +55,50 @@ button:disabled:hover {
   height: 100%;
 }
 
+/* Settings button, sits at the right end of the workspace toolbar. */
+.settings-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--white);
+  color: var(--black);
+  border: var(--line);
+}
+
+.settings-button img {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.settings-item-head {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.settings-detail {
+  margin: 0 0 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+
+.settings-detail dt {
+  font-weight: 700;
+}
+
+.settings-detail dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.settings-detail-status {
+  margin: 0 0 12px;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -66,7 +110,6 @@ button:disabled:hover {
 .topbar h1 {
   margin: 0;
   font-size: 20px;
-  text-transform: uppercase;
   letter-spacing: 2px;
   cursor: text;
 }
@@ -75,7 +118,6 @@ button:disabled:hover {
   font: inherit;
   font-size: 20px;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 2px;
   border: var(--line);
   padding: 0 6px;
@@ -93,8 +135,31 @@ button:disabled:hover {
   display: none;
 }
 
-.sync-badge {
+.presence-indicator {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: var(--line);
+  padding: 4px 10px;
+  background: var(--white);
+  cursor: pointer;
+}
+
+.presence-count {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.presence-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--black);
+  border-radius: 50%;
+  background: #2ecc40;
+}
+
+.sync-badge {
   border: var(--line);
   padding: 4px 8px;
   font-size: 12px;
@@ -516,6 +581,34 @@ button:disabled:hover {
   opacity: 0.6;
 }
 
+.spinner-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 3px solid var(--black);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.spinner-label {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .home {
   height: 100%;
   display: grid;
@@ -601,6 +694,39 @@ button:disabled:hover {
 
 .home-action {
   font-size: 15px;
+}
+
+/* Black square back button in the top-left corner of a club card. */
+.home-back {
+  position: absolute;
+  top: 18px;
+  left: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  background: var(--black);
+  color: var(--white);
+  border: var(--line);
+}
+
+.home-back:hover {
+  background: var(--white);
+  color: var(--black);
+}
+
+/* The upload affordance reads as a clickable blue link. */
+.home-upload-link {
+  align-self: flex-start;
+  font-size: 15px;
+  color: #0000ee;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .home-create {
@@ -781,6 +907,7 @@ button:disabled:hover {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-bottom: 20px;
 }
 
 .modal-body input {
@@ -848,7 +975,7 @@ button:disabled:hover {
   cursor: default;
 }
 
-.invite-people {
+.invite-share {
   margin-top: 16px;
   border-top: var(--line);
   padding-top: 12px;
@@ -878,6 +1005,7 @@ button:disabled:hover {
 }
 
 .invite-avatar {
+  position: relative;
   display: grid;
   place-items: center;
   width: 28px;
@@ -890,9 +1018,41 @@ button:disabled:hover {
   font-size: 13px;
 }
 
-.invite-person-name {
+.presence-pip {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--white);
+  border-radius: 50%;
+}
+
+.presence-pip--on {
+  background: #2ecc40;
+}
+
+.presence-pip--off {
+  background: var(--gray);
+}
+
+.invite-person-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.invite-person-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invite-person-email {
+  font-size: 11px;
+  opacity: 0.55;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -903,6 +1063,10 @@ button:disabled:hover {
   text-transform: uppercase;
   letter-spacing: 1px;
   opacity: 0.6;
+}
+
+.person--offline {
+  opacity: 0.5;
 }
 
 .topbar-invite {

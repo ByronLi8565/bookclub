@@ -8,8 +8,10 @@ import {
   type GroupSummary,
   type RosterEntry,
 } from "../groups/api.ts";
+import { getCachedBook, putCachedBook } from "../groups/bookCache.ts";
 import { Workspace } from "../Workspace.tsx";
 import { Login, LoginModal } from "./Login.tsx";
+import { Spinner } from "./Spinner.tsx";
 import { spawnToast } from "./toast.tsx";
 
 // The resolved state of a group route. Each variant maps to a distinct render.
@@ -81,7 +83,14 @@ export function GroupView({
         setView({ k: "nobook", group: resolved.group, isOwner });
         return;
       }
-      const file = await fetchBook(name);
+      // Prefer a locally cached copy (keyed by content hash); only hit R2 on a
+      // miss, then cache the bytes for next time.
+      const sourceId = resolved.group.sources[0];
+      let file = await getCachedBook(sourceId);
+      if (!file) {
+        file = await fetchBook(name);
+        if (file) void putCachedBook(sourceId, file);
+      }
       if (cancelled) return;
       if (file)
         setView({ k: "ready", group: resolved.group, file, isOwner, members: resolved.members });
@@ -93,7 +102,17 @@ export function GroupView({
     };
   }, [name, session.status, userId, reload]);
 
-  if (view.k === "loading") return <div className="home-loading">loading…</div>;
+  if (view.k === "loading") {
+    return (
+      <div className="home">
+        <div className="home-card">
+          <div className="home-main">
+            <Spinner label="loading…" />
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (view.k === "anon")
     return <GroupGate session={session} message="Sign in to open this club." />;
   if (view.k === "notfound")
@@ -130,12 +149,12 @@ function GroupMessage({ title, body }: { title: string; body: string }): React.R
   return (
     <div className="home">
       <div className="home-card">
+        <a className="home-back" href="/" aria-label="back to your clubs">
+          ‹
+        </a>
         <div className="home-main">
           <h1 className="home-title">{title}</h1>
           <p>{body}</p>
-          <a className="home-action" href="/">
-            back to your clubs
-          </a>
         </div>
       </div>
     </div>
@@ -184,19 +203,27 @@ function NoBook({
   async function onPick(file: File): Promise<void> {
     setBusy(true);
     const result = await uploadBook(name, file);
-    setBusy(false);
-    if (result.ok) onUploaded();
-    else spawnToast("Upload failed", "Couldn't store that book. Try again.", { type: "error" });
+    if (result.ok) {
+      // Seed the local cache with the just-uploaded bytes so the reload is instant.
+      void putCachedBook(result.value, file);
+      onUploaded();
+    } else {
+      setBusy(false);
+      spawnToast("Upload failed", "Couldn't store that book. Try again.", { type: "error" });
+    }
   }
 
   return (
     <div className="home">
       <div className="home-card">
+        <a className="home-back" href="/" aria-label="back to your clubs">
+          ‹
+        </a>
         <div className="home-main">
           <h1 className="home-title">{group.displayName}</h1>
           {isOwner ? (
-            <label className="home-action">
-              {busy ? "uploading…" : "upload the club's book (epub)"}
+            <label className="home-upload-link">
+              {busy ? <Spinner label="uploading…" /> : "upload the club's book (epub)"}
               <input
                 type="file"
                 accept=".epub,application/epub+zip"
@@ -211,9 +238,6 @@ function NoBook({
           ) : (
             <p>Waiting for the owner to add a book.</p>
           )}
-          <a className="home-action" href="/">
-            back to your clubs
-          </a>
         </div>
       </div>
     </div>

@@ -1,8 +1,11 @@
 import { useAgent } from "agents/react";
-import type { NoteAgent, NoteState } from "../server/NoteAgent.ts";
+import { useEffect, useState } from "react";
+import type { NoteAgent, NoteState, OnlinePeer } from "../server/NoteAgent.ts";
 import type { Highlight } from "./highlights.ts";
 import type { Note } from "./notes.ts";
 import { spawnToast } from "./ui/toast.tsx";
+
+export type { OnlinePeer } from "../server/NoteAgent.ts";
 
 // The synced notes for the open book plus the mutation calls that write them.
 // Mutations are fire-and-forget: the durable object broadcasts the new state,
@@ -10,6 +13,7 @@ import { spawnToast } from "./ui/toast.tsx";
 export interface NoteSync {
   notes: Note[];
   syncStatus: "syncing" | "online" | "offline";
+  online: OnlinePeer[];
   addNote: (sourceId: string, body: string, highlights: Highlight[]) => boolean;
   addReply: (sourceId: string, parent: string, body: string) => boolean;
   editNote: (id: string, body: string) => boolean;
@@ -23,7 +27,22 @@ export interface NoteSync {
 // no group open we park the connection on a throwaway "idle" instance whose
 // empty state we ignore, so the hook count stays stable.
 export function useNoteAgent(groupId: string | null): NoteSync {
-  const agent = useAgent<NoteAgent, NoteState>({ agent: "note-agent", name: groupId ?? "idle" });
+  // Live presence, pushed by the agent's broadcast (separate from synced state).
+  const [online, setOnline] = useState<OnlinePeer[]>([]);
+  const agent = useAgent<NoteAgent, NoteState>({
+    agent: "note-agent",
+    name: groupId ?? "idle",
+    onMessage: (event) => {
+      try {
+        const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
+        if (msg.type === "presence" && msg.users) setOnline(msg.users);
+      } catch {
+        // Non-JSON / internal protocol frames: ignore.
+      }
+    },
+  });
+  // Drop stale presence when switching groups (the new instance will re-push).
+  useEffect(() => setOnline([]), [groupId]);
   const { stub } = agent;
   const fire = (call: () => Promise<unknown>) => {
     if (agent.readyState !== agent.OPEN) {
@@ -46,6 +65,7 @@ export function useNoteAgent(groupId: string | null): NoteSync {
 
   return {
     notes: groupId ? (agent.state?.notes ?? []) : [],
+    online: groupId ? online : [],
     syncStatus: syncStatus(
       groupId,
       agent.readyState,

@@ -3,11 +3,11 @@ import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildConversation } from "./conversation.ts";
 import { captureHighlight, type Highlight } from "./highlights.ts";
-import { renameBook, renameGroup, type RosterEntry } from "./groups/api.ts";
+import { renameGroup, type RosterEntry } from "./groups/api.ts";
 import { effectiveHighlight, noteSnippet, type Note } from "./notes.ts";
-import { GroupContext } from "./ui/GroupContext.tsx";
 import { InviteModal } from "./ui/InviteModal.tsx";
 import { NotePanel } from "./ui/NotePanel.tsx";
+import { PresenceModal } from "./ui/PresenceModal.tsx";
 import type { NoteRefs, NoteViewer } from "./ui/NoteThread.tsx";
 import { Reader } from "./ui/reader/Reader.tsx";
 import {
@@ -45,13 +45,12 @@ export function Workspace({
   groupId,
   sourceId,
   file,
-  bookTitleOverride,
   members,
   viewer,
 }: WorkspaceProps) {
   const [inviting, setInviting] = useState(false);
-  // Local overrides so a rename shows immediately (propagation is refetch-only).
-  const [override, setOverride] = useState<string | null>(bookTitleOverride);
+  const [showingPresence, setShowingPresence] = useState(false);
+  // Local override so a rename shows immediately (propagation is refetch-only).
   const [displayName, setDisplayName] = useState(groupName);
   // Notes are owned by the durable object; this is its live broadcast state.
   const agent = useNoteAgent(groupId);
@@ -228,14 +227,6 @@ export function Workspace({
     ? `> ${composing.quote.exact.replaceAll(/\s+/gu, " ").trim()}\n\n`
     : "";
 
-  // The book label: a member's override, else the epub metadata title, else a
-  // short hash. Any member may rename (the server enforces membership).
-  const bookTitle = override ?? view.title ?? `book ${sourceId.slice(0, 8)}`;
-  async function onRenameBook(title: string): Promise<void> {
-    const result = await renameBook(name, sourceId, title);
-    if (result.ok) setOverride(title);
-    else spawnToast("Rename failed", "Couldn't rename the book.", { type: "error" });
-  }
   async function onRenameGroup(title: string): Promise<void> {
     const result = await renameGroup(name, title);
     if (result.ok) setDisplayName(title);
@@ -249,20 +240,16 @@ export function Workspace({
         onRename={(t) => void onRenameGroup(t)}
         canInvite={viewer.isOwner}
         onInvite={() => setInviting(true)}
+        onlineCount={agent.online.length}
+        onShowPresence={() => setShowingPresence(true)}
         syncStatus={agent.syncStatus}
         onSyncClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
+        book={{ sourceId, name }}
       />
       <SplitPane
         left={<Reader view={view} hasFile />}
         right={
           <NotePanel
-            context={
-              <GroupContext
-                bookTitle={bookTitle}
-                members={members}
-                onRename={(t) => void onRenameBook(t)}
-              />
-            }
             conversation={conversation}
             canWrite={canWriteNotes}
             composing={composing !== null}
@@ -289,6 +276,13 @@ export function Workspace({
       />
       {inviting && (
         <InviteModal name={name} displayName={displayName} onClose={() => setInviting(false)} />
+      )}
+      {showingPresence && (
+        <PresenceModal
+          members={members}
+          online={agent.online}
+          onClose={() => setShowingPresence(false)}
+        />
       )}
       <ToastViewport />
     </div>

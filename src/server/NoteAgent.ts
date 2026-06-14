@@ -36,6 +36,14 @@ export interface ConnIdentity {
   role: GroupRole;
 }
 
+// A person currently connected to this group, deduped by userId (one entry even
+// with multiple open tabs). Broadcast to all connections on connect/disconnect.
+export interface OnlinePeer {
+  id: string;
+  name: string;
+  role: GroupRole;
+}
+
 // Keyed by groupId (decision 6): one agent instance per group holds the notes
 // for all of the group's books, so `seq` and `[[n]]` are group-global. The
 // durable object is the source of truth for note identity, timestamps, and
@@ -59,6 +67,25 @@ export class NoteAgent extends Agent<Env, NoteState> {
     const { isMember, role } = await group.membership(me.id);
     if (!isMember || role === null) return connection.close(1008, "forbidden");
     connection.setState({ userId: me.id, name: me.name, role } satisfies ConnIdentity);
+    this.broadcastPresence();
+  }
+
+  // A connection dropped: tell everyone who's left online (excluding the one
+  // that's closing, which may still appear in the connection set here).
+  onClose(connection: Connection): void {
+    this.broadcastPresence(connection.id);
+  }
+
+  // Broadcast the current set of online members to every connection. Deduped by
+  // userId so multiple tabs from one person count once. Ephemeral: never stored.
+  private broadcastPresence(excludeId?: string): void {
+    const seen = new Map<string, OnlinePeer>();
+    for (const conn of this.getConnections<ConnIdentity>()) {
+      if (conn.id === excludeId) continue;
+      const s = conn.state;
+      if (s?.userId) seen.set(s.userId, { id: s.userId, name: s.name, role: s.role });
+    }
+    this.broadcast(JSON.stringify({ type: "presence", users: [...seen.values()] }));
   }
 
   // The server-authoritative identity stamped on this connection at connect time
