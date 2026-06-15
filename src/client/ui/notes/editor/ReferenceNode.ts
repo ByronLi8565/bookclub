@@ -1,5 +1,3 @@
-
-
 // oxlint-disable no-underscore-dangle
 import {
   $applyNodeReplacement,
@@ -9,9 +7,6 @@ import {
   type NodeKey,
   type SerializedTextNode,
 } from "lexical";
-
-
-
 
 export type SerializedReferenceNode = SerializedTextNode & { seq: number };
 

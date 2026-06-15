@@ -4,7 +4,6 @@ import type { SourceCapabilities, SourceHealth } from "../../../shared/types/sou
 import { Loading } from "../shared/Loading.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
 
-
 interface InfoRow {
   label: string;
   value: string;
@@ -14,7 +13,6 @@ interface InfoRow {
 }
 
 const ACCEPT = ".epub,application/epub+zip,.pdf,application/pdf";
-
 
 const CAPABILITY_ROWS: { key: keyof SourceCapabilities; label: string }[] = [
   { key: "selectableText", label: "Selectable text" },
@@ -36,7 +34,6 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-
 function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
   return CAPABILITY_ROWS.map(({ key, label }) => ({
     label,
@@ -44,8 +41,6 @@ function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
     status: capabilities[key] ? ("ok" as const) : ("error" as const),
   }));
 }
-
-
 
 function healthRows(health: SourceHealth): InfoRow[] {
   if (health.status === "error") {
@@ -66,7 +61,6 @@ function healthRows(health: SourceHealth): InfoRow[] {
   return [...capabilityRows(health.capabilities), ...warnings];
 }
 
-
 function infoRows(inspected: InspectedBook): InfoRow[] {
   const { metadata, file, health } = inspected;
   const rows: InfoRow[] = [
@@ -81,8 +75,6 @@ function infoRows(inspected: InspectedBook): InfoRow[] {
   return rows;
 }
 
-
-
 export function UploadModal({
   upload,
   onClose,
@@ -91,7 +83,6 @@ export function UploadModal({
   onClose: () => void;
 }): React.ReactElement {
   const [dragging, setDragging] = useState(false);
-
 
   const { reset } = upload;
   useEffect(() => reset, [reset]);

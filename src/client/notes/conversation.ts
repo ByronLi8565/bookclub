@@ -15,7 +15,6 @@ export function buildConversation(notes: Note[]): Conversation {
 
   const childrenMap = new Map<string, Note[]>();
   for (const note of notes) {
-
     if (note.parent !== null && byId.has(note.parent)) {
       const siblings = childrenMap.get(note.parent) ?? [];
       siblings.push(note);

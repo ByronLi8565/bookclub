@@ -7,8 +7,6 @@ import { spawnToast } from "../ui/shared/toast/store.ts";
 
 export type { OnlinePeer } from "../../server/agents/NoteAgent.ts";
 
-
-
 export interface NoteSync {
   notes: Note[];
   notesReady: boolean;
@@ -21,12 +19,7 @@ export interface NoteSync {
   rebindHighlight: (noteId: string, highlightId: string, anchor: HighlightAnchor) => boolean;
 }
 
-
-
-
-
 export function useNoteAgent(groupId: string | null): NoteSync {
-
   const [online, setOnline] = useState<OnlinePeer[]>([]);
   const agent = useAgent<NoteAgent, NoteState>({
     agent: "note-agent",
@@ -35,9 +28,7 @@ export function useNoteAgent(groupId: string | null): NoteSync {
       try {
         const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
         if (msg.type === "presence" && msg.users) setOnline(msg.users);
-      } catch {
-
-      }
+      } catch {}
     },
   });
 

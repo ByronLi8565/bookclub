@@ -3,9 +3,6 @@ import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HighlightAnchor, SearchMatch, SourceReader } from "../../notes/highlights.ts";
 
-
-
-
 export interface ReaderSearch {
   open: boolean;
   query: string;
@@ -98,10 +95,7 @@ export function useReaderSearch({
           setMatches(found);
           setSearching(false);
           showMatch(found, 0);
-        }).pipe(
-
-          Effect.catchCause(() => Effect.sync(() => setSearching(false))),
-        );
+        }).pipe(Effect.catchCause(() => Effect.sync(() => setSearching(false))));
         fiberRef.current = Effect.runFork(run);
       }, DEBOUNCE_MS);
     },
@@ -128,7 +122,6 @@ export function useReaderSearch({
     setActive(-1);
     setSearching(false);
   }, [cancelPending, clearPaint]);
-
 
   useEffect(() => {
     return () => cancelPending();

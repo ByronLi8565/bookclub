@@ -11,7 +11,7 @@
   height: min(560px, 82vh);
   background: var(--white);
   border: var(--line);
-  
+
   box-shadow:
     5px 5px 0 0 var(--white),
     5px 5px 0 3px var(--black),
@@ -22,7 +22,6 @@
     20px 20px 0 0 var(--black);
 }
 
-
 .home-card::before {
   content: "";
   position: absolute;
@@ -32,7 +31,6 @@
   border-left: var(--line);
   transform: translateX(-50%);
 }
-
 
 .home-card::after {
   content: "";
@@ -101,7 +99,6 @@
   font-size: 15px;
 }
 
-
 .home-back {
   position: absolute;
   top: 18px;
@@ -124,7 +121,6 @@
   background: var(--white);
   color: var(--black);
 }
-
 
 .home-upload-link {
   align-self: flex-start;
@@ -155,7 +151,7 @@
   line-height: 1;
   width: 34px;
   padding: 0;
-  
+
   border-left: none;
   display: flex;
   align-items: center;
@@ -166,7 +162,6 @@
   background: var(--white);
   color: var(--black);
 }
-
 
 .home-create-confirm:disabled,
 .home-create-confirm:disabled:hover {
@@ -205,7 +200,6 @@
   padding: 4px 10px;
 }
 
-
 .home-existing select {
   font: inherit;
   border: none;
@@ -214,7 +208,6 @@
   background: var(--white);
   cursor: pointer;
 }
-
 
 .home-existing:has(select:disabled) {
   color: var(--gray);

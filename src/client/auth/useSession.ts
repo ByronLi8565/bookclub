@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 
-
 export interface SessionUser {
   id: string;
   email: string;
@@ -11,13 +10,11 @@ export type SessionStatus = "loading" | "anon" | "authed";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
-
 export type StartResult = { ok: true; devSignedIn?: boolean } | { ok: false; error: string };
 
 export interface Session {
   status: SessionStatus;
   user: SessionUser | null;
-
 
   startLogin: (email: string) => Promise<StartResult>;
 
@@ -33,7 +30,6 @@ async function readError(response: Response): Promise<string> {
     return `http_${response.status}`;
   }
 }
-
 
 export function useSession(): Session {
   const [status, setStatus] = useState<SessionStatus>("loading");

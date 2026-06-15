@@ -1,10 +1,3 @@
-
-
-
-
-
-
-
 const DB_NAME = "bookclub";
 const STORE = "books";
 
@@ -25,7 +18,6 @@ export async function getCachedSource(sourceId: string): Promise<File | null> {
       req.addEventListener("success", () => {
         const value = req.result as File | Blob | undefined;
         if (!value) return resolve(null);
-
 
         resolve(
           value instanceof File
@@ -49,9 +41,7 @@ export async function deleteCachedSource(sourceId: string): Promise<void> {
       tx.addEventListener("complete", () => resolve());
       tx.addEventListener("error", () => reject(tx.error));
     });
-  } catch {
-
-  }
+  } catch {}
 }
 
 export async function putCachedSource(sourceId: string, file: File): Promise<void> {
@@ -63,7 +53,5 @@ export async function putCachedSource(sourceId: string, file: File): Promise<voi
       tx.addEventListener("complete", () => resolve());
       tx.addEventListener("error", () => reject(tx.error));
     });
-  } catch {
-
-  }
+  } catch {}
 }

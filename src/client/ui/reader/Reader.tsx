@@ -4,8 +4,6 @@ import { RenamableText } from "../shared/RenamableText.tsx";
 import type { SourceSummary } from "../../../shared/types/sources.ts";
 import type { SourceView } from "./useSourceView.ts";
 
-
-
 export function Reader({
   view,
   hasFile,
@@ -21,7 +19,6 @@ export function Reader({
   hasFile: boolean;
   loading?: boolean;
   floatingNote?: boolean;
-
 
   books?: SourceSummary[];
   selectedSourceId?: string;
@@ -156,15 +153,11 @@ export function Reader({
   );
 }
 
-
 function bookLabel(book: SourceSummary, activeTitle: string | null, isActive: boolean): string {
   if (book.title) return book.title;
   if (isActive && activeTitle) return activeTitle;
   return `${book.kind.toUpperCase()} · ${book.id.slice(0, 8)}`;
 }
-
-
-
 
 function BookMenu({
   activeTitle,
@@ -197,7 +190,6 @@ function BookMenu({
   const label = active ? bookLabel(active, activeTitle, true) : (activeTitle ?? "");
 
   const interactive = books.length > 1 || onAddBook !== null;
-
 
   const title = label ? (
     <RenamableText

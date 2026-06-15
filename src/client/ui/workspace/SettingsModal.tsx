@@ -4,7 +4,6 @@ import { setReaderPref, useReaderPrefs, type SmartArrows } from "../../settings/
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
-
 function SettingDropdown<T extends string>({
   value,
   options,
@@ -69,7 +68,6 @@ function SettingDropdown<T extends string>({
   );
 }
 
-
 export interface SettingsBook {
   sourceId: string;
   name: string;
@@ -87,13 +85,11 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-
 type Category = "info" | "pdf";
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: "info", label: "Info" },
   { id: "pdf", label: "PDF" },
 ];
-
 
 export function SettingsModal({
   book,

@@ -3,8 +3,6 @@ import { fetchGroup, getInviteLink, inviteToGroup, type RosterEntry } from "../.
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
-
-
 export function InviteModal({
   name,
   displayName,

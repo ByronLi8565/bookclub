@@ -35,7 +35,6 @@
   max-width: 40%;
 }
 
-
 .book-menu {
   position: relative;
   display: inline-flex;
@@ -197,7 +196,6 @@
   right: 0;
 }
 
-
 @media (pointer: coarse) {
   .reader-page-turn {
     width: 64px;
@@ -207,17 +205,15 @@
 .bc-highlight {
   fill: var(--highlight);
   fill-opacity: var(--highlight-opacity);
-  
+
   mix-blend-mode: multiply;
 }
-
 
 .bc-search {
   fill: var(--red);
   fill-opacity: 0.32;
   mix-blend-mode: multiply;
 }
-
 
 .pdf-scroller {
   position: absolute;
@@ -232,11 +228,9 @@
   display: none;
 }
 
-
 .pdf-page {
   position: relative;
 }
-
 
 .pdf-page .textLayer {
   position: absolute;
@@ -275,18 +269,15 @@
   display: contents;
 }
 
-
 .pdf-page .textLayer ::selection {
   background: transparent;
 }
-
 
 .pdf-highlights,
 .pdf-underlines,
 .pdf-composing {
   z-index: 1;
 }
-
 
 .pdf-highlights,
 .pdf-composing {
@@ -297,7 +288,7 @@
 .pdf-highlights .bc-highlight,
 .pdf-composing .bc-highlight {
   background: var(--highlight);
-  
+
   mix-blend-mode: normal;
 }
 

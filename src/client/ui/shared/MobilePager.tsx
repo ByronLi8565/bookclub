@@ -3,11 +3,6 @@ import { useSwipeable } from "react-swipeable";
 
 export type Pane = "reader" | "notes";
 
-
-
-
-
-
 export function MobilePager({
   pane,
   onPane,
@@ -20,7 +15,6 @@ export function MobilePager({
   onPane: (p: Pane) => void;
   reader: ReactNode;
   notes: ReactNode;
-
 
   selecting: boolean;
   onAddNote: () => void;

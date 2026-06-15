@@ -1,4 +1,3 @@
-
 const REFERENCE_SOURCE = "\\[\\[(\\d+)\\]\\]";
 
 export const REFERENCE_PATTERN = new RegExp(REFERENCE_SOURCE, "gu");

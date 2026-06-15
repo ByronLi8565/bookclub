@@ -112,9 +112,20 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
-  invite(callerId: string, email: string): InviteResult {
+  // The shared precondition for every member-only mutation: the group must
+  // exist and the caller must already belong to it. Returning the failure shape
+  // directly lets callers `if (!guard.ok) return guard;`.
+  private requireMember(
+    callerId: string,
+  ): { ok: true } | { ok: false; reason: "not_found" | "not_member" } {
     if (this.state.groupId === "") return { ok: false, reason: "not_found" };
     if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    return { ok: true };
+  }
+
+  invite(callerId: string, email: string): InviteResult {
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
 
     const normalized = email.trim().toLowerCase();
     const existing = Object.entries(this.state.invites).find(([, inv]) => inv.email === normalized);
@@ -148,15 +159,15 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   ensureOpenInvite(callerId: string): InviteLinkResult {
-    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
     if (this.state.openInvite === "") this.setState({ ...this.state, openInvite: token() });
     return { ok: true, token: this.state.openInvite };
   }
 
   rotateOpenInvite(callerId: string): InviteLinkResult {
-    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
     const t = token();
     this.setState({ ...this.state, openInvite: t });
     return { ok: true, token: t };
@@ -172,8 +183,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   renameGroup(callerId: string, rawTitle: string): RenameGroupResult {
-    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
     const title = rawTitle.trim();
     if (title === "") return { ok: false, reason: "empty" };
     this.setState({ ...this.state, displayName: title.slice(0, MAX_TITLE_LENGTH) });
@@ -181,8 +192,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   renameBook(callerId: string, sourceId: string, rawTitle: string): RenameResult {
-    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
     if (!this.state.sources.includes(sourceId)) return { ok: false, reason: "bad_source" };
     const title = rawTitle.trim();
     if (title === "") return { ok: false, reason: "empty" };
@@ -194,8 +205,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   resolveBookTitle(callerId: string, sourceId: string, rawTitle: string): RenameResult {
-    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
     if (!this.state.sources.includes(sourceId)) return { ok: false, reason: "bad_source" };
     const title = rawTitle.trim();
     if (title === "") return { ok: false, reason: "empty" };
@@ -225,8 +236,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   addSource(callerId: string, sourceId: string, meta: SourceMeta): AddSourceResult {
-    if (this.state.groupId === "") return { ok: false, reason: "not_found" };
-    if (!this.state.members[callerId]) return { ok: false, reason: "not_member" };
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
     const sources = this.state.sources.includes(sourceId)
       ? this.state.sources
       : [...this.state.sources, sourceId];

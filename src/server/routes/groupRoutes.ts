@@ -32,30 +32,30 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-    app.post("/groups", async (c) => {
+  app.post("/groups", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await createGroup(c.env, c.req.raw, body?.name);
     return result.ok ? c.json(result.value, 201) : workflowError(result);
   });
 
-    app.get("/groups/:name", async (c) => {
+  app.get("/groups/:name", async (c) => {
     const result = await resolveGroupView(c.env, c.req.raw, c.req.param("name"));
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-    app.post("/groups/:name/invite-link", async (c) => {
+  app.post("/groups/:name/invite-link", async (c) => {
     const rotate = c.req.query("rotate") === "1";
     const result = await inviteLink(c.env, c.req.raw, c.req.param("name"), rotate);
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-    app.put("/groups/:name/title", async (c) => {
+  app.put("/groups/:name/title", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await renameGroupTitle(c.env, c.req.raw, c.req.param("name"), body?.title);
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-    app.put("/groups/:name/book/title", async (c) => {
+  app.put("/groups/:name/book/title", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await renameBookTitle(
       c.env,
@@ -67,7 +67,7 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-      app.put("/groups/:name/book/parsed-title", async (c) => {
+  app.put("/groups/:name/book/parsed-title", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await resolveBookTitle(
       c.env,
@@ -79,24 +79,24 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-    app.post("/groups/:name/invite", async (c) => {
+  app.post("/groups/:name/invite", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await inviteByEmail(c.env, c.req.raw, c.req.param("name"), body?.email);
     return result.ok ? c.body(null, 204) : workflowError(result);
   });
 
-    app.post("/groups/:name/join", async (c) => {
+  app.post("/groups/:name/join", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await redeemInvite(c.env, c.req.raw, c.req.param("name"), body?.token);
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-      app.put("/groups/:name/book", async (c) => {
+  app.put("/groups/:name/book", async (c) => {
     const result = await uploadSource(c.env, c.req.raw, c.req.param("name"));
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
-        app.get("/groups/:name/book", async (c) => {
+  app.get("/groups/:name/book", async (c) => {
     const result = await fetchSource(
       c.env,
       c.req.raw,

@@ -12,7 +12,6 @@ export interface LoadedSource {
   fromCache: boolean;
 }
 
-
 function summaryFor(group: GroupSummary, sourceId: string, file: File): SourceSummary {
   const known = sourceById(group, sourceId);
   if (known) return known;
@@ -24,8 +23,6 @@ function summaryFor(group: GroupSummary, sourceId: string, file: File): SourceSu
     title: group.bookTitles[sourceId] ?? null,
   };
 }
-
-
 
 export async function loadSource(
   group: GroupSummary,
@@ -49,7 +46,6 @@ export function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | n
   return id ? loadSource(group, id) : Promise.resolve(null);
 }
 
-
 export async function uploadCurrentSource(
   group: GroupSummary,
   file: File,
@@ -69,9 +65,6 @@ export async function uploadCurrentSource(
 export async function cachedSourceSize(sourceId: string): Promise<number | null> {
   return (await getCachedSource(sourceId))?.size ?? null;
 }
-
-
-
 
 export async function refreshSource(
   groupName: string,

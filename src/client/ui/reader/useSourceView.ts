@@ -5,9 +5,6 @@ import type { OnSelect, SourceView } from "./sourceView.ts";
 
 export type { SourceView, SourceLocation, OnSelect } from "./sourceView.ts";
 
-
-
-
 export function useSourceView(
   source: SourceRef | null,
   file: File | null,

@@ -5,7 +5,6 @@ import { escapeHtml } from "../../shared/util.ts";
 
 export type { Note, NoteAuthor } from "../../shared/types/notes.ts";
 
-
 export function effectiveHighlight(note: Note, byId: Map<string, Note>): Highlight | null {
   const seen = new Set<string>();
   let current: Note | undefined = note;
@@ -17,11 +16,7 @@ export function effectiveHighlight(note: Note, byId: Map<string, Note>): Highlig
   return null;
 }
 
-
-
 export const NOTE_TRANSFORMERS: Transformer[] = [QUOTE, BOLD_STAR, ITALIC_STAR];
-
-
 
 export function noteSnippet(note: Note, max = 80): string {
   const body = note.body
@@ -34,9 +29,7 @@ export function noteSnippet(note: Note, max = 80): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-
 export function renderNoteBody(body: string, refs: Map<number, string> = new Map()): string {
-
   const blocks = body
     .split(/\n{2,}/u)
     .map((block) => block.trim())
@@ -53,9 +46,6 @@ export function renderNoteBody(body: string, refs: Map<number, string> = new Map
     })
     .join("");
 }
-
-
-
 
 function renderInline(text: string, refs: Map<number, string>): string {
   const withRefs = escapeHtml(text).replaceAll(REFERENCE_PATTERN, (whole, digits: string) => {

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { RosterEntry } from "../../groups/api.ts";
 
-
 export function GroupContext({
   bookTitle,
   members,

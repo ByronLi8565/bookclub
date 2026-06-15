@@ -1,10 +1,21 @@
 import { contentTypeFor, sourceKindFor, type SourceKind } from "../../shared/types/sources.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
-import type { InspectionProgress, SourceMetadata } from "./inspection.ts";
-import { inspectEpub } from "./epubHealth.ts";
-import { inspectPdf } from "./pdfHealth.ts";
+import { inspectEpub } from "./epub.ts";
+import { inspectPdf } from "./pdf.ts";
 
-export type { InspectionProgress, SourceMetadata, SourceInspectionResult } from "./inspection.ts";
+export type InspectionProgress = (fraction: number) => void;
+
+export interface SourceMetadata {
+  title: string | null;
+  author: string | null;
+  wordCount: number | null;
+  cover: string | null;
+}
+
+export interface SourceInspectionResult {
+  health: SourceHealth;
+  metadata: SourceMetadata;
+}
 
 export type SourceInspection =
   | {

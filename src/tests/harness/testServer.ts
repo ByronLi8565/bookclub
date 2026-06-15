@@ -3,9 +3,6 @@ import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import type { Plugin } from "vite";
 
-
-
-
 const TYPES: Record<string, string> = { ".epub": "application/epub+zip" };
 
 export function fixtureServer(assetsDir: string): Plugin {
@@ -14,7 +11,6 @@ export function fixtureServer(assetsDir: string): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use("/fixtures", (req, res, next) => {
-
         const rel = normalize(decodeURIComponent((req.url ?? "").split("?")[0]!)).replace(
           /^(\.\.[/\\])+/u,
           "",

@@ -9,8 +9,6 @@ export type {
 } from "../../shared/types/notes.ts";
 export { epubAnchor, pdfAnchor } from "../../shared/types/notes.ts";
 
-
-
 const WORD = /[\p{L}\p{N}_'’-]/u;
 
 export function expandToWordBoundaries(range: Range): Range {
@@ -35,10 +33,6 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
-
-
-
-
 export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: number } {
   const vv = window.visualViewport;
   const ox = vv?.offsetLeft ?? 0;
@@ -53,8 +47,6 @@ export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: numb
 }
 
 const CONTEXT = 32;
-
-
 
 export function deriveQuote(range: Range): QuoteSelector {
   const doc = range.startContainer.ownerDocument;
@@ -79,7 +71,6 @@ export function deriveQuote(range: Range): QuoteSelector {
   };
 }
 
-
 export const captureHighlight = (
   sourceId: string,
   anchor: HighlightAnchor,
@@ -93,23 +84,16 @@ export const captureHighlight = (
     createdAt: new Date().toISOString(),
   }));
 
-
 export interface SearchMatch {
   anchor: HighlightAnchor;
   excerpt: string;
 }
 
-
-
 export interface SourceReader {
-
-
   locateHighlight(highlight: Highlight): Effect.Effect<HighlightAnchor | null>;
 
   search(query: string): Effect.Effect<SearchMatch[]>;
 }
-
-
 
 export function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
   const root = doc.body;
@@ -152,12 +136,10 @@ export function rangeFromOffsets(root: Node, start: number, end: number): Range 
 
 const EXCERPT = 40;
 
-
 export interface TextMatch {
   start: number;
   excerpt: string;
 }
-
 
 export function scanText(text: string, query: string): TextMatch[] {
   if (query === "") return [];
@@ -178,7 +160,6 @@ export function scanText(text: string, query: string): TextMatch[] {
   }
   return matches;
 }
-
 
 export function findAllRanges(doc: Document, query: string): { range: Range; excerpt: string }[] {
   const root = doc.body;

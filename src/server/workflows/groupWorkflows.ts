@@ -1,21 +1,26 @@
 import { getAgentByName } from "agents";
 import { Effect } from "effect";
 import { monotonicFactory } from "ulidx";
-import type {
-  GroupRole,
-  GroupSummary,
-  RosterEntry,
-  SourceMeta,
-} from "../../shared/types/groups.ts";
+import type { GroupSummary, Membership, RosterEntry } from "../../shared/types/groups.ts";
 import { currentSource, sourceById } from "../../shared/sources.ts";
 import { getSource, storeSource } from "../services/sources.ts";
 import { sendInvite } from "../services/email.ts";
 import type { Env } from "../env.ts";
-import type { Identity } from "../agents/GroupAgent.ts";
+import type {
+  AddSourceResult,
+  CreateResult,
+  GroupAgent,
+  Identity,
+  InviteLinkResult,
+  InviteResult,
+  RedeemResult,
+  RenameGroupResult,
+  RenameResult,
+} from "../agents/GroupAgent.ts";
 import { REGISTRY_ID } from "../agents/GroupRegistry.ts";
 import { currentIdentity } from "../auth/cookies.ts";
 import { normalizeEmail } from "../util/http.ts";
-import { parseName, type NormalizedName } from "../util/names.ts";
+import { parseName } from "../util/names.ts";
 
 const ulid = monotonicFactory();
 
@@ -28,86 +33,17 @@ export interface WorkflowFailure {
   reason?: string;
 }
 
-type Membership = { isMember: boolean; role: GroupRole | null };
-
-type Group = {
-  getSummary(): GroupSummary | null | Promise<GroupSummary | null>;
-  membership(userId: string): Membership | Promise<Membership>;
-  roster(): RosterEntry[] | Promise<RosterEntry[]>;
-  create(
-    name: NormalizedName,
-    owner: Identity,
-  ):
-    | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "exists" | "name_taken" }
-    | Promise<{ ok: true; summary: GroupSummary } | { ok: false; reason: "exists" | "name_taken" }>;
-  ensureOpenInvite(
-    callerId: string,
-  ):
-    | { ok: true; token: string }
-    | { ok: false; reason: "not_member" | "not_found" }
-    | Promise<{ ok: true; token: string } | { ok: false; reason: "not_member" | "not_found" }>;
-  rotateOpenInvite(callerId: string): ReturnType<Group["ensureOpenInvite"]>;
-  renameGroup(
-    callerId: string,
-    title: string,
-  ):
-    | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "not_member" | "not_found" | "empty" }
-    | Promise<
-        | { ok: true; summary: GroupSummary }
-        | { ok: false; reason: "not_member" | "not_found" | "empty" }
-      >;
-  renameBook(
-    callerId: string,
-    sourceId: string,
-    title: string,
-  ):
-    | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
-    | Promise<
-        | { ok: true; summary: GroupSummary }
-        | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
-      >;
-  resolveBookTitle(
-    callerId: string,
-    sourceId: string,
-    title: string,
-  ):
-    | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
-    | Promise<
-        | { ok: true; summary: GroupSummary }
-        | { ok: false; reason: "not_member" | "not_found" | "bad_source" | "empty" }
-      >;
-  invite(
-    callerId: string,
-    email: string,
-  ):
-    | { ok: true; token: string }
-    | { ok: false; reason: "not_member" | "not_found" }
-    | Promise<{ ok: true; token: string } | { ok: false; reason: "not_member" | "not_found" }>;
-  redeem(
-    token: string,
-    user: Identity,
-  ):
-    | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "not_found" | "bad_invite" | "wrong_email" }
-    | Promise<
-        | { ok: true; summary: GroupSummary }
-        | { ok: false; reason: "not_found" | "bad_invite" | "wrong_email" }
-      >;
-  addSource(
-    callerId: string,
-    sourceId: string,
-    meta: SourceMeta,
-  ):
-    | { ok: true; summary: GroupSummary }
-    | { ok: false; reason: "not_member" | "not_found" }
-    | Promise<
-        { ok: true; summary: GroupSummary } | { ok: false; reason: "not_member" | "not_found" }
-      >;
+// The workflows talk to a GroupAgent over its Durable Object stub. The stub's
+// own RPC types flatten discriminated-union results (every `{ ok }` branch is
+// merged), so we instead derive the caller's view directly from GroupAgent:
+// each method keeps its real signature and result union, only the return is
+// promisified. GroupAgent stays the single source of truth for these shapes.
+type Async<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => Promise<Awaited<R>>
+    : T[K];
 };
+type Group = Async<GroupAgent>;
 type ResolvedGroup = { group: Group; summary: GroupSummary };
 type WorkflowEffect<T> = Effect.Effect<T, WorkflowFailure>;
 
@@ -134,7 +70,7 @@ const resolveGroup = (env: Env, rawName: string): WorkflowEffect<Group> =>
     const registry = yield* tryPromise(() => getAgentByName(env.GroupRegistry, REGISTRY_ID));
     const groupId = yield* tryPromise(() => registry.resolve(parsed.name.key));
     if (!groupId) return yield* Effect.fail(fail(404, "not_found"));
-    return (yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId))) as Group;
+    return (yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId))) as unknown as Group;
   });
 
 const requireGroup = (env: Env, rawName: string): WorkflowEffect<ResolvedGroup> =>
@@ -145,11 +81,32 @@ const requireGroup = (env: Env, rawName: string): WorkflowEffect<ResolvedGroup> 
     return { group, summary };
   });
 
-function renameFailure(reason: string): WorkflowFailure {
-  if (reason === "not_member") return fail(403, "not_member");
-  if (reason === "empty") return fail(400, "empty");
-  return fail(404, reason);
-}
+// Every failure `reason` a GroupAgent method can return. Extracted from the
+// agent's own result types so a new reason forces an entry in REASON_STATUS.
+type FailureReason = Extract<
+  | CreateResult
+  | InviteResult
+  | InviteLinkResult
+  | RedeemResult
+  | AddSourceResult
+  | RenameResult
+  | RenameGroupResult,
+  { ok: false }
+>["reason"];
+
+// The single home for "what HTTP status does this domain failure map to".
+const REASON_STATUS: Record<FailureReason, number> = {
+  exists: 409,
+  name_taken: 409,
+  not_member: 403,
+  not_found: 404,
+  empty: 400,
+  bad_source: 404,
+  bad_invite: 403,
+  wrong_email: 403,
+};
+
+const failReason = (reason: FailureReason): WorkflowFailure => fail(REASON_STATUS[reason], reason);
 
 const runWorkflow = <T>(workflow: WorkflowEffect<T>): Promise<WorkflowResult<T>> => {
   return Effect.runPromise(
@@ -170,7 +127,9 @@ export function listMyGroups(
         groupIds,
         (id) =>
           Effect.gen(function* () {
-            const group = (yield* tryPromise(() => getAgentByName(env.GroupAgent, id))) as Group;
+            const group = (yield* tryPromise(() =>
+              getAgentByName(env.GroupAgent, id),
+            )) as unknown as Group;
             return yield* tryPromise(() => group.getSummary());
           }),
         { concurrency: "unbounded" },
@@ -190,9 +149,11 @@ export function createGroup(
       const me = yield* requireIdentity(env, request);
       const parsed = parseName(rawName);
       if (!parsed.ok) return yield* Effect.fail(fail(400, "invalid_name", parsed.error));
-      const group = (yield* tryPromise(() => getAgentByName(env.GroupAgent, ulid()))) as Group;
+      const group = (yield* tryPromise(() =>
+        getAgentByName(env.GroupAgent, ulid()),
+      )) as unknown as Group;
       const result = yield* tryPromise(() => group.create(parsed.name, me));
-      if (!result.ok) return yield* Effect.fail(fail(409, result.reason));
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
     }),
   );
@@ -229,11 +190,7 @@ export function inviteLink(
       const result = yield* tryPromise(() =>
         rotate ? group.rotateOpenInvite(me.id) : group.ensureOpenInvite(me.id),
       );
-      if (!result.ok) {
-        return yield* Effect.fail(
-          result.reason === "not_member" ? fail(403, "not_member") : fail(404, result.reason),
-        );
-      }
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       const origin = new URL(request.url).origin;
       return { token: result.token, link: `${origin}/${summary.name}?invite=${result.token}` };
     }),
@@ -252,7 +209,7 @@ export function renameGroupTitle(
       if (typeof title !== "string") return yield* Effect.fail(fail(400, "invalid_request"));
       const { group } = yield* requireGroup(env, rawName);
       const result = yield* tryPromise(() => group.renameGroup(me.id, title));
-      if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
     }),
   );
@@ -273,7 +230,7 @@ export function renameBookTitle(
       }
       const { group } = yield* requireGroup(env, rawName);
       const result = yield* tryPromise(() => group.renameBook(me.id, sourceId, title));
-      if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
     }),
   );
@@ -294,7 +251,7 @@ export function resolveBookTitle(
       }
       const { group } = yield* requireGroup(env, rawName);
       const result = yield* tryPromise(() => group.resolveBookTitle(me.id, sourceId, title));
-      if (!result.ok) return yield* Effect.fail(renameFailure(result.reason));
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
     }),
   );
@@ -313,11 +270,7 @@ export function inviteByEmail(
       if (!email) return yield* Effect.fail(fail(400, "invalid_email"));
       const { group, summary } = yield* requireGroup(env, rawName);
       const result = yield* tryPromise(() => group.invite(me.id, email));
-      if (!result.ok) {
-        return yield* Effect.fail(
-          result.reason === "not_member" ? fail(403, "not_member") : fail(404, result.reason),
-        );
-      }
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       const origin = new URL(request.url).origin;
       yield* tryPromise(() =>
         sendInvite(
@@ -345,11 +298,7 @@ export function redeemInvite(
         return yield* Effect.fail(fail(400, "invalid_request"));
       const { group } = yield* requireGroup(env, rawName);
       const result = yield* tryPromise(() => group.redeem(token, me));
-      if (!result.ok) {
-        return yield* Effect.fail(
-          result.reason === "not_found" ? fail(404, "not_found") : fail(403, result.reason),
-        );
-      }
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
     }),
   );

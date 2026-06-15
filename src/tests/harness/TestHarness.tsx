@@ -3,11 +3,6 @@ import { useEffect, useState } from "react";
 import { Reader } from "../../client/ui/reader/Reader.tsx";
 import { useSourceView } from "../../client/ui/reader/useSourceView.ts";
 
-
-
-
-
-
 export function ReaderHarness() {
   const [file, setFile] = useState<File | null>(null);
   const view = useSourceView(

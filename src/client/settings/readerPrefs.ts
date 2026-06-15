@@ -1,8 +1,5 @@
 import { useSyncExternalStore } from "react";
 
-
-
-
 export type SmartArrows = "off" | "smooth" | "instant";
 
 export interface ReaderPrefs {
@@ -33,10 +30,7 @@ export function setReaderPref<K extends keyof ReaderPrefs>(key: K, value: Reader
   prefs = { ...prefs, [key]: value };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
-  } catch {
-
-
-  }
+  } catch {}
   for (const listener of listeners) listener();
 }
 

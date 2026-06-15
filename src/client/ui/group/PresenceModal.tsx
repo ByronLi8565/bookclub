@@ -9,7 +9,6 @@ interface Person {
   isOnline: boolean;
 }
 
-
 function mergePeople(members: RosterEntry[], online: OnlinePeer[]): Person[] {
   const onlineIds = new Set(online.map((p) => p.id));
   const byId = new Map<string, Person>();

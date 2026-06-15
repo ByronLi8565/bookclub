@@ -1,6 +1,5 @@
 import { actions, always, extract, weighted } from "@antithesishq/bombadil";
 
-
 export * from "@antithesishq/bombadil/defaults/properties";
 export { clicks, scroll, waitOnce } from "@antithesishq/bombadil/defaults/actions";
 
@@ -40,9 +39,6 @@ export const pageInBounds = always(() => {
   return p === null || (p.page >= 1 && p.page <= p.total);
 });
 
-
-
-
 const search = extract((state) => {
   const input = state.document.querySelector<HTMLInputElement>(".reader-search-input");
   const countText = state.document.querySelector(".reader-search-count")?.textContent ?? "";
@@ -66,9 +62,6 @@ const openSearch = actions(() => {
   return search.current?.open ? [] : p ? [{ Click: { name: "open-search", point: p } }] : [];
 });
 
-
-
-
 const typeKnownWord = actions(() => {
   const s = search.current;
   if (!s || !s.open || s.value !== "" || !s.point) return [];
@@ -88,8 +81,6 @@ export const searching = weighted([
   [3, typeKnownWord],
   [2, nextMatch],
 ]);
-
-
 
 export const knownWordHasMatches = always(() => {
   const s = search.current;

@@ -58,7 +58,6 @@ const ErrorBody = Schema.Struct({
   reason: Schema.optionalKey(Schema.String),
 });
 
-
 const GroupsEnvelope = Schema.Struct({ groups: Schema.Array(Schema.Unknown) });
 
 const GroupResponse = Schema.Struct({ group: GroupSummary });
@@ -90,7 +89,6 @@ async function readError(response: Response): Promise<string> {
   return body?.error ?? `http_${response.status}`;
 }
 
-
 export async function listMyGroups(): Promise<GroupSummary[]> {
   const r = await fetch("/groups");
   if (!r.ok) return [];
@@ -101,9 +99,7 @@ export async function listMyGroups(): Promise<GroupSummary[]> {
   for (const raw of envelope.groups) {
     try {
       groups.push(decode(raw));
-    } catch {
-
-    }
+    } catch {}
   }
   return groups;
 }
@@ -115,15 +111,12 @@ export async function createGroup(name: string): Promise<ApiResult<GroupSummary>
     body: JSON.stringify({ name }),
   });
   if (!r.ok) {
-
-
     const body = await parseJson(r, ErrorBody);
     return { ok: false, error: body?.reason ?? body?.error ?? `http_${r.status}` };
   }
   const body = await parseJson(r, GroupResponse);
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
-
 
 export async function fetchGroup(
   name: string,
@@ -192,8 +185,6 @@ export async function renameBook(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-
-
 export async function resolveBookTitle(
   name: string,
   sourceId: string,
@@ -208,8 +199,6 @@ export async function resolveBookTitle(
   const body = await parseJson(r, GroupResponse);
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
-
-
 
 export async function uploadSource(
   name: string,
@@ -229,10 +218,6 @@ export async function uploadSource(
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
 }
-
-
-
-
 
 export async function fetchSource(name: string, requestId?: string): Promise<FetchedSource | null> {
   const query = requestId ? `?sourceId=${encodeURIComponent(requestId)}` : "";

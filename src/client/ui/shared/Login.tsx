@@ -15,9 +15,6 @@ const message = (error: string): string => MESSAGES[error] ?? "Something went wr
 
 type Step = "email" | "code" | "done";
 
-
-
-
 export function Login({
   session,
   onSignIn,

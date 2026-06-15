@@ -1,8 +1,6 @@
 import { useMemo } from "react";
 import { renderNoteBody } from "../../../notes/render.ts";
 
-
-
 export function NoteBodyView({
   body,
   refs,

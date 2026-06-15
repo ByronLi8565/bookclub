@@ -1,11 +1,10 @@
 import { useCallback, useState } from "react";
 import type { GroupSummary } from "./api.ts";
 import { uploadCurrentSource } from "./sourceAccess.ts";
-import { inspectSource, type SourceMetadata } from "../sources/admission.ts";
+import { inspectSource, type SourceMetadata } from "../sources/checkHealth.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import type { SourceKind } from "../../shared/types/sources.ts";
 import { spawnToast } from "../ui/shared/toast/store.ts";
-
 
 export type UploadStatus = "idle" | "checking" | "ready" | "uploading";
 
@@ -23,11 +22,9 @@ export interface BookUpload {
 
   inspected: InspectedBook | null;
 
-
   error: string | null;
 
   canUpload: boolean;
-
 
   progress: number;
 
@@ -35,15 +32,10 @@ export interface BookUpload {
 
   updateMetadata: (metadata: Partial<Pick<SourceMetadata, "title" | "author">>) => void;
 
-
   confirm: () => Promise<boolean>;
 
   reset: () => void;
 }
-
-
-
-
 
 export function useBookUpload(
   group: GroupSummary | null,

@@ -1,12 +1,8 @@
 import ePub from "epubjs";
 import { healthError, healthOk, type SourceCapabilities } from "../../shared/types/sourceHealth.ts";
-import {
-  blobToDataUrl,
-  EMPTY_METADATA,
-  type InspectionProgress,
-  type SourceInspectionResult,
-  type SourceMetadata,
-} from "./inspection.ts";
+import type { InspectionProgress, SourceInspectionResult, SourceMetadata } from "./checkHealth.ts";
+
+const EMPTY_METADATA: SourceMetadata = { title: null, author: null, wordCount: null, cover: null };
 
 const EPUB_CAPABILITIES: SourceCapabilities = {
   selectableText: true,
@@ -19,6 +15,15 @@ const EPUB_CAPABILITIES: SourceCapabilities = {
 interface SpineSection {
   load: (request: unknown) => Promise<{ textContent?: string | null } | null>;
   unload: () => void;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result as string));
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("read_failed")));
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function countWords(
