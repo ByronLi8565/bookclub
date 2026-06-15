@@ -16,7 +16,6 @@ import {
   addReply,
   editNote,
   emptyNoteState,
-  migrateNoteState,
   rebindHighlight,
   removeNote,
   type NoteStamp,
@@ -25,64 +24,39 @@ import {
 
 export type { NoteState } from "../util/noteState.ts";
 
-// Monotonic so notes created within the same millisecond inside this
-// single-threaded durable object still get strictly increasing, sortable ids.
 const ulid = monotonicFactory();
 
-// The server-authoritative identity stamped on each connection at connect time
-// (ADR 0001). Read in mutations to attribute and authorize changes (Phase C).
 export interface ConnIdentity {
   userId: string;
   name: string;
   role: GroupRole;
 }
 
-// A person currently connected to this group, deduped by userId (one entry even
-// with multiple open tabs). Broadcast to all connections on connect/disconnect.
 export interface OnlinePeer {
   id: string;
   name: string;
   role: GroupRole;
 }
 
-// Keyed by groupId (decision 6): one agent instance per group holds the notes
-// for all of the group's books, so `seq` and `[[n]]` are group-global. The
-// durable object is the source of truth for note identity, timestamps, and
-// versions; clients send only the content of a change. All the note lifecycle
-// rules live in the pure transitions in noteState.ts; this class just decodes a
-// callable, applies one, and broadcasts the result via setState.
 export class NoteAgent extends Agent<Env, NoteState> {
   initialState: NoteState = emptyNoteState();
 
-  // Server-authored fields for new/changed notes; deterministic logic lives in
-  // noteState.ts and reads these through the NoteStamp seam.
   private stamp: NoteStamp = { id: () => ulid(), now: () => new Date().toISOString() };
 
-  // Defense-in-depth behind the worker's connect gate: re-validate the session
-  // off the handshake cookie and confirm membership, then stamp the identity on
-  // the connection so mutations can read it (ADR 0001). Close on failure.
   async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     const me = await currentIdentity(ctx.request, this.env);
     if (!me) return connection.close(1008, "unauthenticated");
     const group = await getAgentByName(this.env.GroupAgent, this.name);
     const { isMember, role } = await group.membership(me.id);
     if (!isMember || role === null) return connection.close(1008, "forbidden");
-    // Migrate any legacy (cfi-only) highlights to the anchor model before the
-    // client subscribes; a no-op once state is already current.
-    const migrated = migrateNoteState(this.state);
-    if (migrated !== this.state) this.setState(migrated);
     connection.setState({ userId: me.id, name: me.name, role } satisfies ConnIdentity);
     this.broadcastPresence();
   }
 
-  // A connection dropped: tell everyone who's left online (excluding the one
-  // that's closing, which may still appear in the connection set here).
   onClose(connection: Connection): void {
     this.broadcastPresence(connection.id);
   }
 
-  // Broadcast the current set of online members to every connection. Deduped by
-  // userId so multiple tabs from one person count once. Ephemeral: never stored.
   private broadcastPresence(excludeId?: string): void {
     const seen = new Map<string, OnlinePeer>();
     for (const conn of this.getConnections<ConnIdentity>()) {
@@ -93,9 +67,6 @@ export class NoteAgent extends Agent<Env, NoteState> {
     this.broadcast(JSON.stringify({ type: "presence", users: [...seen.values()] }));
   }
 
-  // The server-authoritative identity stamped on this connection at connect time
-  // (ADR 0001). Mutations read it to attribute and authorize changes; it can
-  // never be spoofed by a client message.
   private get me(): ConnIdentity {
     const { connection } = getCurrentAgent<NoteAgent>();
     if (!connection) throw new Error("note mutation outside a connection");

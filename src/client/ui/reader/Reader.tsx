@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Loading } from "../shared/Loading.tsx";
+import { RenamableText } from "../shared/RenamableText.tsx";
 import type { SourceSummary } from "../../../shared/types/sources.ts";
 import type { SourceView } from "./useSourceView.ts";
 
-// Reader shell around the SourceView iframe. `floatingNote` renders the desktop
-// "Add Note" popup at the selection; on mobile that affordance lives in the
-// pager's bottom bar instead, so it (and its dismiss handler) are disabled here.
+
+
 export function Reader({
   view,
   hasFile,
@@ -14,28 +14,28 @@ export function Reader({
   books = [],
   selectedSourceId = "",
   onSelectBook = () => {},
+  onRenameBook = () => {},
   onAddBook = null,
 }: {
   view: SourceView;
   hasFile: boolean;
   loading?: boolean;
   floatingNote?: boolean;
-  // The club's library, the active book, and a selection callback for the title
-  // dropdown. `onAddBook` opens the upload modal (null hides the action).
+
+
   books?: SourceSummary[];
   selectedSourceId?: string;
   onSelectBook?: (sourceId: string) => void;
+  onRenameBook?: (sourceId: string, title: string) => void;
   onAddBook?: (() => void) | null;
 }) {
   const { fontSize, setFontSize, ready, selection, search } = view;
 
-  // Focus the search input when the bar opens so the caller can type at once.
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (search.open) searchInputRef.current?.focus();
   }, [search.open]);
 
-  // Dismiss the Add Note popup on any click outside it
   const { dismissSelection } = view;
   useEffect(() => {
     if (!floatingNote || !selection) return;
@@ -54,6 +54,7 @@ export function Reader({
           books={books}
           selectedSourceId={selectedSourceId}
           onSelectBook={onSelectBook}
+          onRenameBook={onRenameBook}
           onAddBook={onAddBook}
         />
         {view.location && (
@@ -155,29 +156,29 @@ export function Reader({
   );
 }
 
-// A human label for a book in the switcher: the member-set title override, or
-// (for the active book) the parsed title, falling back to kind + short hash.
+
 function bookLabel(book: SourceSummary, activeTitle: string | null, isActive: boolean): string {
   if (book.title) return book.title;
   if (isActive && activeTitle) return activeTitle;
   return `${book.kind.toUpperCase()} · ${book.id.slice(0, 8)}`;
 }
 
-// The book switcher in the reader bar: shows the active book's title with a
-// disclosure arrow that opens a dropdown of the club's library. An "Add a book"
-// entry opens the upload modal (any member may add a book). With a single book
-// and no add affordance it renders as a plain, non-interactive title.
+
+
+
 function BookMenu({
   activeTitle,
   books,
   selectedSourceId,
   onSelectBook,
+  onRenameBook,
   onAddBook,
 }: {
   activeTitle: string | null;
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
+  onRenameBook: (sourceId: string, title: string) => void;
   onAddBook: (() => void) | null;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
@@ -194,15 +195,21 @@ function BookMenu({
 
   const active = books.find((b) => b.id === selectedSourceId) ?? null;
   const label = active ? bookLabel(active, activeTitle, true) : (activeTitle ?? "");
-  // No switching and no adding: just show the title (matches the old bar).
+
   const interactive = books.length > 1 || onAddBook !== null;
 
-  // The original title element is preserved verbatim; the dropdown only adds an
-  // arrow affordance beside it.
+
   const title = label ? (
-    <span className="reader-title" title={label}>
-      {label}
-    </span>
+    <RenamableText
+      value={label}
+      onRename={(nextTitle) => {
+        if (active) onRenameBook(active.id, nextTitle);
+      }}
+      className="reader-title"
+      title="Double-click to rename the book"
+      ariaLabel="book title"
+      inputClassName="reader-title-edit"
+    />
   ) : (
     <span className="reader-title" />
   );

@@ -19,13 +19,11 @@ import {
   renderPageThumbnail,
 } from "./pdf.ts";
 
-// PDF metadata fields we surface.
 interface PdfInfo {
   Title?: string;
   Author?: string;
 }
 
-// Capabilities for a PDF with a usable text layer.
 const TEXT_CAPABILITIES: SourceCapabilities = {
   selectableText: true,
   textAnchors: true,
@@ -38,7 +36,6 @@ const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 const LOW_COVERAGE = 0.8;
 const BAD_ENCODING = 0.02;
 
-// Health-check a PDF by parsing every page and verifying the text layer.
 export async function inspectPdf(
   file: File,
   onProgress?: InspectionProgress,

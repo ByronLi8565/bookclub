@@ -34,8 +34,6 @@
   z-index: 10;
 }
 
-/* Phone layout: two full-width pages on a swipeable horizontal track, with a
-   segmented tab bar pinned at the bottom. */
 .pager {
   flex: 1;
   min-height: 0;
@@ -80,7 +78,6 @@
   color: var(--white);
 }
 
-/* The selection action that replaces the tabs while text is highlighted. */
 .pager-add-note {
   background: var(--highlight);
   font-weight: 700;
@@ -369,6 +366,17 @@
   margin: 0;
   text-align: right;
   word-break: break-word;
+}
+
+.upload-info-edit {
+  box-sizing: border-box;
+  width: min(260px, 100%);
+  font: inherit;
+  line-height: inherit;
+  text-align: right;
+  border: var(--line-thin);
+  padding: 0 4px;
+  background: var(--white);
 }
 
 .upload-status--ok {

@@ -38,7 +38,6 @@
   display: flex;
 }
 
-/* The note's seq as a filled black square in the top-left corner of its head. */
 .note-panel .note-seq {
   display: flex;
   align-items: center;
@@ -65,8 +64,6 @@
   gap: 8px;
 }
 
-/* The inline reply editor sits one level in, lining up under the note it
-   replies to where the new reply will land. */
 .note-panel .replies,
 .note-panel .reply-compose {
   margin-left: 16px;
@@ -146,7 +143,8 @@
   filter: invert(1);
 }
 
-.note-panel .note-head + .note-body {
+.note-panel .note-head + .note-body,
+.note-panel .note-head + .note-editor {
   border-top: var(--line);
 }
 
@@ -172,13 +170,14 @@
   opacity: 0.8;
 }
 
-/* `[[n]]` cross-reference chip, shared by the read view (button) and the editor
-   (token text node). Inline, monospace, sits on the baseline of the text. */
 .note-ref {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0 4px;
-  border: var(--line-thin);
+  border: none;
   border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--black);
   background: var(--white);
   font: inherit;
   font-weight: 700;
@@ -190,21 +189,6 @@
 .note-ref:hover {
   background: var(--black);
   color: var(--white);
-}
-
-/* Brief flash when a reference scrolls its target note into view. */
-.note.flash {
-  animation: note-flash 1.2s ease-out;
-}
-
-@keyframes note-flash {
-  from {
-    background: var(--highlight);
-  }
-
-  to {
-    background: var(--white);
-  }
 }
 
 .note-editor {

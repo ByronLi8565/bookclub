@@ -29,7 +29,7 @@ describe("scanText", () => {
   });
 
   it("does not report overlapping matches", () => {
-    // "aa" at offsets 0 and 1 overlap; scanning resumes past the first hit.
+
     expect(scanText("aaa", "aa").map((m) => m.start)).toEqual([0]);
   });
 

@@ -1,5 +1,5 @@
-// Lexical node fields use the framework's `__`-prefixed convention (e.g. __key,
-// __seq) so clone/getLatest copy them; the dangling-underscore rule doesn't apply.
+
+
 // oxlint-disable no-underscore-dangle
 import {
   $applyNodeReplacement,
@@ -10,10 +10,9 @@ import {
   type SerializedTextNode,
 } from "lexical";
 
-// A `[[n]]` cross-reference, rendered in the editor as an atomic chip showing
-// "#n". It is a token-mode TextNode so the caret can't land inside it and typing
-// never merges into it; on save it serializes back to `[[n]]` markdown via the
-// reference transformer.
+
+
+
 export type SerializedReferenceNode = SerializedTextNode & { seq: number };
 
 export class ReferenceNode extends TextNode {

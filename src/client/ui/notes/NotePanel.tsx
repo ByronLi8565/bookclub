@@ -3,7 +3,6 @@ import { Loading } from "../shared/Loading.tsx";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteThread, type NoteActions, type NoteRefs, type NoteViewer } from "./NoteThread.tsx";
 
-// Right-pane list of note threads.
 export function NotePanel({
   conversation,
   canWrite,
@@ -27,7 +26,6 @@ export function NotePanel({
   actions: NoteActions;
   refs: NoteRefs;
   viewer: NoteViewer;
-  // The group/book collaboration context rendered above the note list.
   context?: React.ReactNode;
 }) {
   const { roots } = conversation;

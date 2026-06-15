@@ -11,7 +11,6 @@ import {
   type HighlightPainter,
 } from "../client/ui/reader/highlightReconciler.ts";
 
-// An in-memory painter that records the draw/erase calls made against it.
 function fakePainter() {
   const draws: { id: string; anchor: HighlightAnchor }[] = [];
   const erases: string[] = [];
@@ -22,7 +21,6 @@ function fakePainter() {
   return { painter, draws, erases };
 }
 
-// A SourceReader that locates a highlight at the cfis it knows about, else null.
 function fakeReader(resolvable: Set<string>): SourceReader {
   return {
     locateHighlight: (h) =>
@@ -105,7 +103,7 @@ describe("updateHighlights", () => {
     const { painter, draws } = fakePainter();
     const drawn = new Map<string, HighlightAnchor>();
     const rebinds: { noteId: string; highlightId: string; anchor: HighlightAnchor }[] = [];
-    // Stored cfi no longer resolves; the quote search relocates it to cfi-fresh.
+
     const reader: SourceReader = {
       locateHighlight: () => Effect.succeed(epubAnchor("cfi-fresh")),
       search: () => Effect.succeed([]),
@@ -178,7 +176,7 @@ describe("updateHighlights", () => {
         reader: fakeReader(new Set(["cfi-1", "cfi-2"])),
         painter,
         rebind: noRebind,
-        // Cancel once the first highlight has been painted.
+
         isCancelled: () => draws.length > 0,
       },
     );
@@ -190,7 +188,7 @@ describe("updateHighlights", () => {
     const { painter, draws } = fakePainter();
     const drawn = new Map<string, HighlightAnchor>();
     let cancelled = false;
-    // Locating flips the cancel flag, simulating a source switch mid-await.
+
     const reader: SourceReader = {
       locateHighlight: (h) =>
         Effect.sync(() => {

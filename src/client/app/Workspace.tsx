@@ -26,30 +26,20 @@ import {
 import { useSourceView } from "../ui/reader/useSourceView.ts";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
 
-// The reader + notes workspace (the Steps 1-5 app), mounted by GroupView at
-// `/:name` for a group the caller is a member of. The book and its sourceId
-// (content hash) are supplied by the group; the NoteAgent is keyed by groupId
-// (decision 6), so all of the group's notes flow through one instance.
 export interface WorkspaceProps {
-  name: string; // the group's URL name (for invite/title APIs)
-  groupName: string; // the group's display name
+  name: string;
+  groupName: string;
   groupId: string;
-  source: SourceRef; // the active source (content hash + kind + content type)
+  source: SourceRef;
   file: File | null;
-  // The active book's stored label (member override, else parsed default), or
-  // null when none is recorded yet — which arms the read-repair below.
   storedBookTitle: string | null;
-  // Called when the reader decodes a metadata title for a book that has no
-  // stored label, so the parsed title can be backfilled as the default.
   onTitleParsed: (sourceId: string, title: string) => void;
-  // The club's library and which book is active, for the reader's book switcher.
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
-  // Opens the add-a-book upload modal (any member may add a book).
+  onRenameBook: (sourceId: string, title: string) => void;
   onAddBook: () => void;
   members: RosterEntry[];
-  // The signed-in caller, used to gate edit/delete affordances (decision 7).
   viewer: NoteViewer;
 }
 
@@ -64,6 +54,7 @@ export function Workspace({
   books,
   selectedSourceId,
   onSelectBook,
+  onRenameBook,
   onAddBook,
   members,
   viewer,
@@ -71,15 +62,9 @@ export function Workspace({
   const sourceId = source.id;
   const [inviting, setInviting] = useState(false);
   const [showingPresence, setShowingPresence] = useState(false);
-  // Phone layout: which of the two swipeable pages is showing (decision: a
-  // selection jumps to notes; a jump/reference returns to the reader).
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
-  // Local override so a rename shows immediately (propagation is refetch-only).
   const [displayName, setDisplayName] = useState(groupName);
-  // Notes are owned by the durable object; this is its live broadcast state. One
-  // NoteAgent serves the whole club (decision 6), so notes for every book flow
-  // through it; scope to the active book before rendering and reconciling.
   const agent = useNoteAgent(groupId);
   const notes = useMemo(
     () => agent.notes.filter((n) => n.sourceId === sourceId),
@@ -87,7 +72,6 @@ export function Workspace({
   );
   const canWriteNotes = agent.syncStatus === "online";
 
-  // The armed highlight being composed into a new note (painted, awaiting save).
   const [composing, setComposing] = useState<Highlight | null>(null);
   const composingRef = useRef<Highlight | null>(null);
   composingRef.current = composing;
@@ -97,30 +81,42 @@ export function Workspace({
   sourceIdRef.current = sourceId;
 
   const onSelectRef = useRef<(anchor: HighlightAnchor, range: Range) => void>(() => {});
+  const restoreAfterSearchClearRef = useRef<() => void>(() => {});
   const view = useSourceView(
     source,
     file,
     (anchor, range) => onSelectRef.current(anchor, range),
     (dir) => setPane(dir === "left" ? "notes" : "reader"),
+    () => restoreAfterSearchClearRef.current(),
   );
 
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
-  // Override the browser's native find with the reader's full-text search.
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: view.ready, preventDefault: true });
   useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open });
 
-  // Which embedded highlights are currently painted on the reader, mapped to the
-  // anchor they were drawn at, so the sync effect can diff against live state.
   const drawnRef = useRef<Map<string, HighlightAnchor>>(new Map());
 
-  // Add Note: capture the highlight synchronously (never retain the live range),
-  // paint it, and arm the compose slot. The note is created only on save.
+  restoreAfterSearchClearRef.current = () => {
+    for (const note of notes) {
+      for (const h of note.highlights) {
+        view.eraseHighlight(h.id);
+        view.drawHighlight(h.id, h.anchor, () => view.goTo(h.anchor));
+        drawnRef.current.set(h.id, h.anchor);
+      }
+    }
+    const comp = composingRef.current;
+    if (comp) {
+      view.eraseHighlight(comp.id);
+      view.drawHighlight(comp.id, comp.anchor, () => view.goTo(comp.anchor));
+      drawnRef.current.set(comp.id, comp.anchor);
+    }
+  };
+
   onSelectRef.current = (anchor, range) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
     Effect.runPromise(captureHighlight(sid, anchor, range)).then((highlight) => {
-      // Replace any in-flight compose: erase its orphaned paint first.
       const prev = composingRef.current;
       if (prev) {
         view.eraseHighlight(prev.id);
@@ -129,7 +125,6 @@ export function Workspace({
       view.drawHighlight(highlight.id, highlight.anchor, () => view.goTo(highlight.anchor));
       drawnRef.current.set(highlight.id, highlight.anchor);
       setComposing(highlight);
-      // Pressing "Add Note" takes you to the notes page to write the note.
       setPane("notes");
     });
   };
@@ -154,7 +149,6 @@ export function Workspace({
   }
 
   function onReplySave(parentId: string, body: string) {
-    // An empty reply has nothing to show (no highlight, no body); discard it.
     if (body === "") {
       setReplyingTo(null);
       return;
@@ -162,10 +156,6 @@ export function Workspace({
     if (agent.addReply(sourceId, parentId, body)) setReplyingTo(null);
   }
 
-  // Keep the rendition's painted highlights in sync with the live note state.
-  // The reconciler draws (and rebinds drifted cfis for) highlights that appear
-  // and erases those that leave; we just hand it the desired set, a painter, and
-  // a cancel flag. Runs on every state change, so a peer's note shows up here too.
   useEffect(() => {
     if (!view.ready) return;
     let cancelled = false;
@@ -174,7 +164,6 @@ export function Workspace({
     for (const note of notes) {
       for (const h of note.highlights) desired.push({ noteId: note.id, highlight: h });
     }
-    // The composing highlight is painted but not yet in state; keep it alive.
     const comp = composingRef.current;
     if (comp) desired.push({ noteId: null, highlight: comp });
 
@@ -193,21 +182,14 @@ export function Workspace({
     return () => {
       cancelled = true;
     };
-    // Re-run on state changes and when the book becomes ready, not on every view identity change.
+
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, view.ready]);
 
-  // A new book means a new rendition with no annotations; forget what we drew.
   useEffect(() => {
     drawnRef.current.clear();
   }, [sourceId]);
 
-  // Read-repair the book's label: once the reader has decoded a metadata title
-  // and the club has no stored label for this book, backfill the parsed title as
-  // its default. Gated on having a title (no title -> nothing to send -> no
-  // retry loop) and on the absence of a stored label (set-if-absent on the
-  // server makes a concurrent double-fire harmless). The ref guards against
-  // refiring for the same book within a session.
   const titleRepairedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!view.title || storedBookTitle) return;
@@ -217,7 +199,6 @@ export function Workspace({
   }, [view.title, storedBookTitle, sourceId, onTitleParsed]);
 
   function onDelete(note: Note) {
-    // Erasing the paint is handled by the sync effect once the note leaves state.
     if (!agent.removeNote(note.id)) return;
     setEditingId((id) => (id === note.id ? null : id));
     setReplyingTo((id) => (id === note.id ? null : id));
@@ -239,30 +220,15 @@ export function Workspace({
   const { goTo } = view;
   const [pendingReferenceSeq, setPendingReferenceSeq] = useState<number | null>(null);
 
-  // Scroll the panel to a note and flash it. Shared by every "go to this note"
-  // path (jumping from the note itself, or following a `[[n]]` reference) so the
-  // feedback is consistent.
-  const flashNote = useCallback((seq: number) => {
-    const el = document.getElementById(`note-${seq}`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.remove("flash");
-    requestAnimationFrame(() => {
-      el.classList.add("flash");
-      window.setTimeout(() => el.classList.remove("flash"), 1200);
-    });
-  }, []);
-
   const onJump = useCallback(
     (note: Note) => {
       const hl = effectiveHighlight(note, byId);
       if (hl) {
         goTo(hl.anchor);
-        setPane("reader"); // follow the highlight to the reader page
+        setPane("reader");
       }
-      flashNote(note.seq);
     },
-    [byId, goTo, flashNote],
+    [byId, goTo],
   );
 
   useEffect(() => {
@@ -280,9 +246,8 @@ export function Workspace({
     } else {
       setPane("notes");
     }
-    requestAnimationFrame(() => flashNote(target.seq));
     setPendingReferenceSeq(null);
-  }, [pendingReferenceSeq, allBySeq, allById, sourceId, view.ready, goTo, flashNote]);
+  }, [pendingReferenceSeq, allBySeq, allById, sourceId, view.ready, goTo]);
 
   const onReference = useCallback(
     (seq: number) => {
@@ -297,15 +262,12 @@ export function Workspace({
       const hl = effectiveHighlight(target, allById);
       if (hl) {
         goTo(hl.anchor);
-        setPane("reader"); // a reference jumps the reader to the cited highlight
+        setPane("reader");
       }
-      flashNote(seq);
     },
-    [allBySeq, allById, sourceId, onSelectBook, goTo, flashNote],
+    [allBySeq, allById, sourceId, onSelectBook, goTo],
   );
 
-  // Seed a new note's body with the highlighted passage as a blockquote, then a
-  // blank paragraph for the note text.
   const composeInitialBody = composing
     ? `> ${composing.quote.exact.replaceAll(/\s+/gu, " ").trim()}\n\n`
     : "";
@@ -339,6 +301,7 @@ export function Workspace({
             books={books}
             selectedSourceId={selectedSourceId}
             onSelectBook={onSelectBook}
+            onRenameBook={onRenameBook}
             onAddBook={onAddBook}
           />
         );

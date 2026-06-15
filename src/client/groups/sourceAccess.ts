@@ -12,8 +12,7 @@ export interface LoadedSource {
   fromCache: boolean;
 }
 
-// Build a SourceSummary for a freshly fetched/uploaded file, preferring the
-// club's recorded metadata and falling back to what the File itself carries.
+
 function summaryFor(group: GroupSummary, sourceId: string, file: File): SourceSummary {
   const known = sourceById(group, sourceId);
   if (known) return known;
@@ -26,9 +25,8 @@ function summaryFor(group: GroupSummary, sourceId: string, file: File): SourceSu
   };
 }
 
-// Load a specific bound source, preferring the local IndexedDB copy and falling
-// back to the worker/R2 route on a miss. Successful network fetches seed the
-// cache.
+
+
 export async function loadSource(
   group: GroupSummary,
   sourceId: string,
@@ -46,21 +44,20 @@ export async function loadSource(
   return { source: summaryFor(group, id, fetched.file), file: fetched.file, fromCache: false };
 }
 
-// Load the club's default (first) source. Convenience wrapper over loadSource.
 export function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | null> {
   const id = currentSourceId(group);
   return id ? loadSource(group, id) : Promise.resolve(null);
 }
 
-// Upload a new group source and seed the cache with the same bytes, so the next
-// group load can open locally without immediately re-fetching from R2.
+
 export async function uploadCurrentSource(
   group: GroupSummary,
   file: File,
   health: SourceHealth,
   title: string | null,
+  author: string | null,
 ): Promise<ApiResult<LoadedSource>> {
-  const uploaded = await uploadSource(group.name, file, health, title);
+  const uploaded = await uploadSource(group.name, file, health, title, author);
   if (!uploaded.ok) return uploaded;
   await putCachedSource(uploaded.value, file);
   return {
@@ -73,10 +70,9 @@ export async function cachedSourceSize(sourceId: string): Promise<number | null>
   return (await getCachedSource(sourceId))?.size ?? null;
 }
 
-// Refresh the local copy from worker/R2. Deleting first ensures a failed fetch
-// does not leave callers believing the old cached bytes were refreshed. Takes
-// the bare group name + sourceId since the settings dialog reloads afterwards
-// and does not consume the returned summary's metadata.
+
+
+
 export async function refreshSource(
   groupName: string,
   sourceId: string,

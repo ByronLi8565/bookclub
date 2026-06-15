@@ -5,18 +5,18 @@ import type { OnSelect, SourceView } from "./sourceView.ts";
 
 export type { SourceView, SourceLocation, OnSelect } from "./sourceView.ts";
 
-// The source-kind dispatcher. Both adapters are called unconditionally (stable
-// hook order); each receives the file only when it owns the current source, so
-// the inactive one stays idle. `Workspace` and `Reader` consume the returned
-// SourceView without knowing which adapter produced it.
+
+
+
 export function useSourceView(
   source: SourceRef | null,
   file: File | null,
   onSelect: OnSelect,
   onSwipe?: (dir: "left" | "right") => void,
+  onSearchHighlightCleared?: () => void,
 ): SourceView {
   const isPdf = source?.kind === "pdf";
-  const epub = useEpubSourceView(isPdf ? null : file, onSelect, onSwipe);
-  const pdf = usePdfSourceView(isPdf ? file : null, onSelect, onSwipe);
+  const epub = useEpubSourceView(isPdf ? null : file, onSelect, onSwipe, onSearchHighlightCleared);
+  const pdf = usePdfSourceView(isPdf ? file : null, onSelect, onSwipe, onSearchHighlightCleared);
   return isPdf ? pdf : epub;
 }

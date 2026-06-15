@@ -1,9 +1,7 @@
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 
-// Inspection progress fraction [0, 1].
 export type InspectionProgress = (fraction: number) => void;
 
-// Parsed bibliographic metadata from an inspected file.
 export interface SourceMetadata {
   title: string | null;
   author: string | null;
@@ -18,13 +16,11 @@ export const EMPTY_METADATA: SourceMetadata = {
   cover: null,
 };
 
-// Health verdict plus parsed metadata for an inspected file.
 export interface SourceInspectionResult {
   health: SourceHealth;
   metadata: SourceMetadata;
 }
 
-// Read a blob into a data URL.
 export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

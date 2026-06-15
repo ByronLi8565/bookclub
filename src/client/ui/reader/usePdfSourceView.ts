@@ -24,45 +24,31 @@ import {
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { OnSelect, SourceLocation, SourceView } from "./sourceView.ts";
 
-// A highlight the adapter has been told to paint, kept so page navigation can
-// repaint the overlays for whichever page is now showing.
 interface Drawn {
   anchor: HighlightAnchor;
   onClick: () => void;
 }
 
-// Navigation/zoom tunables, grouped so the paging + zoom feel is easy to adjust
-// (or later expose as user settings) without hunting through the adapter.
 const READER_NAV = {
-  // Fraction of the visible height an arrow key scrolls before it turns a page.
-  // 1 = one full screen
   scrollStepFraction: 1,
-  // px tolerance for treating the page's top/bottom edge as fully in view.
   edgeEpsilon: 20,
-  // When a page opens, skip its top whitespace and rest the first line this many
-  // CSS px below the pane's top. 0 would pin text flush to the edge.
   textTopMargin: 24,
-  // Zoom bounds (percent of fit-to-width) and trackpad-pinch sensitivity.
   minZoom: 50,
   maxZoom: 400,
   pinchWheelSensitivity: 0.01,
 } as const;
 
-// The PDF source adapter: a PDF.js single-page view behind the format-agnostic
-// SourceView. Anchors are page + normalized rects; selection, search, and
-// rebind all flow through the page text layer.
 export function usePdfSourceView(
   file: File | null,
   onSelect: OnSelect,
   onSwipe?: (dir: "left" | "right") => void,
+  onSearchHighlightCleared?: () => void,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const onSwipeRef = useRef(onSwipe);
   onSwipeRef.current = onSwipe;
-  // Smart-arrow mode, mirrored to a ref so the navigation callbacks read the
-  // latest value without being re-created on every preference change.
   const { smartArrows } = useReaderPrefs();
   const smartArrowsRef = useRef(smartArrows);
   smartArrowsRef.current = smartArrows;
@@ -77,7 +63,6 @@ export function usePdfSourceView(
   const pageRef = useRef(1);
   const fontSizeRef = useRef(100);
   fontSizeRef.current = fontSize;
-  // DOM layers, built once the container + file are ready.
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -85,14 +70,12 @@ export function usePdfSourceView(
   const highlightLayerRef = useRef<HTMLDivElement | null>(null);
   const underlineLayerRef = useRef<HTMLDivElement | null>(null);
   const composingLayerRef = useRef<HTMLDivElement | null>(null);
-  // Per-page text + geometry, cached so search/locate/render don't re-extract.
   const geometryRef = useRef<Map<number, PageGeometry>>(new Map());
   const drawnRef = useRef<Map<string, Drawn>>(new Map());
   const underlineRef = useRef<HighlightAnchor | null>(null);
   const pendingRef = useRef<{ anchor: HighlightAnchor; range: Range; clear: () => void } | null>(
     null,
   );
-  // Bumped on each render so a late async render can detect it was superseded.
   const renderSeqRef = useRef(0);
 
   const geometryFor = useCallback(async (pageNum: number): Promise<PageGeometry | null> => {
@@ -105,12 +88,6 @@ export function usePdfSourceView(
     return geom;
   }, []);
 
-  // The px scroll range that keeps the page's *text* within the pane: `floor`
-  // parks the first line just below the top (trimming the large top margin many
-  // PDFs bake in), `ceil` parks the last line just above the bottom. Both are
-  // clamped to the real scrollable range, so navigation never lands in the page
-  // box's whitespace. Reads cached geometry — the current page is always
-  // rendered, hence cached — and falls back to the full range when absent.
   const scrollBounds = useCallback((): { floor: number; ceil: number } => {
     const scroller = scrollerRef.current;
     const wrap = wrapRef.current;
@@ -129,7 +106,6 @@ export function usePdfSourceView(
     return { floor, ceil };
   }, []);
 
-  // Park the current page at the top of its text, ensuring geometry is loaded.
   const scrollToTextTop = useCallback(async (): Promise<void> => {
     const pageNum = pageRef.current;
     await geometryFor(pageNum);
@@ -138,8 +114,6 @@ export function usePdfSourceView(
     scroller.scrollTop = scrollBounds().floor;
   }, [geometryFor, scrollBounds]);
 
-  // Paint overlay divs for the rects of `anchor` (only if it's on the current
-  // page) into `layer`, tagged so they can be removed by highlight id.
   const paintRects = (layer: HTMLDivElement, id: string, anchor: HighlightAnchor, cls: string) => {
     if (anchor.kind !== "pdf-text" || anchor.page !== pageRef.current) return;
     const { clientWidth: w, clientHeight: h } = layer;
@@ -174,8 +148,6 @@ export function usePdfSourceView(
     if (underlineRef.current) paintRects(layer, "search", underlineRef.current, "bc-search");
   }, []);
 
-  // The live in-progress selection, painted with the same look as a saved
-  // highlight (the native browser selection is hidden via CSS).
   const clearComposing = useCallback(() => {
     composingLayerRef.current?.replaceChildren();
   }, []);
@@ -196,7 +168,6 @@ export function usePdfSourceView(
     }
   }, []);
 
-  // Render the current page: canvas, text layer, then repaint overlays.
   const renderPage = useCallback(async () => {
     const doc = docRef.current;
     const wrap = wrapRef.current;
@@ -209,7 +180,6 @@ export function usePdfSourceView(
     const page = await doc.getPage(pageNum);
     if (seq !== renderSeqRef.current) return;
 
-    // Fit the page to the container width, scaled by the zoom control.
     const base = page.getViewport({ scale: 1 });
     const fit = (wrap.parentElement?.clientWidth ?? base.width) / base.width;
     const scale = fit * (fontSizeRef.current / 100);
@@ -228,9 +198,6 @@ export function usePdfSourceView(
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     if (seq !== renderSeqRef.current) return;
 
-    // (Re)build the selectable text layer over the canvas. PDF.js sizes each
-    // text run through `--total-scale-factor`, so it must match the viewport
-    // scale or the spans (and the native selection) render mis-sized/off.
     textLayer.replaceChildren();
     textLayer.style.width = `${viewport.width}px`;
     textLayer.style.height = `${viewport.height}px`;
@@ -267,20 +234,13 @@ export function usePdfSourceView(
       setSelection(null);
       pendingRef.current = null;
       clearComposing();
-      // Park the freshly-rendered page at the top of its text.
       void renderPage().then(() => scrollToTextTop());
     },
     [renderPage, location, clearComposing, scrollToTextTop],
   );
 
-  // Scroll within the current page by one capped step, bounded by the page's
-  // *text* (floor = first line, ceil = last line) rather than the raw page box,
-  // returning false when already pinned to that edge so the caller turns the
-  // page. A page whose text fits the viewport reports "at edge" in both
-  // directions, so the first key press turns straight away.
   const scrollWithinPage = useCallback(
     (dir: "down" | "up"): boolean => {
-      // "off" disables intra-page scrolling: arrows turn the page immediately.
       const mode = smartArrowsRef.current;
       if (mode === "off") return false;
       const scroller = scrollerRef.current;
@@ -301,7 +261,6 @@ export function usePdfSourceView(
     [scrollBounds],
   );
 
-  // Load the document and build the DOM layers once the container is mounted.
   useEffect(() => {
     const host = containerRef.current;
     if (!file || !host) return;
@@ -314,9 +273,6 @@ export function usePdfSourceView(
     underlineRef.current = null;
     pageRef.current = 1;
 
-    // A scroll container owns overflow so zooming grows the page *inside* the
-    // pane (scrolling/clipping) instead of bursting out of it. The page wrapper
-    // is centered within it.
     const scroller = document.createElement("div");
     scroller.className = "pdf-scroller";
     const wrap = document.createElement("div");
@@ -337,7 +293,6 @@ export function usePdfSourceView(
       layer.style.inset = "0";
       layer.style.pointerEvents = "none";
     }
-    // Canvas (paint) below, overlays above it, text layer on top for selection.
     for (const child of [canvas, highlightLayer, underlineLayer, composingLayer, textLayer])
       wrap.appendChild(child);
     scroller.appendChild(wrap);
@@ -350,10 +305,6 @@ export function usePdfSourceView(
     underlineLayerRef.current = underlineLayer;
     composingLayerRef.current = composingLayer;
 
-    // Open + render as a forked fiber so the cleanup can interrupt it instead of
-    // threading a `cancelled` flag through every async step. The document is
-    // committed to `docRef` synchronously inside the load step (before any
-    // interruptible boundary), so teardown can always dispose it.
     const fiber = Effect.runFork(
       Effect.gen(function* () {
         const doc = yield* Effect.promise(async () => {
@@ -383,8 +334,6 @@ export function usePdfSourceView(
     };
   }, [file, renderPage, scrollToTextTop]);
 
-  // Surface a selection inside the text layer as a pending anchor + popup. The
-  // text layer lives in the top document, so `selectionchange` fires normally.
   useEffect(() => {
     const onSelectionChange = () => {
       const textLayer = textLayerRef.current;
@@ -426,12 +375,10 @@ export function usePdfSourceView(
     },
     [renderPage],
   );
-  // Advance only once the bottom of the page is in view; otherwise scroll down.
   const next = useCallback(() => {
     if (scrollWithinPage("down")) return;
     goToPage(pageRef.current + 1);
   }, [scrollWithinPage, goToPage]);
-  // Mirror for going back: scroll up first, then turn to the previous page.
   const prev = useCallback(() => {
     if (scrollWithinPage("up")) return;
     goToPage(pageRef.current - 1);
@@ -457,14 +404,14 @@ export function usePdfSourceView(
     },
     [repaintHighlights],
   );
-  const drawUnderline = useCallback(
+  const drawSearchHighlight = useCallback(
     (anchor: HighlightAnchor) => {
       underlineRef.current = anchor;
       repaintUnderline();
     },
     [repaintUnderline],
   );
-  const eraseUnderline = useCallback(() => {
+  const eraseSearchHighlight = useCallback(() => {
     underlineRef.current = null;
     repaintUnderline();
   }, [repaintUnderline]);
@@ -481,9 +428,6 @@ export function usePdfSourceView(
     dismissSelection();
   }, [dismissSelection]);
 
-  // Pinch-to-zoom, scoped to the PDF scroller so it only affects the page (the
-  // browser's own page zoom is suppressed). Trackpad pinches arrive as
-  // ctrl+wheel; touch pinches are tracked from the two-finger distance.
   useEffect(() => {
     if (!ready) return;
     const scroller = scrollerRef.current;
@@ -527,8 +471,6 @@ export function usePdfSourceView(
     };
   }, [ready, setFontSize]);
 
-  // Swipe to turn pages (mirrors the epub adapter's gesture wiring). Ignores
-  // multi-touch so it never fires mid-pinch.
   useEffect(() => {
     let startX = 0;
     let multiTouch = false;
@@ -553,8 +495,6 @@ export function usePdfSourceView(
   }, []);
 
   const reader = useMemo<SourceReader>(() => {
-    // Find the quote on a given page; null if absent. Prefers the contextual
-    // (prefix+exact+suffix) match, then bare exact, mirroring the epub path.
     const locateOnPage = (
       geom: PageGeometry,
       quote: { prefix: string; exact: string; suffix: string },
@@ -573,7 +513,6 @@ export function usePdfSourceView(
           if (anchor.kind !== "pdf-text") return null;
           const doc = docRef.current;
           if (!doc) return anchor;
-          // Try the stored page first, then scan the whole document.
           const order = [
             anchor.page,
             ...Array.from({ length: doc.numPages }, (_, i) => i + 1).filter(
@@ -586,7 +525,6 @@ export function usePdfSourceView(
             const rects = locateOnPage(geom, h.quote);
             if (rects && rects.length > 0) return pdfAnchor(pageNum, rects);
           }
-          // Fall back to the stored anchor so an existing highlight still paints.
           return anchor.rects.length > 0 ? anchor : null;
         }).pipe(Effect.orElseSucceed(() => null)),
       search: (query) =>
@@ -607,7 +545,14 @@ export function usePdfSourceView(
     };
   }, [geometryFor]);
 
-  const search = useReaderSearch({ reader, ready, goTo, drawUnderline, eraseUnderline });
+  const search = useReaderSearch({
+    reader,
+    ready,
+    goTo,
+    drawSearchHighlight,
+    eraseSearchHighlight,
+    onSearchHighlightCleared,
+  });
 
   return {
     containerRef,

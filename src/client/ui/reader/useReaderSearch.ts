@@ -3,17 +3,16 @@ import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HighlightAnchor, SearchMatch, SourceReader } from "../../notes/highlights.ts";
 
-// The reader's ctrl+f state machine. The search bar (Reader) renders it and the
-// Mod+F hotkey (Workspace) drives `openSearch`. Jump-to-match: there is no
-// results list; Enter/Shift+Enter (or the bar's arrows) cycle `active`, and the
-// active match is underlined in place.
+
+
+
 export interface ReaderSearch {
   open: boolean;
   query: string;
   matches: SearchMatch[];
-  // Index into `matches` of the match currently shown, or -1 when there are none.
+
   active: number;
-  // A search is in flight (the whole book is being scanned).
+
   searching: boolean;
   openSearch: () => void;
   closeSearch: () => void;
@@ -22,23 +21,24 @@ export interface ReaderSearch {
   prev: () => void;
 }
 
-// How long to wait after the last keystroke before scanning the book.
 const DEBOUNCE_MS = 250;
 
 interface Deps {
   reader: SourceReader;
   ready: boolean;
   goTo: (anchor: HighlightAnchor) => void;
-  drawUnderline: (anchor: HighlightAnchor) => void;
-  eraseUnderline: (anchor: HighlightAnchor) => void;
+  drawSearchHighlight: (anchor: HighlightAnchor) => void;
+  eraseSearchHighlight: (anchor: HighlightAnchor) => void;
+  onSearchHighlightCleared?: () => void;
 }
 
 export function useReaderSearch({
   reader,
   ready,
   goTo,
-  drawUnderline,
-  eraseUnderline,
+  drawSearchHighlight,
+  eraseSearchHighlight,
+  onSearchHighlightCleared,
 }: Deps): ReaderSearch {
   const [open, setOpen] = useState(false);
   const [query, setQueryState] = useState("");
@@ -46,19 +46,18 @@ export function useReaderSearch({
   const [active, setActive] = useState(-1);
   const [searching, setSearching] = useState(false);
 
-  // The anchor currently underlined, so we can erase it before painting the next.
   const paintedRef = useRef<HighlightAnchor | null>(null);
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   const clearPaint = useCallback(() => {
     if (paintedRef.current) {
-      eraseUnderline(paintedRef.current);
+      eraseSearchHighlight(paintedRef.current);
       paintedRef.current = null;
+      onSearchHighlightCleared?.();
     }
-  }, [eraseUnderline]);
+  }, [eraseSearchHighlight, onSearchHighlightCleared]);
 
-  // Show match `index`: move the active marker, navigate there, and re-underline.
   const showMatch = useCallback(
     (list: SearchMatch[], index: number) => {
       clearPaint();
@@ -66,13 +65,12 @@ export function useReaderSearch({
       setActive(match ? index : -1);
       if (!match) return;
       goTo(match.anchor);
-      drawUnderline(match.anchor);
+      drawSearchHighlight(match.anchor);
       paintedRef.current = match.anchor;
     },
-    [clearPaint, goTo, drawUnderline],
+    [clearPaint, goTo, drawSearchHighlight],
   );
 
-  // Interrupt any in-flight scan and clear the timer; shared teardown.
   const cancelPending = useCallback(() => {
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
     debounceRef.current = null;
@@ -101,7 +99,7 @@ export function useReaderSearch({
           setSearching(false);
           showMatch(found, 0);
         }).pipe(
-          // Never leave the bar spinning: treat any failure/defect as no matches.
+
           Effect.catchCause(() => Effect.sync(() => setSearching(false))),
         );
         fiberRef.current = Effect.runFork(run);
@@ -131,13 +129,11 @@ export function useReaderSearch({
     setSearching(false);
   }, [cancelPending, clearPaint]);
 
-  // A new book (reader identity change) or unmount drops any in-flight scan and
-  // resets the bar; the old rendition's underline goes with it.
+
   useEffect(() => {
     return () => cancelPending();
   }, [cancelPending, reader]);
 
-  // Searching only makes sense once the book is rendered.
   useEffect(() => {
     if (!ready) {
       cancelPending();

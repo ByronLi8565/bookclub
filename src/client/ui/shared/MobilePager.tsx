@@ -3,12 +3,11 @@ import { useSwipeable } from "react-swipeable";
 
 export type Pane = "reader" | "notes";
 
-// The phone layout: two full-width pages (reader, notes) on a horizontal track.
-// Swipe or tap the bottom tabs to move between them. Workspace also drives the
-// active pane directly (e.g. "Add Note" jumps to notes, a jump to a highlight
-// returns to the reader). Swipes that start inside the epub iframe are detected
-// in useSourceView and routed here via onPane; this handles the notes page and
-// the reader's margins.
+
+
+
+
+
 export function MobilePager({
   pane,
   onPane,
@@ -21,8 +20,8 @@ export function MobilePager({
   onPane: (p: Pane) => void;
   reader: ReactNode;
   notes: ReactNode;
-  // When text is selected in the reader, the tab bar becomes a single "Add Note"
-  // action (the touch equivalent of the desktop selection popup).
+
+
   selecting: boolean;
   onAddNote: () => void;
 }) {

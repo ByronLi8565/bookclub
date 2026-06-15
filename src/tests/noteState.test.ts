@@ -12,13 +12,11 @@ import {
   type NoteState,
 } from "../server/util/noteState.ts";
 
-// A deterministic stamp: ids count up (n1, n2, ...) and time is fixed unless set.
 function fakeStamp(now = "2026-01-01T00:00:00.000Z"): NoteStamp {
   let n = 0;
   return { id: () => `id-${++n}`, now: () => now };
 }
 
-// The default author for fixtures; tests that exercise permissions use their own.
 const ALICE: NoteAuthor = { id: "u-alice", name: "Alice" };
 const BOB: NoteAuthor = { id: "u-bob", name: "Bob" };
 

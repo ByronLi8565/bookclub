@@ -1,9 +1,8 @@
 import { useMemo } from "react";
 import { renderNoteBody } from "../../../notes/render.ts";
 
-// Read-only note body. renderNoteBody escapes all text before formatting, so the
-// produced HTML is safe to inject. `refs` (seq -> snippet) decides which `[[n]]`
-// become clickable chips; a click is delegated off the chip's data-seq.
+
+
 export function NoteBodyView({
   body,
   refs,

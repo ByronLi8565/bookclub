@@ -11,8 +11,7 @@
   height: min(560px, 82vh);
   background: var(--white);
   border: var(--line);
-  /* Stacked offset rectangles fake a block of pages on the lower-right edge,
-     finished with the original hard drop shadow. */
+  
   box-shadow:
     5px 5px 0 0 var(--white),
     5px 5px 0 3px var(--black),
@@ -23,7 +22,7 @@
     20px 20px 0 0 var(--black);
 }
 
-/* The center spine: makes the card read like an open book. */
+
 .home-card::before {
   content: "";
   position: absolute;
@@ -34,7 +33,7 @@
   transform: translateX(-50%);
 }
 
-/* A red ribbon bookmark poking out of the top of the book. */
+
 .home-card::after {
   content: "";
   position: absolute;
@@ -102,7 +101,7 @@
   font-size: 15px;
 }
 
-/* Black square back button in the top-left corner of a club card. */
+
 .home-back {
   position: absolute;
   top: 18px;
@@ -126,7 +125,7 @@
   color: var(--black);
 }
 
-/* The upload affordance reads as a clickable blue link. */
+
 .home-upload-link {
   align-self: flex-start;
   font-size: 15px;
@@ -156,7 +155,7 @@
   line-height: 1;
   width: 34px;
   padding: 0;
-  /* Sit flush against the input, sharing the border edge. */
+  
   border-left: none;
   display: flex;
   align-items: center;
@@ -168,7 +167,7 @@
   color: var(--black);
 }
 
-/* Keep the plus on its black square (and white) even while disabled. */
+
 .home-create-confirm:disabled,
 .home-create-confirm:disabled:hover {
   background: var(--black);
@@ -206,8 +205,7 @@
   padding: 4px 10px;
 }
 
-/* The club picker sits to the right of the label, divided by the box's interior
-   separator. */
+
 .home-existing select {
   font: inherit;
   border: none;
@@ -217,7 +215,7 @@
   cursor: pointer;
 }
 
-/* Grayed out until signed in. */
+
 .home-existing:has(select:disabled) {
   color: var(--gray);
 }

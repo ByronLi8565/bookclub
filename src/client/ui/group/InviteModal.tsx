@@ -3,9 +3,8 @@ import { fetchGroup, getInviteLink, inviteToGroup, type RosterEntry } from "../.
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
-// Owner-only invite dialog: send an email invite and/or share the reusable open
-// link (regenerate to revoke the old one), plus the current people-with-access
-// list. Opened from Home and the workspace topbar.
+
+
 export function InviteModal({
   name,
   displayName,
@@ -72,7 +71,6 @@ export function InviteModal({
     else spawnToast("Failed", "Couldn't regenerate the link.", { type: "error" });
   }
 
-  // Show the link without its protocol prefix (it stays full in the clipboard).
   const shownLink = link ? link.replace(/^https?:\/\//u, "") : "";
 
   return (

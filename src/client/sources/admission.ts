@@ -6,7 +6,6 @@ import { inspectPdf } from "./pdfHealth.ts";
 
 export type { InspectionProgress, SourceMetadata, SourceInspectionResult } from "./inspection.ts";
 
-// Client-side pre-upload health check result.
 export type SourceInspection =
   | {
       ok: true;

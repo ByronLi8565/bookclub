@@ -1,5 +1,3 @@
-// Small request helpers shared by the worker's route modules.
-
 export { normalizeEmail } from "../../shared/util.ts";
 
 export async function readJson(request: Request): Promise<Record<string, unknown> | null> {

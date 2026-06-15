@@ -6,11 +6,9 @@ import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import type { SourceKind } from "../../shared/types/sources.ts";
 import { spawnToast } from "../ui/shared/toast/store.ts";
 
-// idle: no file chosen. checking: inspecting a picked file. ready: inspection
-// finished (the file may still be unusable — see health). uploading: storing it.
+
 export type UploadStatus = "idle" | "checking" | "ready" | "uploading";
 
-// A file that has been picked and inspected, ready to preview in the modal.
 export interface InspectedBook {
   file: File;
   kind: SourceKind;
@@ -22,30 +20,31 @@ export interface InspectedBook {
 export interface BookUpload {
   status: UploadStatus;
   busy: boolean;
-  // The inspected file awaiting confirmation, or null before one is picked.
+
   inspected: InspectedBook | null;
-  // Why the picked file couldn't be inspected at all (unsupported / unreadable),
-  // shown inline in the modal; null once a file inspects successfully.
+
+
   error: string | null;
-  // Whether the inspected file can actually be uploaded (health isn't an error).
+
   canUpload: boolean;
-  // Inspection progress (0–100) while `status === "checking"`, else 0. Drives
-  // the modal's progress bar as the whole file is scanned.
+
+
   progress: number;
-  // Inspect a picked file and hold the result for preview. Does not upload.
+
   select: (file: File) => Promise<void>;
-  // Upload the currently-inspected file; resolves true on success (caller closes
-  // the modal). A no-op when there's nothing inspected or health is an error.
+
+  updateMetadata: (metadata: Partial<Pick<SourceMetadata, "title" | "author">>) => void;
+
+
   confirm: () => Promise<boolean>;
-  // Clear the picked file and any error (e.g. when the modal closes).
+
   reset: () => void;
 }
 
-// Book admission, split into inspect (`select`) and upload (`confirm`) so the
-// upload modal can preview a file's metadata and health before committing it.
-// Admission refuses unreadable/unsupported files and files whose health is an
-// error; warnings are surfaced for the user to acknowledge by uploading anyway.
-// On success `onUploaded` fires with the new source's content hash.
+
+
+
+
 export function useBookUpload(
   group: GroupSummary | null,
   onUploaded: (sourceId: string) => void,
@@ -89,6 +88,15 @@ export function useBookUpload(
     setStatus("ready");
   }, []);
 
+  const updateMetadata = useCallback(
+    (metadata: Partial<Pick<SourceMetadata, "title" | "author">>): void => {
+      setInspected((current) =>
+        current ? { ...current, metadata: { ...current.metadata, ...metadata } } : current,
+      );
+    },
+    [],
+  );
+
   const confirm = useCallback(async (): Promise<boolean> => {
     if (!group || !inspected || inspected.health.status === "error") return false;
     setStatus("uploading");
@@ -97,6 +105,7 @@ export function useBookUpload(
       inspected.file,
       inspected.health,
       inspected.metadata.title,
+      inspected.metadata.author,
     );
     if (result.ok) {
       onUploaded(result.value.source.id);
@@ -116,6 +125,7 @@ export function useBookUpload(
     canUpload: inspected !== null && inspected.health.status !== "error",
     progress,
     select,
+    updateMetadata,
     confirm,
     reset,
   };

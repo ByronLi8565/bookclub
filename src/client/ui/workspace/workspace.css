@@ -1,5 +1,4 @@
-/* The three toolbar controls (presence, sync badge, settings) share one height
-   so their boxes line up; the presence indicator sets the reference size. */
+
 .presence-indicator,
 .sync-badge,
 .settings-button {
@@ -9,7 +8,7 @@
   justify-content: center;
 }
 
-/* Settings button, sits at the right end of the workspace toolbar. */
+
 .settings-button {
   width: 32px;
 }
@@ -29,7 +28,7 @@
   min-height: 220px;
 }
 
-/* Each setting is a row: name + description on the left, control on the right. */
+
 .settings-item {
   display: flex;
   align-items: flex-start;
@@ -60,8 +59,7 @@
   color: var(--gray);
 }
 
-/* Buttons and the smart-arrows <select> share one control look — compact, to
-   sit neatly across from the setting's description. */
+
 .settings-action {
   width: 100%;
   font: inherit;
@@ -73,8 +71,7 @@
   cursor: pointer;
 }
 
-/* Custom dropdown built from the reader's book-menu styling so it matches the
-   rest of the UI rather than the browser-native <select>. */
+
 .settings-dropdown {
   display: block;
   position: relative;
@@ -91,15 +88,13 @@
   white-space: nowrap;
 }
 
-/* Let the label take the room and ellipsize rather than wrap and shove the
-   arrow out of the button. */
+
 .settings-dropdown-trigger > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* The trigger already carries the arrow inline; drop the button reset so it
-   inherits the compact label look and doesn't add its own padding/hover. */
+
 .settings-dropdown-trigger .book-menu-arrow {
   padding: 0;
 }

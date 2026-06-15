@@ -30,6 +30,7 @@ const SourceMeta = Schema.Struct({
   contentType: Schema.String,
   size: Schema.Number,
   title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 
 const GroupSummary = Schema.Struct({
@@ -57,8 +58,7 @@ const ErrorBody = Schema.Struct({
   reason: Schema.optionalKey(Schema.String),
 });
 
-// Loose envelope for the home list: the `groups` items are decoded one at a
-// time (see listMyGroups), so the array element type stays unknown here.
+
 const GroupsEnvelope = Schema.Struct({ groups: Schema.Array(Schema.Unknown) });
 
 const GroupResponse = Schema.Struct({ group: GroupSummary });
@@ -90,8 +90,7 @@ async function readError(response: Response): Promise<string> {
   return body?.error ?? `http_${response.status}`;
 }
 
-// The groups the signed-in user belongs to (GET /groups). Each summary is
-// decoded independently and bad entries are skipped
+
 export async function listMyGroups(): Promise<GroupSummary[]> {
   const r = await fetch("/groups");
   if (!r.ok) return [];
@@ -103,13 +102,12 @@ export async function listMyGroups(): Promise<GroupSummary[]> {
     try {
       groups.push(decode(raw));
     } catch {
-      // Drop the unparseable group; the rest of the list still renders.
+
     }
   }
   return groups;
 }
 
-// Create a group with a write-once URL name (POST /groups).
 export async function createGroup(name: string): Promise<ApiResult<GroupSummary>> {
   const r = await fetch("/groups", {
     method: "POST",
@@ -117,8 +115,8 @@ export async function createGroup(name: string): Promise<ApiResult<GroupSummary>
     body: JSON.stringify({ name }),
   });
   if (!r.ok) {
-    // For an invalid name the worker returns the precise rule in `reason`
-    // (bad_charset, too_long, …); prefer it over the generic `error`.
+
+
     const body = await parseJson(r, ErrorBody);
     return { ok: false, error: body?.reason ?? body?.error ?? `http_${r.status}` };
   }
@@ -126,8 +124,7 @@ export async function createGroup(name: string): Promise<ApiResult<GroupSummary>
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Resolve a group by URL name plus the caller's membership (GET /groups/:name).
-// Returns null when the name is unclaimed or illegal.
+
 export async function fetchGroup(
   name: string,
 ): Promise<{ group: GroupSummary; membership: Membership; members: RosterEntry[] } | null> {
@@ -137,7 +134,6 @@ export async function fetchGroup(
   return parseJson(r, FetchGroupResponse);
 }
 
-// Redeem an invite token to join a group (POST /groups/:name/join).
 export async function redeemInvite(name: string, token: string): Promise<ApiResult<GroupSummary>> {
   const r = await fetch(`/groups/${name}/join`, {
     method: "POST",
@@ -149,7 +145,6 @@ export async function redeemInvite(name: string, token: string): Promise<ApiResu
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Any member: invite an email to the group (POST /groups/:name/invite).
 export async function inviteToGroup(name: string, email: string): Promise<ApiResult<null>> {
   const r = await fetch(`/groups/${name}/invite`, {
     method: "POST",
@@ -159,7 +154,6 @@ export async function inviteToGroup(name: string, email: string): Promise<ApiRes
   return r.ok ? { ok: true, value: null } : { ok: false, error: await readError(r) };
 }
 
-// Any member: get or rotate the group's open invite link (POST .../invite-link).
 export async function getInviteLink(
   name: string,
   rotate = false,
@@ -172,7 +166,6 @@ export async function getInviteLink(
   return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
 }
 
-// Any member: rename the club's display name (PUT /groups/:name/title).
 export async function renameGroup(name: string, title: string): Promise<ApiResult<GroupSummary>> {
   const r = await fetch(`/groups/${name}/title`, {
     method: "PUT",
@@ -184,7 +177,6 @@ export async function renameGroup(name: string, title: string): Promise<ApiResul
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Any member: set a display title for a bound book (PUT .../book/title).
 export async function renameBook(
   name: string,
   sourceId: string,
@@ -200,9 +192,8 @@ export async function renameBook(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Any member: backfill a book's default label from the reader's parsed metadata
-// title (PUT .../book/parsed-title). Read-repair: the server only writes it if
-// no default is stored yet, so this is safe to fire from any reader.
+
+
 export async function resolveBookTitle(
   name: string,
   sourceId: string,
@@ -218,31 +209,31 @@ export async function resolveBookTitle(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-// Any member: upload a group source — EPUB or PDF (PUT /groups/:name/book).
-// The pre-upload health report rides along in a header (Option A): the client
-// gates on it; the server validates the file's magic bytes independently.
+
+
 export async function uploadSource(
   name: string,
   file: File,
   health: SourceHealth,
   title: string | null,
+  author: string | null,
 ): Promise<ApiResult<string>> {
   const headers: Record<string, string> = {
     "Content-Type": file.type || EPUB_CONTENT_TYPE,
     "X-Source-Health": encodeURIComponent(JSON.stringify(health)),
   };
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
+  if (author) headers["X-Source-Author"] = encodeURIComponent(author);
   const r = await fetch(`/groups/${name}/book`, { method: "PUT", headers, body: file });
   if (!r.ok) return { ok: false, error: await readError(r) };
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
 }
 
-// Fetch a group's source bytes (GET /groups/:name/book). Without a sourceId the
-// club's default (first) book is returned; pass one to load a specific book.
-// Returns null when no source has been uploaded yet (or access is refused). The
-// filename extension reflects the content type so the reader adapter can be
-// chosen from the File.
+
+
+
+
 export async function fetchSource(name: string, requestId?: string): Promise<FetchedSource | null> {
   const query = requestId ? `?sourceId=${encodeURIComponent(requestId)}` : "";
   const r = await fetch(`/groups/${name}/book${query}`);

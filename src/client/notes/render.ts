@@ -5,7 +5,6 @@ import { escapeHtml } from "../../shared/util.ts";
 
 export type { Note, NoteAuthor } from "../../shared/types/notes.ts";
 
-// A note's anchor in the book: its own first highlight or that of the nearest ancestor
 
 export function effectiveHighlight(note: Note, byId: Map<string, Note>): Highlight | null {
   const seen = new Set<string>();
@@ -18,14 +17,12 @@ export function effectiveHighlight(note: Note, byId: Map<string, Note>): Highlig
   return null;
 }
 
-// The note body dialect.
-// Order matters for `$convertToMarkdownString`: element transformers first,
-// then text-format transformers.
+
+
 export const NOTE_TRANSFORMERS: Transformer[] = [QUOTE, BOLD_STAR, ITALIC_STAR];
 
-// A one-line preview of a note, used as the hover hint on a `[[n]]` chip. Prefers
-// body text (markdown stripped, references shown as #n); falls back to the
-// anchored quote, then the bare number for an empty highlight-only note.
+
+
 export function noteSnippet(note: Note, max = 80): string {
   const body = note.body
     .replaceAll(REFERENCE_PATTERN, (_whole, digits: string) => `#${digits}`)
@@ -37,10 +34,9 @@ export function noteSnippet(note: Note, max = 80): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-// Markdown to HTML for read-only note bodies.
-// Paragraphs, **bold**, *italic*, `> ` blockquotes, and `[[n]]` references.
+
 export function renderNoteBody(body: string, refs: Map<number, string> = new Map()): string {
-  // Blank-line-separated runs become blocks; a run of `> ` lines is a quote.
+
   const blocks = body
     .split(/\n{2,}/u)
     .map((block) => block.trim())
@@ -58,10 +54,9 @@ export function renderNoteBody(body: string, refs: Map<number, string> = new Map
     .join("");
 }
 
-// Inline formatting over already-escaped text. References resolve first so a
-// seq's snippet is not overridden by emphasis rules; bold runs before italic so the
-// double-star run is consumed before the single-star one. An unresolved `[[n]]`
-// is left as plain text rather than rendered as a (broken) chip.
+
+
+
 function renderInline(text: string, refs: Map<number, string>): string {
   const withRefs = escapeHtml(text).replaceAll(REFERENCE_PATTERN, (whole, digits: string) => {
     const seq = Number(digits);

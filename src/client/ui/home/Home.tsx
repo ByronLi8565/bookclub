@@ -11,7 +11,6 @@ import { spawnToast } from "../shared/toast/store.ts";
 
 const EMPTY_REFS = new Map<number, string>();
 
-// Friendly copy for the name-validation error codes from the server.
 const NAME_ERRORS: Record<string, string> = {
   empty: "Enter a name for your club.",
   too_short: "That name is too short — use at least 2 characters.",
@@ -22,8 +21,7 @@ const NAME_ERRORS: Record<string, string> = {
   name_taken: "That name is already taken — pick another.",
 };
 
-// The landing page (`/`). Signed in: create a club and jump into the ones you
-// belong to. Signed out: sign-in prompt. The login modal is owned here.
+
 export function Home({ session }: { session: Session }): React.ReactElement {
   const authed = session.status === "authed";
   const [loginOpen, setLoginOpen] = useState(false);

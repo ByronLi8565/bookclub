@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
 
-// Friendly copy for the server's error codes.
 const MESSAGES: Record<string, string> = {
   invalid_email: "That doesn't look like an email.",
   rate_limited: "Too many codes requested. Wait a bit and try again.",
@@ -16,10 +15,9 @@ const message = (error: string): string => MESSAGES[error] ?? "Something went wr
 
 type Step = "email" | "code" | "done";
 
-// The sign-in control in the top-right of the home page. Authed: the user's
-// email with a sign-out affordance. Anonymous: a "sign in with email" link that
-// asks the page to open the login modal (owned by Home so other controls can
-// open it too).
+
+
+
 export function Login({
   session,
   onSignIn,
@@ -72,7 +70,7 @@ export function LoginModal({
       setError(message(result.error));
       return;
     }
-    // Local dev: signed in already, no code step. Show success and close.
+
     if (result.devSignedIn) {
       setStep("done");
       setTimeout(onClose, 1200);
@@ -91,7 +89,7 @@ export function LoginModal({
       setError(message(result.error));
       return;
     }
-    // Show success, then auto-close (session is already authed underneath).
+
     setStep("done");
     setTimeout(onClose, 1200);
   }

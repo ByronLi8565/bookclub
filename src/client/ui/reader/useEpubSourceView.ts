@@ -24,43 +24,36 @@ function firstChapterHref(nav: Navigation): string | undefined {
   return nav.landmark?.("bodymatter")?.href ?? nav.toc?.[0]?.href;
 }
 
-// Epub.js binding layer.
 interface LiveView {
   book: Book;
   rendition: Rendition;
 }
 
-// A rendered epub.js view: its highlight pane (re-render) and Contents (selection).
 interface ResizableView {
   on: (e: string, cb: () => void) => void;
   pane?: { render: () => void };
   contents?: Contents;
 }
 
-// One loaded spine item, presented to the rebind/search scan.
 interface SectionHandle {
   document: Document;
   cfiFromRange(range: Range): string | null;
 }
 
-// The EPUB source adapter: an epub.js rendition behind the format-agnostic
-// SourceView. Anchors are EPUB CFIs; the adapter maps highlight ids to the cfi
-// they were painted at so the reader can erase by id.
 export function useEpubSourceView(
   file: File | null,
   onSelect: OnSelect,
   onSwipe?: (dir: "left" | "right") => void,
+  onSearchHighlightCleared?: () => void,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const onSwipeRef = useRef(onSwipe);
   onSwipeRef.current = onSwipe;
+  const openSearchRef = useRef<() => void>(() => {});
   const [title, setTitle] = useState<string | null>(null);
 
-  // Detect horizontal swipes inside the epub iframe by attaching react-swipeable
-  // to the iframe body (it can't bubble to our React tree). The ref is stashed so
-  // the per-view `rendered` handler can attach it to each spine iframe.
   const swipe = useSwipeable({
     onSwipedLeft: () => onSwipeRef.current?.("left"),
     onSwipedRight: () => onSwipeRef.current?.("right"),
@@ -69,16 +62,12 @@ export function useEpubSourceView(
   const swipeRef = useRef(swipe.ref);
   swipeRef.current = swipe.ref;
 
-  // Single source of truth: a usable rendition exists iff the reader is ready.
   const viewRef = useRef(Effect.runSync(Ref.make(Option.none<LiveView>())));
   const [ready, setReady] = useState(false);
   const [fontSize, setFontSizeState] = useState(100);
-  // Pending selection: popup position is state; range/cfi and the native-selection clearer live in a ref.
   const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
-  // Highlight id -> the cfi it was painted at, so the reader can erase by id.
   const drawnCfiRef = useRef<Map<string, string>>(new Map());
-  // Page within the current spine item, plus overall percentage from synthetic locations.
   const [location, setLocation] = useState<SourceView["location"]>(null);
 
   const publish = (view: Option.Option<LiveView>) => {
@@ -96,14 +85,10 @@ export function useEpubSourceView(
     drawnCfiRef.current.clear();
 
     const book = ePub();
-    // `spread: "auto"` gives a two-page spread on a wide pane, like a real book.
     const rendition = book.renderTo(el, { width: "100%", height: "100%", spread: "auto" });
 
-    // Keep text selectable on touch (iOS long-press); our stylesheet can't reach the iframe.
     rendition.themes.default({ body: { "-webkit-user-select": "text", "user-select": "text" } });
 
-    // Snap a live selection to word boundaries and surface the "Add Note" button.
-    // `lastText` dedupes the poll below so we only re-render when it changes.
     let lastText = "";
     const onSelection = (contents: Contents) => {
       const sel = contents.window.getSelection();
@@ -127,9 +112,6 @@ export function useEpubSourceView(
       setSelection(null);
     };
 
-    // iOS never fires `selectionchange` inside the (sandboxed srcdoc) epub iframe,
-    // so we poll the live selection instead. The text itself is readable, just not
-    // event-driven; this is the one reliable cross-platform detection path.
     const poll = window.setInterval(() => {
       const views = rendition.getContents() as unknown as Contents[];
       const active = views.find((c) => {
@@ -140,9 +122,21 @@ export function useEpubSourceView(
       else clearSelection();
     }, 300);
 
+    const removeContentKeydowns: (() => void)[] = [];
     rendition.on("rendered", (_section: unknown, view: ResizableView) => {
       view.on("resized", () => requestAnimationFrame(() => view.pane?.render()));
-      if (view.contents) swipeRef.current(view.contents.document.body);
+      if (view.contents) {
+        swipeRef.current(view.contents.document.body);
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
+          event.preventDefault();
+          openSearchRef.current();
+        };
+        view.contents.document.addEventListener("keydown", onKeyDown);
+        removeContentKeydowns.push(() =>
+          view.contents?.document.removeEventListener("keydown", onKeyDown),
+        );
+      }
     });
 
     const showLocation = () => {
@@ -172,8 +166,6 @@ export function useEpubSourceView(
       setSelection(null);
     });
 
-    // The split divider resizes the pane without a window resize; reflow
-    // ourselves, throttled to one reflow per frame to track the drag live.
     let resizeFrame: number | undefined;
     const resizeObserver = new ResizeObserver(() => {
       if (resizeFrame !== undefined) return;
@@ -193,12 +185,10 @@ export function useEpubSourceView(
     const load = Effect.gen(function* () {
       const buf = yield* Effect.tryPromise(() => file.arrayBuffer());
       yield* Effect.tryPromise(() => book.open(buf, "binary"));
-      // Surface the epub's metadata title (used as the default source label).
       const metadata = yield* Effect.tryPromise(() => book.loaded.metadata).pipe(
         Effect.orElseSucceed(() => null),
       );
       yield* Effect.sync(() => setTitle(metadata?.title?.trim() || null));
-      // Start on the first real chapter
       const start = yield* Effect.tryPromise(() => book.loaded.navigation).pipe(
         Effect.map(firstChapterHref),
         // oxlint-disable-next-line no-useless-undefined
@@ -206,7 +196,6 @@ export function useEpubSourceView(
       );
       yield* Effect.tryPromise(() => rendition.display(start));
       yield* Effect.sync(() => publish(Option.some({ book, rendition })));
-      // Generate synthetic locations after display; the overall percentage appears once ready.
       yield* Effect.tryPromise(() => book.locations.generate(1024));
       yield* Effect.sync(showLocation);
     }).pipe(
@@ -219,6 +208,7 @@ export function useEpubSourceView(
     return () => {
       if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
       clearInterval(poll);
+      for (const removeContentKeydown of removeContentKeydowns) removeContentKeydown();
       resizeObserver.disconnect();
       Effect.runFork(Fiber.interrupt(fiber));
       publish(Option.none());
@@ -268,20 +258,22 @@ export function useEpubSourceView(
     },
     [onView],
   );
-  // Search uses the "underline" annotation type, a separate keyspace from note
-  // highlights, so painting/erasing a search match can never disturb a note's
-  // highlight even at an identical cfi range.
-  const drawUnderline = useCallback(
+  const drawSearchHighlight = useCallback(
     (anchor: HighlightAnchor) => {
       if (anchor.kind !== "epub-cfi") return;
-      onView((v) => v.rendition.annotations.underline(anchor.value, {}, () => {}, "bc-search"));
+      onView((v) => {
+        if ([...drawnCfiRef.current.values()].includes(anchor.value)) {
+          v.rendition.annotations.remove(anchor.value, "highlight");
+        }
+        v.rendition.annotations.highlight(anchor.value, {}, () => {}, "bc-search");
+      });
     },
     [onView],
   );
-  const eraseUnderline = useCallback(
+  const eraseSearchHighlight = useCallback(
     (anchor: HighlightAnchor) => {
       if (anchor.kind !== "epub-cfi") return;
-      onView((v) => v.rendition.annotations.remove(anchor.value, "underline"));
+      onView((v) => v.rendition.annotations.remove(anchor.value, "highlight"));
     },
     [onView],
   );
@@ -297,16 +289,11 @@ export function useEpubSourceView(
     dismissSelection();
   }, [dismissSelection]);
 
-  // The reader only closes over the stable `viewRef`, so it's built once. A
-  // stable identity matters: useReaderSearch keys its effects off it.
   const reader = useMemo<SourceReader>(() => {
-    // Run an effect against the live book, or yield `fallback` if not ready.
     const withBook = <A>(fallback: A, f: (book: Book) => Effect.Effect<A>): Effect.Effect<A> =>
       Effect.flatMap(Ref.get(viewRef.current), (view) =>
         Option.isSome(view) ? f(view.value.book) : Effect.succeed(fallback),
       );
-    // Load every spine item in order, run `pick` against each, concatenate. A
-    // spine item that fails to load (cover, nav, malformed doc) is skipped.
     const findInSections = <A>(pick: (section: SectionHandle) => A[]): Effect.Effect<A[]> =>
       withBook<A[]>([], (book) =>
         Effect.gen(function* () {
@@ -363,7 +350,15 @@ export function useEpubSourceView(
     };
   }, []);
 
-  const search = useReaderSearch({ reader, ready, goTo, drawUnderline, eraseUnderline });
+  const search = useReaderSearch({
+    reader,
+    ready,
+    goTo,
+    drawSearchHighlight,
+    eraseSearchHighlight,
+    onSearchHighlightCleared,
+  });
+  openSearchRef.current = search.openSearch;
 
   return {
     containerRef,

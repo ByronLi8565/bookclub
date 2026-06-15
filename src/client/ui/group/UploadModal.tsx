@@ -2,19 +2,20 @@ import { useEffect, useState } from "react";
 import type { BookUpload, InspectedBook } from "../../groups/useBookUpload.ts";
 import type { SourceCapabilities, SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { Loading } from "../shared/Loading.tsx";
+import { RenamableText } from "../shared/RenamableText.tsx";
 
-// A single line in the "upload info" table. `status` colors the value text to
-// communicate health (green/amber/red), matching the mock.
+
 interface InfoRow {
   label: string;
   value: string;
+  editable?: "title" | "author";
+  placeholder?: string;
   status?: "ok" | "warn" | "error";
 }
 
 const ACCEPT = ".epub,application/epub+zip,.pdf,application/pdf";
 
-// The highlight capabilities the health check probes, in display order. These
-// are the per-file health checks (notably for PDFs, whose text layer varies).
+
 const CAPABILITY_ROWS: { key: keyof SourceCapabilities; label: string }[] = [
   { key: "selectableText", label: "Selectable text" },
   { key: "textAnchors", label: "Text anchors" },
@@ -23,7 +24,6 @@ const CAPABILITY_ROWS: { key: keyof SourceCapabilities; label: string }[] = [
   { key: "pageNavigation", label: "Page navigation" },
 ];
 
-// Human-readable byte size (e.g. "1.4 MB").
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];
@@ -36,8 +36,7 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-// The per-capability health checks: one row each, green when supported and red
-// when not, so the reader knows exactly which highlight features will work.
+
 function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
   return CAPABILITY_ROWS.map(({ key, label }) => ({
     label,
@@ -46,9 +45,8 @@ function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
   }));
 }
 
-// Turn a health verdict into table rows: the per-capability checks plus a line
-// per warning — or, for a rejected file (which has no capabilities), the
-// blocking reason(s).
+
+
 function healthRows(health: SourceHealth): InfoRow[] {
   if (health.status === "error") {
     return health.errors.map((e) => ({
@@ -68,13 +66,13 @@ function healthRows(health: SourceHealth): InfoRow[] {
   return [...capabilityRows(health.capabilities), ...warnings];
 }
 
-// Build the full "upload info" table for an inspected file: bibliographic
-// metadata (rows omitted when absent), file basics, then the health verdict.
+
 function infoRows(inspected: InspectedBook): InfoRow[] {
   const { metadata, file, health } = inspected;
-  const rows: InfoRow[] = [];
-  if (metadata.title) rows.push({ label: "Title", value: metadata.title });
-  if (metadata.author) rows.push({ label: "Author", value: metadata.author });
+  const rows: InfoRow[] = [
+    { label: "Title", value: metadata.title ?? "", editable: "title", placeholder: "untitled" },
+    { label: "Author", value: metadata.author ?? "", editable: "author", placeholder: "unknown" },
+  ];
   if (metadata.wordCount !== null) {
     rows.push({ label: "Words", value: metadata.wordCount.toLocaleString() });
   }
@@ -83,9 +81,8 @@ function infoRows(inspected: InspectedBook): InfoRow[] {
   return rows;
 }
 
-// The upload screen the add-a-book flow opens first. Drop or pick an EPUB/PDF,
-// preview its parsed metadata and a highlight-readiness health check (colored to
-// show status), then commit it. Available to any club member.
+
+
 export function UploadModal({
   upload,
   onClose,
@@ -95,8 +92,7 @@ export function UploadModal({
 }): React.ReactElement {
   const [dragging, setDragging] = useState(false);
 
-  // Reset the hook's picked-file state when the modal unmounts, so reopening it
-  // starts clean.
+
   const { reset } = upload;
   useEffect(() => reset, [reset]);
 
@@ -155,7 +151,7 @@ export function UploadModal({
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) void upload.select(f);
-                // Allow re-picking the same file later.
+
                 e.target.value = "";
               }}
             />
@@ -178,7 +174,23 @@ export function UploadModal({
                   <div className="upload-info-row" key={`${row.label}-${i}`}>
                     <dt>{row.label}</dt>
                     <dd className={row.status ? `upload-status--${row.status}` : undefined}>
-                      {row.value}
+                      {row.editable ? (
+                        <RenamableText
+                          value={row.value}
+                          onRename={(value) => {
+                            const next = value.trim() || null;
+                            if (row.editable === "title") upload.updateMetadata({ title: next });
+                            else upload.updateMetadata({ author: next });
+                          }}
+                          allowEmpty
+                          placeholder={row.placeholder}
+                          title={`Double-click to edit ${row.label.toLowerCase()}`}
+                          ariaLabel={row.label.toLowerCase()}
+                          inputClassName="upload-info-edit"
+                        />
+                      ) : (
+                        row.value
+                      )}
                     </dd>
                   </div>
                 ))}
@@ -202,7 +214,6 @@ export function UploadModal({
   );
 }
 
-// The upload glyph from assets/upload.svg, inlined so it inherits currentColor.
 function UploadIcon(): React.ReactElement {
   return (
     <svg

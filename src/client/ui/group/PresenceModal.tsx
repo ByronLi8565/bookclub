@@ -9,22 +9,20 @@ interface Person {
   isOnline: boolean;
 }
 
-// Merge the full roster (everyone who's ever joined) with the live online set,
-// online first, so we can show present members as online and the rest as offline.
+
 function mergePeople(members: RosterEntry[], online: OnlinePeer[]): Person[] {
   const onlineIds = new Set(online.map((p) => p.id));
   const byId = new Map<string, Person>();
   for (const m of members) {
     byId.set(m.id, { ...m, isOnline: onlineIds.has(m.id) });
   }
-  // Include anyone online who isn't in the roster snapshot (e.g. just joined).
+
   for (const p of online) {
     if (!byId.has(p.id)) byId.set(p.id, { ...p, email: "", isOnline: true });
   }
   return [...byId.values()].toSorted((a, b) => Number(b.isOnline) - Number(a.isOnline));
 }
 
-// A read-only dialog listing the club's members, marking who's currently online.
 export function PresenceModal({
   members,
   online,

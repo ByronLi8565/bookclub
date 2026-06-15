@@ -1,11 +1,11 @@
-/* Tighten the topbar so its controls fit a phone width. */
+
 @media (max-width: 720px) {
   .topbar {
     gap: 8px;
     padding: 10px 12px;
   }
 
-  /* Let the title take the slack so invite/presence/settings sit at the right. */
+  
   .topbar h1,
   .topbar-title-edit {
     font-size: 16px;
@@ -21,16 +21,13 @@
     max-width: 50%;
   }
 
-  /* Declutter the phone view: drop the progress readout, and swap the sync
-       badge for the presence indicator (the people list). */
+  
   .reader-bar .page-count,
   .sync-badge {
     display: none;
   }
 
-  /* Landing page: simplify the book illustration for a narrow screen — drop the
-     stacked-page shadow and center spine, center the card and its content, and
-     move the bookmark to the left edge. */
+  
   .home {
     padding: 24px;
     transform: translateX(-8px);

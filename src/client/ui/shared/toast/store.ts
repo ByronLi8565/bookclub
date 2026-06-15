@@ -56,7 +56,6 @@ function emit(): void {
   for (const listener of listeners) listener(toasts);
 }
 
-// Surface the note-sync connection status as a toast, keyed off the book hash.
 export function showSyncStatusToast(
   status: "syncing" | "online" | "offline",
   sourceId: string,

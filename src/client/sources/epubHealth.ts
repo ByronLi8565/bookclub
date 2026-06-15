@@ -8,7 +8,6 @@ import {
   type SourceMetadata,
 } from "./inspection.ts";
 
-// EPUB capabilities
 const EPUB_CAPABILITIES: SourceCapabilities = {
   selectableText: true,
   textAnchors: true,
@@ -17,13 +16,11 @@ const EPUB_CAPABILITIES: SourceCapabilities = {
   pageNavigation: true,
 };
 
-// Spine section narrowed to what the word counter uses.
 interface SpineSection {
   load: (request: unknown) => Promise<{ textContent?: string | null } | null>;
   unload: () => void;
 }
 
-// Count words across every spine section.
 async function countWords(
   book: ReturnType<typeof ePub>,
   sections: SpineSection[],
@@ -40,7 +37,6 @@ async function countWords(
   return words;
 }
 
-// Extract the cover image as a self-contained data URL.
 async function coverDataUrl(book: ReturnType<typeof ePub>): Promise<string | null> {
   const url = await book.coverUrl().catch(() => null);
   if (!url) return null;
@@ -50,7 +46,6 @@ async function coverDataUrl(book: ReturnType<typeof ePub>): Promise<string | nul
   return blob ? blobToDataUrl(blob).catch(() => null) : null;
 }
 
-// Health-check an EPUB by opening it and verifying it has a readable spine.
 export async function inspectEpub(
   file: File,
   onProgress?: InspectionProgress,

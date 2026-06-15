@@ -1,6 +1,5 @@
 import type { Note } from "../../shared/types/notes.ts";
 
-// Handles ordering (oldest first) and orphan reparenting for threaded notes
 export interface Conversation {
   roots: Note[];
   childrenOf: (id: string) => Note[];
@@ -16,7 +15,7 @@ export function buildConversation(notes: Note[]): Conversation {
 
   const childrenMap = new Map<string, Note[]>();
   for (const note of notes) {
-    // A reply whose parent is gone is reparented to the root level below.
+
     if (note.parent !== null && byId.has(note.parent)) {
       const siblings = childrenMap.get(note.parent) ?? [];
       siblings.push(note);

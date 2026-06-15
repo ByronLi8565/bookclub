@@ -1,4 +1,4 @@
-// Dependency-free `[[n]]` cross-reference grammar.
+
 const REFERENCE_SOURCE = "\\[\\[(\\d+)\\]\\]";
 
 export const REFERENCE_PATTERN = new RegExp(REFERENCE_SOURCE, "gu");

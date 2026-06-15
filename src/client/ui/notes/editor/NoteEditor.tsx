@@ -18,9 +18,6 @@ import { NOTE_TRANSFORMERS } from "../../../notes/render.ts";
 import { ReferenceNode } from "./ReferenceNode.ts";
 import { createReferenceTransformer } from "./referenceTransformer.ts";
 
-// The restricted node set: paragraphs and text are built in; QuoteNode is the
-// only structural node we allow, plus ReferenceNode for `[[n]]` chips. No
-// headings, lists, links, code, or images.
 const editorConfig = {
   namespace: "note",
   nodes: [QuoteNode, ReferenceNode],
@@ -28,8 +25,6 @@ const editorConfig = {
   theme: { text: { bold: "bc-bold", italic: "bc-italic" }, quote: "bc-quote" },
 };
 
-// Parse the markdown body and place the caret ready for typing: if it ends with
-// the seeded quote, drop a fresh paragraph beneath it and select that.
 function buildInitialState(initialBody: string, transformers: Transformer[]) {
   return () => {
     $convertFromMarkdownString(initialBody, transformers);
@@ -45,7 +40,6 @@ function buildInitialState(initialBody: string, transformers: Transformer[]) {
   };
 }
 
-// Actions and keyboard shortcuts, sharing the composer context.
 function Chrome({
   containerRef,
   submitLabel,
@@ -71,8 +65,6 @@ function Chrome({
     onSubmit(body.trim());
   }, [canSubmit, editor, onSubmit, transformers]);
 
-  // Ctrl/Cmd+B and +I format; Ctrl/Cmd+Enter publishes. Scoped to this editor's
-  // container so multiple open editors don't fire each other's shortcuts.
   useHotkey("Mod+B", () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold"), {
     target: containerRef,
     preventDefault: true,
@@ -90,8 +82,6 @@ function Chrome({
         ErrorBoundary={LexicalErrorBoundary}
       />
       <HistoryPlugin />
-      {/* Only references transform live while typing; bold/italic/quote stay
-          explicit (Cmd+B/I / markdown on save) as before. */}
       <MarkdownShortcutPlugin transformers={[referenceTransformer]} />
       <div className="note-editor-actions">
         <button type="button" className="primary" onClick={submit} disabled={!canSubmit}>
@@ -121,8 +111,6 @@ export function NoteEditor({
   canSubmit?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  // Read the valid seqs fresh on each transform so peer-added notes count, while
-  // the transformer identity stays stable across renders.
   const validSeqsRef = useRef(validSeqs);
   validSeqsRef.current = validSeqs;
   const referenceTransformer = useMemo(

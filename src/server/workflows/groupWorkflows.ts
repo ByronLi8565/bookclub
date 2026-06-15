@@ -279,9 +279,6 @@ export function renameBookTitle(
   );
 }
 
-// Read-repair the parsed metadata title for a book: any member whose reader has
-// decoded a title can backfill the club's default label, but only if none is
-// stored yet (the agent enforces set-if-absent). Idempotent and member-driven.
 export function resolveBookTitle(
   env: Env,
   request: Request,
@@ -377,13 +374,13 @@ export function uploadSource(
           stored.reason === "empty" ? fail(400, "empty") : fail(400, "unsupported_type"),
         );
       }
-      // The client sends the parsed metadata title (URL-encoded) so we can record
-      // a human-readable default label for the book.
       const rawTitle = request.headers.get("X-Source-Title");
       const title = rawTitle ? decodeURIComponent(rawTitle).trim() || null : null;
+      const rawAuthor = request.headers.get("X-Source-Author");
+      const author = rawAuthor ? decodeURIComponent(rawAuthor).trim() || null : null;
       const { id, kind, contentType: storedType, size } = stored.source;
       yield* tryPromise(() =>
-        group.addSource(me.id, id, { kind, contentType: storedType, size, title }),
+        group.addSource(me.id, id, { kind, contentType: storedType, size, title, author }),
       );
       return { hash: id };
     }),
@@ -402,7 +399,6 @@ export function fetchSource(
       const { group, summary } = yield* requireGroup(env, rawName);
       const { isMember } = yield* tryPromise(() => group.membership(me.id));
       if (!isMember) return yield* Effect.fail(fail(403, "forbidden"));
-      // A specific bound book if requested, else the club's default (first) book.
       const source = sourceId ? sourceById(summary, sourceId) : currentSource(summary);
       if (!source) return yield* Effect.fail(fail(404, "no_book"));
       const object = yield* tryPromise(() => getSource(env, source.id));

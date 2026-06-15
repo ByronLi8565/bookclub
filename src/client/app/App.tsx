@@ -5,8 +5,7 @@ import { Home } from "../ui/home/Home.tsx";
 import { Loading } from "../ui/shared/Loading.tsx";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 
-// Phase B root: `/` is the group home; `/:name` is a group's reader workspace
-// (members only). Session state is hydrated once and threaded into both routes.
+
 export default function App() {
   const session = useSession();
   return (

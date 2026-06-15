@@ -9,9 +9,8 @@ export type {
 } from "../../shared/types/notes.ts";
 export { epubAnchor, pdfAnchor } from "../../shared/types/notes.ts";
 
-// Snap a selection out to whole words, so a sloppy drag still yields a clean
-// highlight. Only text-node endpoints are adjusted; element boundaries are left
-// as-is.
+
+
 const WORD = /[\p{L}\p{N}_'’-]/u;
 
 export function expandToWordBoundaries(range: Range): Range {
@@ -36,11 +35,10 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
-// Position for the "Add Note" popup, given the selection rect (in the reader
-// surface's viewport) and the frame element's rect (in the top document, for an
-// epub iframe; undefined when the text layer is in the top document). The point
-// is clamped into the visible visual viewport, which on iOS can be
-// offset/zoomed relative to the layout viewport, so the popup stays on-screen.
+
+
+
+
 export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: number } {
   const vv = window.visualViewport;
   const ox = vv?.offsetLeft ?? 0;
@@ -54,12 +52,10 @@ export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: numb
   };
 }
 
-// How much surrounding context to capture on each side of the exact text.
 const CONTEXT = 32;
 
-// Derive a QuoteSelector (exact + prefix + suffix) from a live DOM Range. Shared
-// by both reader adapters: epub spine documents and pdf text-layer documents are
-// both DOM, so the same context extraction applies.
+
+
 export function deriveQuote(range: Range): QuoteSelector {
   const doc = range.startContainer.ownerDocument;
   const root = doc?.body;
@@ -83,8 +79,7 @@ export function deriveQuote(range: Range): QuoteSelector {
   };
 }
 
-// Turn a selection (a kind-specific anchor + the live range) into a Highlight.
-// The id is a local placeholder; the server assigns the canonical ulid later.
+
 export const captureHighlight = (
   sourceId: string,
   anchor: HighlightAnchor,
@@ -98,33 +93,29 @@ export const captureHighlight = (
     createdAt: new Date().toISOString(),
   }));
 
-// One full-text search hit: its anchor plus a one-line snippet of surrounding
-// text for the search bar to show.
+
 export interface SearchMatch {
   anchor: HighlightAnchor;
   excerpt: string;
 }
 
-// The reader's anchor-oriented capabilities, implemented by each source adapter
-// (EPUB, PDF). Locating and searching are adapter-owned: the reconciler and the
-// search bar depend only on this narrow seam, never on cfi or page specifics.
+
+
 export interface SourceReader {
-  // Resolve a highlight's anchor, rebinding via its quote fallback if the stored
-  // anchor no longer resolves. Null when it cannot be located at all.
+
+
   locateHighlight(highlight: Highlight): Effect.Effect<HighlightAnchor | null>;
-  // Full-text search across the whole source, in reading order.
+
   search(query: string): Effect.Effect<SearchMatch[]>;
 }
 
-// Search a document for a QuoteSelector, preferring the match whose surrounding
-// text agrees with the stored prefix/suffix. Returns a Range or null if the
-// exact text cannot be found at all. Shared by both adapters' rebind paths.
+
+
 export function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
   const root = doc.body;
   if (!root) return null;
   const text = root.textContent ?? "";
 
-  // Prefer the precise (prefix + exact + suffix) match.
   const contextual = quote.prefix + quote.exact + quote.suffix;
   let start = text.indexOf(contextual);
   if (start >= 0) {
@@ -136,7 +127,6 @@ export function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
   return rangeFromOffsets(root, start, start + quote.exact.length);
 }
 
-// Map character offsets within an element's textContent back to a DOM Range.
 export function rangeFromOffsets(root: Node, start: number, end: number): Range | null {
   const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const range = root.ownerDocument!.createRange();
@@ -160,18 +150,15 @@ export function rangeFromOffsets(root: Node, start: number, end: number): Range 
   return null;
 }
 
-// How much context to show on each side of a match in the excerpt.
 const EXCERPT = 40;
 
-// One occurrence of a query within a plain text string: its start offset and a
-// trimmed, single-line excerpt of the surrounding context.
+
 export interface TextMatch {
   start: number;
   excerpt: string;
 }
 
-// Find every (case-insensitive) occurrence of `query` in `text`. Non-overlapping:
-// each scan resumes past the previous hit. Pure (no DOM), so it's unit-testable.
+
 export function scanText(text: string, query: string): TextMatch[] {
   if (query === "") return [];
   const haystack = text.toLowerCase();
@@ -192,8 +179,7 @@ export function scanText(text: string, query: string): TextMatch[] {
   return matches;
 }
 
-// Map the pure string matches back to DOM Ranges within a document, dropping any
-// that fail to resolve to a Range. Shared by both adapters' full-text search.
+
 export function findAllRanges(doc: Document, query: string): { range: Range; excerpt: string }[] {
   const root = doc.body;
   if (!root) return [];

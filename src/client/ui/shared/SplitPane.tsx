@@ -1,6 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
 
-// Two panes with a draggable vertical divider.
 export function SplitPane({ left, right }: { left: ReactNode; right: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pct, setPct] = useState(62);

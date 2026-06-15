@@ -1,18 +1,11 @@
 import type { Highlight, HighlightAnchor, Note, NoteAuthor } from "../../shared/types/notes.ts";
-import { migrateHighlight, needsHighlightMigration } from "../../shared/types/notes.ts";
 import { extractReferences } from "../../shared/references.ts";
 
-// The whole synced state for one Source (book): the notes plus the next
-// human-readable seq to hand out. Pure transitions over this state live here so
-// the note lifecycle can be tested without a durable object; NoteAgent is a thin
-// adapter that applies them and broadcasts the result.
 export interface NoteState {
   notes: Note[];
   nextSeq: number;
 }
 
-// The non-deterministic facts a transition needs, injected so transitions stay
-// pure and testable: a fresh sortable id and the current time.
 export interface NoteStamp {
   id(): string;
   now(): string;
@@ -44,9 +37,6 @@ export function addReply(
   return append(state, sourceId, author, parent, body, [], stamp);
 }
 
-// Edit a note's body. Author-only (decision 7): a caller may only edit their own
-// note. A mismatch (or a missing/deleted note) is a no-op — the server is the
-// enforcer, independent of any UI gating.
 export function editNote(
   state: NoteState,
   id: string,
@@ -64,10 +54,6 @@ export function editNote(
   );
 }
 
-// Delete a note. A note is only hard-deleted when nothing depends on it: no
-// replies and no `[[seq]]` references in any other note. Otherwise it becomes a
-// tombstone, so threads stay intact and references never dangle. (No tombstone
-// GC: a tombstone is not reclaimed if its last dependent later disappears.)
 export function removeNote(
   state: NoteState,
   id: string,
@@ -77,8 +63,6 @@ export function removeNote(
 ): NoteState {
   const target = state.notes.find((note) => note.id === id);
   if (!target) return state;
-  // Author may delete their own note; the group owner may moderate any note
-  // (decision 7). Anyone else is a no-op.
   if (target.author.id !== callerId && !isOwner) return state;
 
   const hasChildren = state.notes.some((note) => note.parent === id);
@@ -134,29 +118,10 @@ export function rebindHighlight(
   );
 }
 
-// Normalize persisted notes whose highlights predate the anchor model (they
-// carried a `cfi` selector instead of `anchor`). Returns the same reference when
-// nothing needs migrating, so callers can skip a redundant state write.
-export function migrateNoteState(state: NoteState): NoteState {
-  const stale = state.notes.some((note) =>
-    note.highlights.some((h) => needsHighlightMigration(h as never)),
-  );
-  if (!stale) return state;
-  return {
-    ...state,
-    notes: state.notes.map((note) => ({
-      ...note,
-      highlights: note.highlights.map((h) => migrateHighlight(h as never)),
-    })),
-  };
-}
-
-// Replace the note list while preserving the seq counter.
 function setNotes(state: NoteState, notes: Note[]): NoteState {
   return { notes, nextSeq: state.nextSeq ?? 1 };
 }
 
-// Append a new note (top-level or reply) with the server-authored fields stamped.
 function append(
   state: NoteState,
   sourceId: string,

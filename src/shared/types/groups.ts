@@ -1,19 +1,13 @@
-// Shared group types used by both the client API layer and the server agents.
-
 import type { SourceKind } from "./sources.ts";
 
 export type GroupRole = "owner" | "member";
 
-// Per-source metadata recorded when a source is bound. Legacy groups predate
-// this map; the current-source accessors default missing entries to EPUB.
 export interface SourceMeta {
   kind: SourceKind;
   contentType: string;
   size: number;
-  // The parsed metadata title captured at upload, used as the default
-  // human-readable label when no member has set an override. Null/absent when
-  // the file carried no title (or for legacy entries).
   title?: string | null;
+  author?: string | null;
 }
 
 export interface GroupSummary {

@@ -1,8 +1,3 @@
-// Source admission health. Before a source is bound to a club, its reader and
-// highlight capabilities are checked. Health is modeled as errors and warnings,
-// not a boolean: `ok` binds immediately, `warn` binds after explicit
-// confirmation, `error` never binds.
-
 export type SourceHealthStatus = "ok" | "warn" | "error";
 
 export interface SourceCapabilities {

@@ -38,9 +38,7 @@ body,
   margin: 0;
 }
 
-/* The app is a fixed full-screen shell; scrolling happens inside panes (note
-   list, reader), never on the page. Lock both axes so swipes and the layout
-   don't fight page scroll or rubber-band. */
+
 html,
 body {
   overflow: hidden;
@@ -123,7 +121,6 @@ button:disabled:hover {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* Dynamic viewport height so the layout (and the flush bottom tab bar) tracks
-     iOS Safari's collapsing toolbar instead of leaving a gap. */
+  
   height: 100dvh;
 }

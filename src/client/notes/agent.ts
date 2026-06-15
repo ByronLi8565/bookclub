@@ -7,9 +7,8 @@ import { spawnToast } from "../ui/shared/toast/store.ts";
 
 export type { OnlinePeer } from "../../server/agents/NoteAgent.ts";
 
-// The synced notes for the open book plus the mutation calls that write them.
-// Mutations are fire-and-forget: the durable object broadcasts the new state,
-// which arrives as a fresh `notes` value on the next render.
+
+
 export interface NoteSync {
   notes: Note[];
   notesReady: boolean;
@@ -22,13 +21,12 @@ export interface NoteSync {
   rebindHighlight: (noteId: string, highlightId: string, anchor: HighlightAnchor) => boolean;
 }
 
-// Connect to the per-group NoteAgent durable object (one instance per groupId,
-// decision 6) over a websocket and expose its live state. The notes for all of a
-// group's books live in this one instance, each tagged with its sourceId. With
-// no group open we park the connection on a throwaway "idle" instance whose
-// empty state we ignore, so the hook count stays stable.
+
+
+
+
 export function useNoteAgent(groupId: string | null): NoteSync {
-  // Live presence, pushed by the agent's broadcast (separate from synced state).
+
   const [online, setOnline] = useState<OnlinePeer[]>([]);
   const agent = useAgent<NoteAgent, NoteState>({
     agent: "note-agent",
@@ -38,11 +36,11 @@ export function useNoteAgent(groupId: string | null): NoteSync {
         const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
         if (msg.type === "presence" && msg.users) setOnline(msg.users);
       } catch {
-        // Non-JSON / internal protocol frames: ignore.
+
       }
     },
   });
-  // Drop stale presence when switching groups (the new instance will re-push).
+
   useEffect(() => setOnline([]), [groupId]);
   const { stub } = agent;
   const fire = (call: () => Promise<unknown>) => {

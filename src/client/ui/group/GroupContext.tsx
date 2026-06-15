@@ -1,8 +1,7 @@
 import { useState } from "react";
 import type { RosterEntry } from "../../groups/api.ts";
 
-// The collaboration context shown atop the note panel: which book is in view
-// (with an inline rename any member may use) and who's in the club.
+
 export function GroupContext({
   bookTitle,
   members,

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-// The signed-in user as the client knows it (the session cookie itself is
-// httpOnly and never read here).
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -12,17 +11,16 @@ export type SessionStatus = "loading" | "anon" | "authed";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
-// startLogin's result. In local dev the server signs the user in directly
-// (no code step); `devSignedIn` tells the UI to skip straight to "done".
+
 export type StartResult = { ok: true; devSignedIn?: boolean } | { ok: false; error: string };
 
 export interface Session {
   status: SessionStatus;
   user: SessionUser | null;
-  // Request a login code for an email (POST /auth/start). In local dev this
-  // signs the user in directly (devSignedIn) with no code step.
+
+
   startLogin: (email: string) => Promise<StartResult>;
-  // Submit a code to complete sign-in (POST /auth/verify); sets the user on ok.
+
   verify: (email: string, code: string, displayName?: string) => Promise<ActionResult>;
   signOut: () => Promise<void>;
 }
@@ -36,8 +34,7 @@ async function readError(response: Response): Promise<string> {
   }
 }
 
-// Tracks the current session, hydrating from /auth/me on mount and exposing the
-// sign-in/out actions. The server is the authority; this is just a cache.
+
 export function useSession(): Session {
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -64,7 +61,7 @@ export function useSession(): Session {
       body: JSON.stringify({ email }),
     });
     if (!r.ok) return { ok: false, error: await readError(r) };
-    // Dev shortcut: the server already created the session and returned the user.
+
     if (r.status !== 204) {
       const body = (await r.json().catch(() => null)) as {
         devSignedIn?: boolean;

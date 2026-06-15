@@ -1,9 +1,9 @@
-// A small IndexedDB cache for source bytes, keyed by sourceId (the content hash,
-// so entries never go stale). Lets a page reload reuse the local copy instead of
-// re-downloading from R2. The File is stored directly, preserving its name and
-// content type, so EPUB and PDF round-trip without losing their kind. All
-// operations are best-effort: any failure (private mode, quota, unsupported)
-// degrades gracefully to a network fetch.
+
+
+
+
+
+
 
 const DB_NAME = "bookclub";
 const STORE = "books";
@@ -25,8 +25,8 @@ export async function getCachedSource(sourceId: string): Promise<File | null> {
       req.addEventListener("success", () => {
         const value = req.result as File | Blob | undefined;
         if (!value) return resolve(null);
-        // A File round-trips as-is (name + type preserved). A legacy Blob entry
-        // (pre-PDF) is wrapped as an EPUB file, matching how it was stored.
+
+
         resolve(
           value instanceof File
             ? value
@@ -50,7 +50,7 @@ export async function deleteCachedSource(sourceId: string): Promise<void> {
       tx.addEventListener("error", () => reject(tx.error));
     });
   } catch {
-    // Best-effort: ignore cache delete failures.
+
   }
 }
 
@@ -64,6 +64,6 @@ export async function putCachedSource(sourceId: string, file: File): Promise<voi
       tx.addEventListener("error", () => reject(tx.error));
     });
   } catch {
-    // Best-effort: ignore cache write failures.
+
   }
 }

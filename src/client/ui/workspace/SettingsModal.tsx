@@ -4,8 +4,7 @@ import { setReaderPref, useReaderPrefs, type SmartArrows } from "../../settings/
 import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
-// A custom dropdown that mirrors the reader's book switcher styling (instead of
-// a browser-native <select>) so settings controls match the rest of the UI.
+
 function SettingDropdown<T extends string>({
   value,
   options,
@@ -70,14 +69,12 @@ function SettingDropdown<T extends string>({
   );
 }
 
-// Identifies the book a settings dialog can manage: its content-hash sourceId
-// and the group URL name used to redownload it from R2.
+
 export interface SettingsBook {
   sourceId: string;
   name: string;
 }
 
-// Human-readable byte size (e.g. "1.4 MB").
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];
@@ -90,16 +87,14 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
-// Settings are grouped into categories, navigated with the same segmented
-// tab bar the mobile pager uses.
+
 type Category = "info" | "pdf";
 const CATEGORIES: { id: Category; label: string }[] = [
   { id: "info", label: "Info" },
   { id: "pdf", label: "PDF" },
 ];
 
-// Settings dialog. The "Info" category manages the current book's local copy;
-// "PDF" holds reader behavior toggles.
+
 export function SettingsModal({
   book,
   onClose,
@@ -108,7 +103,7 @@ export function SettingsModal({
   onClose: () => void;
 }): React.ReactElement {
   const [category, setCategory] = useState<Category>("info");
-  // The cached file size in bytes, or null while loading / when not cached.
+
   const [cachedSize, setCachedSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -134,7 +129,7 @@ export function SettingsModal({
       spawnToast("Book redownloaded", "The local copy was refreshed from storage.", {
         type: "info",
       });
-      // Reload so the workspace re-reads the freshly cached bytes.
+
       location.reload();
     } else {
       setCachedSize(null);

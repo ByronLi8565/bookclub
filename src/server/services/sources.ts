@@ -7,13 +7,8 @@ import {
 } from "../../shared/types/sources.ts";
 import type { Env } from "../env.ts";
 
-// Source bytes (EPUB or PDF) live in R2 keyed by their content hash, so the same
-// file uploaded to two groups is stored once (dedup across groups — decision
-// 13). Access is gated per group at the route layer; this module only validates
-// the kind and moves bytes.
-
 export interface StoredSource {
-  id: string; // content hash
+  id: string;
   kind: SourceKind;
   contentType: string;
   size: number;
@@ -23,10 +18,6 @@ export type StoreSourceResult =
   | { ok: true; source: StoredSource }
   | { ok: false; reason: "unsupported_type" | "empty" };
 
-// Store source bytes under their content hash (no-op if already present) and
-// return the source metadata. The kind is determined from the file's magic
-// bytes, falling back to the client-supplied content type, and never trusted
-// blindly: a file whose signature matches neither EPUB nor PDF is rejected.
 export async function storeSource(
   env: Env,
   bytes: ArrayBuffer,
@@ -46,7 +37,6 @@ export async function storeSource(
   };
 }
 
-// Fetch a stored source by content hash, or null if absent.
 export function getSource(env: Env, id: string): Promise<R2ObjectBody | null> {
   return env.BOOKS.get(id);
 }

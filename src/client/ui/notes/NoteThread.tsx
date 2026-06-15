@@ -4,8 +4,6 @@ import { effectiveHighlight, type Note } from "../../notes/render.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";
 
-// Replies indent one level each, up to this many levels; deeper replies render
-// flat at the deepest indent rather than marching off the right edge.
 const MAX_INDENT = 4;
 
 export function noteTitle(note: Note): string {
@@ -30,25 +28,17 @@ export function formatNoteTimestamp(createdAt: string): string {
   });
 }
 
-// Read-view data shared by every row: which seqs resolve (for editor chips),
-// id -> note (for anchor inheritance), and seq -> snippet (for read chips).
 export interface NoteRefs {
   validSeqs: Set<number>;
   byId: Map<string, Note>;
   refs: Map<number, string>;
 }
 
-// The signed-in caller, used to gate edit/delete affordances per note. The
-// server is the enforcer (decision 7); these only hide buttons that would be
-// rejected anyway. A member may edit their own note; the author or the group
-// owner may delete one.
 export interface NoteViewer {
   userId: string;
   isOwner: boolean;
 }
 
-// The per-note callbacks and the single-open-editor selectors, threaded down to
-// every row in a thread.
 export interface NoteActions {
   editingId: string | null;
   replyingTo: string | null;
@@ -107,8 +97,6 @@ export function NoteCardView({
   );
 }
 
-// One note: its head and body (or an inline edit editor), followed by an inline
-// reply editor when this note is the reply target.
 function NoteRow({
   note,
   actions,
@@ -122,10 +110,8 @@ function NoteRow({
   canWrite: boolean;
   viewer: NoteViewer;
 }) {
-  // A note can jump if it (or an ancestor, for replies) carries a highlight.
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
-  // Affordance gating (decision 7): author edits own; author or owner deletes.
   const isAuthor = note.author.id === viewer.userId;
   const canEdit = isAuthor;
   const canDelete = isAuthor || viewer.isOwner;
@@ -261,8 +247,6 @@ function NoteRow({
   );
 }
 
-// The replies of a note, each rendered recursively. `depth` is the indent level
-// of this group; past MAX_INDENT we stop nesting and render flat at that level.
 function Replies({
   parent,
   childrenOf,
@@ -301,7 +285,6 @@ function Replies({
   return depth <= MAX_INDENT ? <div className="replies">{content}</div> : content;
 }
 
-// A top-level note plus its nested reply tree.
 export function NoteThread({
   root,
   childrenOf,
