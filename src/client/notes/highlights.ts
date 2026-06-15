@@ -33,6 +33,15 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
+export function isTextSelectionIn(root: Node, range: Range): boolean {
+  return (
+    range.startContainer.nodeType === Node.TEXT_NODE &&
+    range.endContainer.nodeType === Node.TEXT_NODE &&
+    root.contains(range.startContainer) &&
+    root.contains(range.endContainer)
+  );
+}
+
 export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: number } {
   const vv = window.visualViewport;
   const ox = vv?.offsetLeft ?? 0;

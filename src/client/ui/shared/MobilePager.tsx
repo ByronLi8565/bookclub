@@ -38,15 +38,27 @@ export function MobilePager({
       </div>
       <div className="pager-tabs">
         {selecting ? (
-          <button className="pager-add-note" onClick={onAddNote}>
+          <button
+            className="pager-add-note"
+            onClick={onAddNote}
+            title="Add a note on this selection"
+          >
             Add Note
           </button>
         ) : (
           <>
-            <button aria-pressed={pane === "reader"} onClick={() => onPane("reader")}>
+            <button
+              aria-pressed={pane === "reader"}
+              onClick={() => onPane("reader")}
+              title="Show reader"
+            >
               Reader
             </button>
-            <button aria-pressed={pane === "notes"} onClick={() => onPane("notes")}>
+            <button
+              aria-pressed={pane === "notes"}
+              onClick={() => onPane("notes")}
+              title="Show notes"
+            >
               Notes
             </button>
           </>

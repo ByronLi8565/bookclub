@@ -45,7 +45,7 @@ export function PresenceModal({
       >
         <div className="modal-head">
           <strong>online now</strong>
-          <button type="button" onClick={onClose} aria-label="close">
+          <button type="button" onClick={onClose} aria-label="close" title="Close">
             ✕
           </button>
         </div>

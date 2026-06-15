@@ -111,7 +111,7 @@ export function UploadModal({
       >
         <div className="modal-head">
           <strong>add a book</strong>
-          <button type="button" onClick={onClose} aria-label="close">
+          <button type="button" onClick={onClose} aria-label="close" title="Close">
             ✕
           </button>
         </div>
@@ -195,6 +195,7 @@ export function UploadModal({
               className="primary upload-submit"
               disabled={!upload.canUpload || upload.busy}
               onClick={() => void onConfirm()}
+              title="Upload book"
             >
               {upload.status === "uploading" ? "uploading…" : "upload"}
             </button>

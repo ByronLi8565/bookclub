@@ -18,7 +18,12 @@ export function ToastViewport() {
         >
           <div className="toast-head">
             <strong>{toast.title}</strong>
-            <button type="button" onClick={() => dismissToast(toast.id)} aria-label="dismiss toast">
+            <button
+              type="button"
+              onClick={() => dismissToast(toast.id)}
+              aria-label="dismiss toast"
+              title="Dismiss"
+            >
               x
             </button>
           </div>

@@ -82,7 +82,7 @@ export function InviteModal({
       >
         <div className="modal-head">
           <strong>invite to {displayName}</strong>
-          <button type="button" onClick={onClose} aria-label="close">
+          <button type="button" onClick={onClose} aria-label="close" title="Close">
             ✕
           </button>
         </div>
@@ -94,7 +94,12 @@ export function InviteModal({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <button type="submit" className="primary" disabled={busy || email === ""}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={busy || email === ""}
+              title="Send invite"
+            >
               send invite
             </button>
           </form>

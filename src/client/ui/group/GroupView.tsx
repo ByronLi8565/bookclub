@@ -285,7 +285,12 @@ function NoBook({
         </a>
         <div className="home-main">
           <h1 className="home-title">{group.displayName}</h1>
-          <button type="button" className="home-upload-link plain-button" onClick={onUpload}>
+          <button
+            type="button"
+            className="home-upload-link plain-button"
+            onClick={onUpload}
+            title="Upload a book or PDF"
+          >
             upload the club&apos;s book or PDF
           </button>
         </div>

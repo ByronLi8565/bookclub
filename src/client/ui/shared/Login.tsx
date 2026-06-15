@@ -30,6 +30,7 @@ export function Login({
           type="button"
           className="login-link plain-button"
           onClick={() => void session.signOut()}
+          title="Sign out"
         >
           sign out
         </button>
@@ -38,7 +39,7 @@ export function Login({
   }
 
   return (
-    <button type="button" className="login-signin" onClick={onSignIn}>
+    <button type="button" className="login-signin" onClick={onSignIn} title="Sign in">
       sign in
     </button>
   );
@@ -102,7 +103,7 @@ export function LoginModal({
       >
         <div className="modal-head">
           <strong>sign in with email</strong>
-          <button type="button" onClick={onClose} aria-label="close">
+          <button type="button" onClick={onClose} aria-label="close" title="Close">
             ✕
           </button>
         </div>
@@ -118,7 +119,12 @@ export function LoginModal({
                 onChange={(e) => setEmail(e.target.value)}
                 autoFocus
               />
-              <button type="submit" className="primary" disabled={busy || email === ""}>
+              <button
+                type="submit"
+                className="primary"
+                disabled={busy || email === ""}
+                title="Send code"
+              >
                 send code
               </button>
             </form>
@@ -133,7 +139,12 @@ export function LoginModal({
                 onChange={(e) => setCode(e.target.value)}
                 autoFocus
               />
-              <button type="submit" className="primary" disabled={busy || code === ""}>
+              <button
+                type="submit"
+                className="primary"
+                disabled={busy || code === ""}
+                title="Verify code"
+              >
                 verify
               </button>
             </form>

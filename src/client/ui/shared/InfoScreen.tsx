@@ -16,7 +16,7 @@ export function InfoScreen({ onClose }: { onClose: () => void }): React.ReactEle
       >
         <div className="modal-head">
           <strong id="home-info-title">RELEASE LOG</strong>
-          <button type="button" onClick={onClose} aria-label="close info">
+          <button type="button" onClick={onClose} aria-label="close info" title="Close">
             ✕
           </button>
         </div>

@@ -15,10 +15,6 @@
     white-space: nowrap;
   }
 
-  .reader-bar .reader-title {
-    max-width: 50%;
-  }
-
   .reader-bar .page-count,
   .sync-badge {
     display: none;

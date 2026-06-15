@@ -3,6 +3,7 @@ import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   expandToWordBoundaries,
+  isTextSelectionIn,
   pdfAnchor,
   popupPoint,
   scanText,
@@ -15,7 +16,7 @@ import { useReaderPrefs } from "../../settings/readerPrefs.ts";
 import {
   destroyPdf,
   loadPdf,
-  loadTextLayerCtor,
+  loadTextLayerBuilderCtor,
   pageGeometry,
   rectsForRange,
   type PageGeometry,
@@ -23,6 +24,7 @@ import {
 } from "../../sources/pdf.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { OnSelect, SourceLocation, SourceView } from "./sourceView.ts";
+import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 
 interface Drawn {
   anchor: HighlightAnchor;
@@ -37,6 +39,33 @@ const READER_NAV = {
   maxZoom: 400,
   pinchWheelSensitivity: 0.01,
 } as const;
+
+const PDF_RECT_Y_NUDGE_PX = 4;
+
+interface WebKitGestureEvent extends Event {
+  scale?: number;
+}
+
+// Client rects for only the *text* inside a range. Walking text nodes (rather
+// than calling range.getClientRects() directly) ignores element boxes — notably
+// pdf.js's `.endOfContent` selection sink, which is stretched to the full layer
+// during a drag and would otherwise inflate a highlight to the whole page.
+function textClientRects(range: Range): DOMRect[] {
+  const common = range.commonAncestorContainer;
+  const root = common.nodeType === Node.TEXT_NODE ? common.parentNode : common;
+  if (!root) return [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const rects: DOMRect[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!range.intersectsNode(node)) continue;
+    const sub = document.createRange();
+    sub.selectNodeContents(node);
+    if (node === range.startContainer) sub.setStart(node, range.startOffset);
+    if (node === range.endContainer) sub.setEnd(node, range.endOffset);
+    rects.push(...sub.getClientRects());
+  }
+  return rects;
+}
 
 export function usePdfSourceView(
   file: File | null,
@@ -67,9 +96,10 @@ export function usePdfSourceView(
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
+  const textLayerBuilderRef = useRef<TextLayerBuilder | null>(null);
   const highlightLayerRef = useRef<HTMLDivElement | null>(null);
+  const flashLayerRef = useRef<HTMLDivElement | null>(null);
   const underlineLayerRef = useRef<HTMLDivElement | null>(null);
-  const composingLayerRef = useRef<HTMLDivElement | null>(null);
   const geometryRef = useRef<Map<number, PageGeometry>>(new Map());
   const drawnRef = useRef<Map<string, Drawn>>(new Map());
   const underlineRef = useRef<HighlightAnchor | null>(null);
@@ -114,8 +144,26 @@ export function usePdfSourceView(
     scroller.scrollTop = scrollBounds().floor;
   }, [geometryFor, scrollBounds]);
 
+  const scrollToAnchor = useCallback(
+    async (anchor: HighlightAnchor): Promise<void> => {
+      if (anchor.kind !== "pdf-text" || anchor.rects.length === 0) return;
+      const pageNum = pageRef.current;
+      await geometryFor(pageNum);
+      const scroller = scrollerRef.current;
+      const wrap = wrapRef.current;
+      if (!scroller || !wrap || pageNum !== pageRef.current) return;
+      const h = wrap.clientHeight;
+      const top = Math.min(...anchor.rects.map((r) => r.y)) * h;
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const target = Math.min(maxScroll, Math.max(0, top - READER_NAV.textTopMargin));
+      scroller.scrollTop = target;
+    },
+    [geometryFor],
+  );
+
   const paintRects = (layer: HTMLDivElement, id: string, anchor: HighlightAnchor, cls: string) => {
-    if (anchor.kind !== "pdf-text" || anchor.page !== pageRef.current) return;
+    const painted: HTMLDivElement[] = [];
+    if (anchor.kind !== "pdf-text" || anchor.page !== pageRef.current) return painted;
     const { clientWidth: w, clientHeight: h } = layer;
     for (const rect of anchor.rects) {
       const div = document.createElement("div");
@@ -123,7 +171,7 @@ export function usePdfSourceView(
       div.dataset.hid = id;
       div.style.position = "absolute";
       div.style.left = `${rect.x * w}px`;
-      div.style.top = `${rect.y * h}px`;
+      div.style.top = `${rect.y * h + PDF_RECT_Y_NUDGE_PX}px`;
       div.style.width = `${rect.width * w}px`;
       div.style.height = `${rect.height * h}px`;
       if (cls === "bc-highlight") {
@@ -131,7 +179,9 @@ export function usePdfSourceView(
         div.addEventListener("click", () => drawnRef.current.get(id)?.onClick());
       }
       layer.appendChild(div);
+      painted.push(div);
     }
+    return painted;
   };
 
   const repaintHighlights = useCallback(() => {
@@ -148,32 +198,26 @@ export function usePdfSourceView(
     if (underlineRef.current) paintRects(layer, "search", underlineRef.current, "bc-search");
   }, []);
 
-  const clearComposing = useCallback(() => {
-    composingLayerRef.current?.replaceChildren();
+  const clearFlash = useCallback(() => {
+    flashLayerRef.current?.replaceChildren();
   }, []);
-  const paintComposing = useCallback((rects: PdfRect[]) => {
-    const layer = composingLayerRef.current;
-    if (!layer) return;
-    layer.replaceChildren();
-    const { clientWidth: w, clientHeight: h } = layer;
-    for (const rect of rects) {
-      const div = document.createElement("div");
-      div.className = "bc-highlight";
-      div.style.position = "absolute";
-      div.style.left = `${rect.x * w}px`;
-      div.style.top = `${rect.y * h}px`;
-      div.style.width = `${rect.width * w}px`;
-      div.style.height = `${rect.height * h}px`;
-      layer.appendChild(div);
-    }
-  }, []);
+
+  const flashHighlight = useCallback(
+    (anchor: HighlightAnchor) => {
+      const layer = flashLayerRef.current;
+      if (!layer) return;
+      clearFlash();
+      const [first] = paintRects(layer, "jump", anchor, "bc-jump-flash");
+      first?.addEventListener("animationend", clearFlash, { once: true });
+    },
+    [clearFlash],
+  );
 
   const renderPage = useCallback(async () => {
     const doc = docRef.current;
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
-    const textLayer = textLayerRef.current;
-    if (!doc || !wrap || !canvas || !textLayer) return;
+    if (!doc || !wrap || !canvas) return;
 
     const seq = ++renderSeqRef.current;
     const pageNum = pageRef.current;
@@ -188,6 +232,10 @@ export function usePdfSourceView(
 
     wrap.style.width = `${viewport.width}px`;
     wrap.style.height = `${viewport.height}px`;
+    // The text-layer spans size their glyphs off this CSS var; set it on the
+    // page so the builder's freshly-created layer inherits it.
+    wrap.style.setProperty("--total-scale-factor", String(scale));
+    wrap.style.setProperty("--scale-factor", String(scale));
     canvas.width = Math.floor(viewport.width * dpr);
     canvas.height = Math.floor(viewport.height * dpr);
     canvas.style.width = `${viewport.width}px`;
@@ -198,20 +246,24 @@ export function usePdfSourceView(
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     if (seq !== renderSeqRef.current) return;
 
-    textLayer.replaceChildren();
-    textLayer.style.width = `${viewport.width}px`;
-    textLayer.style.height = `${viewport.height}px`;
-    textLayer.style.setProperty("--total-scale-factor", String(scale));
-    textLayer.style.setProperty("--scale-factor", String(scale));
-    const TextLayer = await loadTextLayerCtor();
+    // Render the text layer through pdf.js's TextLayerBuilder rather than the
+    // bare TextLayer class. The builder appends the `.endOfContent` selection
+    // sink and registers pdf.js's global selection handler, which is what makes
+    // touch/drag selection grab individual words instead of the whole page.
+    const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
     if (seq !== renderSeqRef.current) return;
-    const tl = new TextLayer({
-      textContentSource: await page.getTextContent(),
-      container: textLayer,
-      viewport,
-    });
-    await tl.render();
-    if (seq !== renderSeqRef.current) return;
+    const builder = new TextLayerBuilderCtor({ pdfPage: page });
+    await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
+    if (seq !== renderSeqRef.current) {
+      builder.cancel();
+      builder.div.remove();
+      return;
+    }
+    textLayerBuilderRef.current?.cancel();
+    textLayerBuilderRef.current?.div.remove();
+    textLayerBuilderRef.current = builder;
+    textLayerRef.current = builder.div;
+    wrap.appendChild(builder.div);
 
     repaintHighlights();
     repaintUnderline();
@@ -225,18 +277,22 @@ export function usePdfSourceView(
   }, [repaintHighlights, repaintUnderline]);
 
   const goToPage = useCallback(
-    (pageNum: number) => {
+    async (pageNum: number, afterRender: () => Promise<void> = scrollToTextTop): Promise<void> => {
       const doc = docRef.current;
       if (!doc) return;
       const clamped = Math.min(Math.max(1, pageNum), doc.numPages);
-      if (clamped === pageRef.current && location) return;
+      if (clamped === pageRef.current && location) {
+        await afterRender();
+        return;
+      }
       pageRef.current = clamped;
       setSelection(null);
       pendingRef.current = null;
-      clearComposing();
-      void renderPage().then(() => scrollToTextTop());
+      clearFlash();
+      await renderPage();
+      await afterRender();
     },
-    [renderPage, location, clearComposing, scrollToTextTop],
+    [renderPage, location, clearFlash, scrollToTextTop],
   );
 
   const scrollWithinPage = useCallback(
@@ -280,30 +336,28 @@ export function usePdfSourceView(
     wrap.style.position = "relative";
     wrap.style.margin = "0 auto";
     const canvas = document.createElement("canvas");
-    const textLayer = document.createElement("div");
-    textLayer.className = "textLayer";
     const highlightLayer = document.createElement("div");
     highlightLayer.className = "pdf-highlights";
+    const flashLayer = document.createElement("div");
+    flashLayer.className = "pdf-jump-flash";
     const underlineLayer = document.createElement("div");
     underlineLayer.className = "pdf-underlines";
-    const composingLayer = document.createElement("div");
-    composingLayer.className = "pdf-composing";
-    for (const layer of [highlightLayer, underlineLayer, composingLayer]) {
+    for (const layer of [highlightLayer, flashLayer, underlineLayer]) {
       layer.style.position = "absolute";
       layer.style.inset = "0";
       layer.style.pointerEvents = "none";
     }
-    for (const child of [canvas, highlightLayer, underlineLayer, composingLayer, textLayer])
+    // The text layer is created and appended per-render by the TextLayerBuilder.
+    for (const child of [canvas, highlightLayer, flashLayer, underlineLayer])
       wrap.appendChild(child);
     scroller.appendChild(wrap);
     host.appendChild(scroller);
     scrollerRef.current = scroller;
     wrapRef.current = wrap;
     canvasRef.current = canvas;
-    textLayerRef.current = textLayer;
     highlightLayerRef.current = highlightLayer;
+    flashLayerRef.current = flashLayer;
     underlineLayerRef.current = underlineLayer;
-    composingLayerRef.current = composingLayer;
 
     const fiber = Effect.runFork(
       Effect.gen(function* () {
@@ -324,46 +378,58 @@ export function usePdfSourceView(
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
       renderSeqRef.current++;
+      clearFlash();
+      textLayerBuilderRef.current?.cancel();
+      textLayerBuilderRef.current = null;
+      textLayerRef.current = null;
       const doc = docRef.current;
       docRef.current = null;
       if (doc) void destroyPdf(doc);
       scroller.remove();
       scrollerRef.current = null;
       wrapRef.current = null;
+      flashLayerRef.current = null;
       setReady(false);
     };
-  }, [file, renderPage, scrollToTextTop]);
+  }, [file, renderPage, scrollToTextTop, clearFlash]);
 
+  // Native selection drives everything: the browser paints the live highlight
+  // (via .textLayer ::selection) and we just read the resulting range to place
+  // the confirm popup and remember what to capture on commit.
   useEffect(() => {
+    const clear = () => {
+      if (!pendingRef.current) return;
+      pendingRef.current = null;
+      setSelection(null);
+    };
     const onSelectionChange = () => {
       const textLayer = textLayerRef.current;
       const wrap = wrapRef.current;
       if (!textLayer || !wrap) return;
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return clear();
       const raw = sel.getRangeAt(0);
-      if (!textLayer.contains(raw.commonAncestorContainer)) return;
+      if (!isTextSelectionIn(textLayer, raw)) return clear();
       const range = expandToWordBoundaries(raw);
 
       const box = wrap.getBoundingClientRect();
-      const rects: PdfRect[] = [...range.getClientRects()].map((r) => ({
+      const rects: PdfRect[] = textClientRects(range).map((r) => ({
         x: (r.left - box.left) / box.width,
         y: (r.top - box.top) / box.height,
         width: r.width / box.width,
         height: r.height / box.height,
       }));
-      if (rects.length === 0) return;
+      if (rects.length === 0) return clear();
       pendingRef.current = {
         anchor: pdfAnchor(pageRef.current, rects),
         range,
         clear: () => sel.removeAllRanges(),
       };
-      paintComposing(rects);
       setSelection(popupPoint(range.getBoundingClientRect()));
     };
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
-  }, [paintComposing]);
+  }, []);
 
   const setFontSize = useCallback(
     (pct: number) => {
@@ -377,17 +443,17 @@ export function usePdfSourceView(
   );
   const next = useCallback(() => {
     if (scrollWithinPage("down")) return;
-    goToPage(pageRef.current + 1);
+    void goToPage(pageRef.current + 1);
   }, [scrollWithinPage, goToPage]);
   const prev = useCallback(() => {
     if (scrollWithinPage("up")) return;
-    goToPage(pageRef.current - 1);
+    void goToPage(pageRef.current - 1);
   }, [scrollWithinPage, goToPage]);
   const goTo = useCallback(
-    (anchor: HighlightAnchor) => {
-      if (anchor.kind === "pdf-text") goToPage(anchor.page);
+    async (anchor: HighlightAnchor): Promise<void> => {
+      if (anchor.kind === "pdf-text") await goToPage(anchor.page, () => scrollToAnchor(anchor));
     },
-    [goToPage],
+    [goToPage, scrollToAnchor],
   );
 
   const drawHighlight = useCallback(
@@ -419,9 +485,8 @@ export function usePdfSourceView(
   const dismissSelection = useCallback(() => {
     pendingRef.current?.clear();
     pendingRef.current = null;
-    clearComposing();
     setSelection(null);
-  }, [clearComposing]);
+  }, []);
   const commitSelection = useCallback(() => {
     const pending = pendingRef.current;
     if (pending) onSelectRef.current(pending.anchor, pending.range);
@@ -445,29 +510,61 @@ export function usePdfSourceView(
       );
     let pinchStartDist = 0;
     let pinchStartZoom = 100;
+    // Single-finger touches are left entirely to the browser so native text
+    // selection (long-press to pick a word, drag the handles to extend) works.
+    // We only intercept two-finger gestures for pinch-zoom.
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
+      e.preventDefault();
+      e.stopPropagation();
       pinchStartDist = dist(e.touches);
       pinchStartZoom = fontSizeRef.current;
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 2 || pinchStartDist <= 0) return;
+      if (e.touches.length !== 2) return;
       e.preventDefault();
+      e.stopPropagation();
+      if (pinchStartDist <= 0) {
+        pinchStartDist = dist(e.touches);
+        pinchStartZoom = fontSizeRef.current;
+        return;
+      }
       setFontSize((pinchStartZoom * dist(e.touches)) / pinchStartDist);
     };
     const onTouchEnd = (e: TouchEvent) => {
+      if (pinchStartDist > 0) e.stopPropagation();
       if (e.touches.length < 2) pinchStartDist = 0;
+    };
+    const onTouchCancel = () => {
+      pinchStartDist = 0;
+    };
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pinchStartDist = 0;
+      pinchStartZoom = fontSizeRef.current;
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setFontSize(pinchStartZoom * ((e as WebKitGestureEvent).scale ?? 1));
     };
 
     scroller.addEventListener("wheel", onWheel, { passive: false });
-    scroller.addEventListener("touchstart", onTouchStart, { passive: true });
-    scroller.addEventListener("touchmove", onTouchMove, { passive: false });
-    scroller.addEventListener("touchend", onTouchEnd);
+    scroller.addEventListener("touchstart", onTouchStart, { passive: false, capture: true });
+    scroller.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
+    scroller.addEventListener("touchend", onTouchEnd, { capture: true });
+    scroller.addEventListener("touchcancel", onTouchCancel, { capture: true });
+    scroller.addEventListener("gesturestart", onGestureStart, { passive: false, capture: true });
+    scroller.addEventListener("gesturechange", onGestureChange, { passive: false, capture: true });
     return () => {
       scroller.removeEventListener("wheel", onWheel);
-      scroller.removeEventListener("touchstart", onTouchStart);
-      scroller.removeEventListener("touchmove", onTouchMove);
-      scroller.removeEventListener("touchend", onTouchEnd);
+      scroller.removeEventListener("touchstart", onTouchStart, { capture: true });
+      scroller.removeEventListener("touchmove", onTouchMove, { capture: true });
+      scroller.removeEventListener("touchend", onTouchEnd, { capture: true });
+      scroller.removeEventListener("touchcancel", onTouchCancel, { capture: true });
+      scroller.removeEventListener("gesturestart", onGestureStart, { capture: true });
+      scroller.removeEventListener("gesturechange", onGestureChange, { capture: true });
     };
   }, [ready, setFontSize]);
 
@@ -478,6 +575,7 @@ export function usePdfSourceView(
     if (!host) return;
     const onStart = (e: TouchEvent) => {
       multiTouch = e.touches.length > 1;
+      if (multiTouch) return;
       startX = e.changedTouches[0]?.clientX ?? 0;
     };
     const onEnd = (e: TouchEvent) => {
@@ -563,6 +661,7 @@ export function usePdfSourceView(
     next,
     prev,
     goTo,
+    flashHighlight,
     drawHighlight,
     eraseHighlight,
     selection,

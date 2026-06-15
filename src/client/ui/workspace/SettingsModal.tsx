@@ -37,6 +37,7 @@ function SettingDropdown<T extends string>({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={ariaLabel}
+        title={ariaLabel}
         onClick={() => setOpen((v) => !v)}
       >
         <span>{active?.label ?? value}</span>
@@ -53,6 +54,7 @@ function SettingDropdown<T extends string>({
                 role="menuitemradio"
                 aria-checked={option.value === value}
                 className={option.value === value ? "book-menu-item is-active" : "book-menu-item"}
+                title={option.label}
                 onClick={() => {
                   onChange(option.value);
                   setOpen(false);
@@ -144,7 +146,7 @@ export function SettingsModal({
       >
         <div className="modal-head">
           <strong>settings</strong>
-          <button type="button" onClick={onClose} aria-label="close">
+          <button type="button" onClick={onClose} aria-label="close" title="Close">
             ✕
           </button>
         </div>
@@ -169,6 +171,7 @@ export function SettingsModal({
                   className="settings-action"
                   onClick={() => void onRedownload()}
                   disabled={busy || loading}
+                  title="Refresh the local book copy from storage"
                 >
                   {busy
                     ? "redownloading…"
@@ -206,6 +209,7 @@ export function SettingsModal({
               key={c.id}
               type="button"
               aria-pressed={category === c.id}
+              title={`${c.label} settings`}
               onClick={() => setCategory(c.id)}
             >
               {c.label}

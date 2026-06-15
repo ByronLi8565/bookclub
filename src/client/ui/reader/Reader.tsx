@@ -54,18 +54,26 @@ export function Reader({
           onRenameBook={onRenameBook}
           onAddBook={onAddBook}
         />
-        {view.location && (
+        {view.location && view.location.total > 0 && (
           <span className="page-count">
             {view.location.page} / {view.location.total}
             {view.location.percentage > 0 && ` · ${Math.round(view.location.percentage * 100)}%`}
           </span>
         )}
         <span className="spacer" />
-        <button onClick={() => setFontSize(Math.max(80, fontSize - 10))} disabled={!ready}>
+        <button
+          onClick={() => setFontSize(Math.max(50, fontSize - 10))}
+          disabled={!ready}
+          title="Decrease text size"
+        >
           −
         </button>
         <span className="font-size">{fontSize}%</span>
-        <button onClick={() => setFontSize(fontSize + 10)} disabled={!ready}>
+        <button
+          onClick={() => setFontSize(fontSize + 10)}
+          disabled={!ready}
+          title="Increase text size"
+        >
           +
         </button>
       </div>
@@ -102,6 +110,7 @@ export function Reader({
             onClick={search.prev}
             disabled={search.matches.length === 0}
             aria-label="Previous match"
+            title="Previous match"
           >
             ↑
           </button>
@@ -109,10 +118,11 @@ export function Reader({
             onClick={search.next}
             disabled={search.matches.length === 0}
             aria-label="Next match"
+            title="Next match"
           >
             ↓
           </button>
-          <button onClick={search.closeSearch} aria-label="Close search">
+          <button onClick={search.closeSearch} aria-label="Close search" title="Close search">
             ✕
           </button>
         </div>
@@ -130,6 +140,7 @@ export function Reader({
             className="reader-page-turn reader-page-turn--prev"
             onClick={view.prev}
             aria-label="Previous page"
+            title="Previous page"
           />
         )}
         {ready && !view.location?.atEnd && (
@@ -137,6 +148,7 @@ export function Reader({
             className="reader-page-turn reader-page-turn--next"
             onClick={view.next}
             aria-label="Next page"
+            title="Next page"
           />
         )}
       </div>
@@ -145,6 +157,7 @@ export function Reader({
           className="add-note"
           style={{ left: selection.x, top: selection.y }}
           onClick={view.commitSelection}
+          title="Add a note on this selection"
         >
           Add Note
         </button>
@@ -217,6 +230,7 @@ function BookMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="switch book"
+        title="Switch book"
         onClick={() => setOpen((v) => !v)}
       >
         ▾
@@ -232,6 +246,7 @@ function BookMenu({
                 className={
                   book.id === selectedSourceId ? "book-menu-item is-active" : "book-menu-item"
                 }
+                title={`Open ${bookLabel(book, activeTitle, book.id === selectedSourceId)}`}
                 onClick={() => {
                   onSelectBook(book.id);
                   setOpen(false);
@@ -246,6 +261,7 @@ function BookMenu({
               <button
                 type="button"
                 className="book-menu-item"
+                title="Add a book"
                 onClick={() => {
                   onAddBook();
                   setOpen(false);

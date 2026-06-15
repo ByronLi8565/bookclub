@@ -23,7 +23,7 @@ const DEBOUNCE_MS = 250;
 interface Deps {
   reader: SourceReader;
   ready: boolean;
-  goTo: (anchor: HighlightAnchor) => void;
+  goTo: (anchor: HighlightAnchor) => Promise<void>;
   drawSearchHighlight: (anchor: HighlightAnchor) => void;
   eraseSearchHighlight: (anchor: HighlightAnchor) => void;
   onSearchHighlightCleared?: () => void;
@@ -61,7 +61,7 @@ export function useReaderSearch({
       const match = list[index];
       setActive(match ? index : -1);
       if (!match) return;
-      goTo(match.anchor);
+      void goTo(match.anchor);
       drawSearchHighlight(match.anchor);
       paintedRef.current = match.anchor;
     },

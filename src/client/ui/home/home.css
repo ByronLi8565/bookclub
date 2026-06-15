@@ -188,34 +188,9 @@
   gap: 12px;
 }
 
-.home-existing {
-  display: flex;
-  align-items: stretch;
-  border: var(--line);
-  padding: 0;
-}
-
 .home-existing-label {
   align-self: center;
   padding: 4px 10px;
-}
-
-.home-existing select {
-  font: inherit;
-  border: none;
-  border-left: var(--line);
-  padding: 4px 10px;
-  background: var(--white);
-  cursor: pointer;
-}
-
-.home-existing:has(select:disabled) {
-  color: var(--gray);
-}
-
-.home-existing select:disabled {
-  color: var(--gray);
-  cursor: not-allowed;
 }
 
 .home-info-panel {

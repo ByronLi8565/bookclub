@@ -68,6 +68,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
           type="button"
           className="home-info-button"
           aria-label="open info"
+          title="About & release log"
           onClick={() => setInfoOpen(true)}
         >
           i
@@ -105,6 +106,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
                   type="submit"
                   className="home-create-confirm"
                   aria-label="create"
+                  title="Create club"
                   disabled={name === ""}
                 >
                   +
@@ -114,6 +116,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
               <button
                 type="button"
                 className="home-action"
+                title="Create a new bookclub"
                 onClick={() => {
                   setCreating(true);
                   setError(null);
@@ -138,6 +141,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
                       <button
                         type="button"
                         className="login-link plain-button"
+                        title="Invite people"
                         onClick={() => setInviting(g)}
                       >
                         invite

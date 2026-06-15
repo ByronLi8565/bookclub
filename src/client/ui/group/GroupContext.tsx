@@ -36,7 +36,7 @@ export function GroupContext({
               }
             }}
           />
-          <button type="button" onClick={save}>
+          <button type="button" onClick={save} title="Save book name">
             save
           </button>
         </div>

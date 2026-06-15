@@ -17,7 +17,8 @@ export interface SourceView {
   setFontSize: (pct: number) => void;
   next: () => void;
   prev: () => void;
-  goTo: (anchor: HighlightAnchor) => void;
+  goTo: (anchor: HighlightAnchor) => Promise<void>;
+  flashHighlight: (anchor: HighlightAnchor) => void;
   drawHighlight: (id: string, anchor: HighlightAnchor, onClick: () => void) => void;
   eraseHighlight: (id: string) => void;
   selection: { x: number; y: number } | null;

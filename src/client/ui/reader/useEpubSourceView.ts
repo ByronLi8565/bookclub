@@ -15,10 +15,77 @@ import {
 import type Navigation from "epubjs/types/navigation";
 import { makeEpubReader } from "./epubReader.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
-import type { OnSelect, SourceView } from "./sourceView.ts";
+import type { OnSelect, SourceLocation, SourceView } from "./sourceView.ts";
 
 function firstChapterHref(nav: Navigation): string | undefined {
   return nav.landmark?.("bodymatter")?.href ?? nav.toc?.[0]?.href;
+}
+
+// Where the reader currently sits, before it is turned into a press count.
+interface RawLocation {
+  index: number;
+  page: number;
+  atStart: boolean;
+  atEnd: boolean;
+}
+
+// The book measured as arrow-key presses to the end. `offsetByIndex` maps a
+// spine index to the number of presses that precede that section.
+interface Pagination {
+  total: number;
+  divisor: number;
+  offsetByIndex: Map<number, number>;
+}
+
+// Count the page-turns (arrow presses) for the whole book at a given viewport
+// and zoom, by laying every section out in a hidden, throwaway rendition over
+// the *same* already-parsed book and reading the real per-section page count.
+// One press advances by `layout.delta`; with a 2-up spread `divisor` is 2.
+async function measurePagination(
+  book: Book,
+  width: number,
+  height: number,
+  fontSizePct: number,
+  isCancelled: () => boolean,
+): Promise<Pagination | null> {
+  if (width <= 0 || height <= 0) return null;
+
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText = `position:absolute;left:-99999px;top:0;width:${width}px;height:${height}px;visibility:hidden;pointer-events:none;`;
+  document.body.appendChild(host);
+
+  const probe = book.renderTo(host, { width, height, spread: "auto", flow: "paginated" });
+  probe.themes.fontSize(`${fontSizePct}%`);
+  try {
+    const items = (
+      book.spine as unknown as { spineItems: { index: number; href: string; linear?: string }[] }
+    ).spineItems;
+
+    const offsetByIndex = new Map<number, number>();
+    let total = 0;
+    let divisor = 1;
+    for (const item of items) {
+      if (isCancelled()) return null;
+      offsetByIndex.set(item.index, total);
+      if (item.linear === "no") continue;
+      await probe.display(item.href);
+      if (isCancelled()) return null;
+      const loc = probe.currentLocation() as unknown as
+        | { start?: { displayed?: { total?: number } } }
+        | undefined;
+      const props = (
+        probe as unknown as { manager?: { layout?: { props?: { divisor?: number } } } }
+      ).manager?.layout?.props;
+      if (props?.divisor) divisor = props.divisor;
+      const pages = loc?.start?.displayed?.total ?? 1;
+      total += Math.max(1, Math.ceil(pages / divisor));
+    }
+    return { total, divisor, offsetByIndex };
+  } finally {
+    probe.destroy();
+    host.remove();
+  }
 }
 
 interface LiveView {
@@ -60,7 +127,10 @@ export function useEpubSourceView(
   const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
   const drawnCfiRef = useRef<Map<string, string>>(new Map());
-  const [location, setLocation] = useState<SourceView["location"]>(null);
+  const [raw, setRaw] = useState<RawLocation | null>(null);
+  const [pagination, setPagination] = useState<Pagination | null>(null);
+  const [viewportTick, setViewportTick] = useState(0);
+  const measureSeqRef = useRef(0);
 
   const publish = (view: Option.Option<LiveView>) => {
     Effect.runSync(Ref.set(viewRef.current, view));
@@ -72,7 +142,8 @@ export function useEpubSourceView(
     if (!file || !el) return;
 
     publish(Option.none());
-    setLocation(null);
+    setRaw(null);
+    setPagination(null);
     setTitle(null);
     drawnCfiRef.current.clear();
 
@@ -134,24 +205,16 @@ export function useEpubSourceView(
     const showLocation = () => {
       const loc = rendition.currentLocation() as unknown as
         | {
-            start?: { cfi: string; displayed?: { page: number; total: number } };
+            start?: { index: number; displayed?: { page: number } };
             atStart?: boolean;
             atEnd?: boolean;
           }
         | undefined;
       const start = loc?.start;
       if (!start?.displayed) return;
-      const generated = book.locations.length();
-      const rawLocation = generated ? Number(book.locations.locationFromCfi(start.cfi)) : 0;
-      const page = generated
-        ? Math.min(generated, Math.max(1, rawLocation + 1))
-        : start.displayed.page;
-      const total = generated || start.displayed.total;
-      const percentage = generated ? (book.locations.percentageFromCfi(start.cfi) ?? 0) : 0;
-      setLocation({
-        page,
-        total,
-        percentage,
+      setRaw({
+        index: start.index,
+        page: start.displayed.page,
         atStart: loc?.atStart ?? false,
         atEnd: loc?.atEnd ?? false,
       });
@@ -172,6 +235,7 @@ export function useEpubSourceView(
         try {
           rendition.resize(el.clientWidth, el.clientHeight);
           showLocation();
+          setViewportTick((v) => v + 1);
         } catch (error) {
           console.error("failed to resize rendition", error);
         }
@@ -193,7 +257,6 @@ export function useEpubSourceView(
       );
       yield* Effect.tryPromise(() => rendition.display(start));
       yield* Effect.sync(() => publish(Option.some({ book, rendition })));
-      yield* Effect.tryPromise(() => book.locations.generate(1024));
       yield* Effect.sync(showLocation);
     }).pipe(
       Effect.tapError((error) => Effect.sync(() => console.error("failed to open epub", error))),
@@ -214,10 +277,53 @@ export function useEpubSourceView(
     };
   }, [file]);
 
+  // Recompute the page-turn total whenever the book opens, the zoom changes, or
+  // the viewport resizes. Each run is a forked fiber; a newer trigger interrupts
+  // the one in flight (and the debounce coalesces bursts of resize/zoom events).
+  // The previous total stays on screen until the new one lands.
+  useEffect(() => {
+    if (!ready) return;
+    const el = containerRef.current;
+    const liveView = Effect.runSync(Ref.get(viewRef.current));
+    if (!el || Option.isNone(liveView)) return;
+    const { book } = liveView.value;
+    const width = el.clientWidth;
+    const height = el.clientHeight;
+    const pct = fontSize;
+
+    const seq = ++measureSeqRef.current;
+    const fiber = Effect.runFork(
+      Effect.gen(function* () {
+        yield* Effect.sleep("250 millis");
+        if (seq !== measureSeqRef.current) return;
+        const result = yield* Effect.tryPromise(() =>
+          measurePagination(book, width, height, pct, () => seq !== measureSeqRef.current),
+        );
+        if (result && seq === measureSeqRef.current) {
+          yield* Effect.sync(() => setPagination(result));
+        }
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => console.error("failed to paginate epub", error)),
+        ),
+        Effect.ignore,
+      ),
+    );
+
+    return () => {
+      measureSeqRef.current++;
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
+  }, [ready, fontSize, viewportTick]);
+
   const onView = useCallback((f: (view: LiveView) => void) => {
     const view = Effect.runSync(Ref.get(viewRef.current));
     if (Option.isSome(view)) f(view.value);
   }, []);
+  const currentView = useCallback(
+    () => Option.getOrNull(Effect.runSync(Ref.get(viewRef.current))),
+    [],
+  );
 
   const setFontSize = useCallback(
     (pct: number) => {
@@ -229,12 +335,33 @@ export function useEpubSourceView(
   const next = useCallback(() => onView((v) => void v.rendition.next()), [onView]);
   const prev = useCallback(() => onView((v) => void v.rendition.prev()), [onView]);
   const goTo = useCallback(
-    (anchor: HighlightAnchor) => {
+    async (anchor: HighlightAnchor): Promise<void> => {
       if (anchor.kind !== "epub-cfi") return;
-      onView((v) => void v.rendition.display(anchor.value));
+      const view = currentView();
+      if (view) await view.rendition.display(anchor.value);
     },
-    [onView],
+    [currentView],
   );
+  const flashHighlight = useCallback(() => {
+    const view = currentView();
+    if (!view) return;
+    const contents = view.rendition.getContents() as unknown as Contents[];
+    const flashed: Element[] = [];
+    for (const content of contents) {
+      for (const el of content.document.querySelectorAll(".bc-highlight")) {
+        el.classList.remove("bc-highlight-jump-flash");
+        flashed.push(el);
+      }
+    }
+    requestAnimationFrame(() => {
+      for (const el of flashed) {
+        el.classList.add("bc-highlight-jump-flash");
+        el.addEventListener("animationend", () => el.classList.remove("bc-highlight-jump-flash"), {
+          once: true,
+        });
+      }
+    });
+  }, [currentView]);
   const drawHighlight = useCallback(
     (id: string, anchor: HighlightAnchor, onClick: () => void) => {
       if (anchor.kind !== "epub-cfi") return;
@@ -304,6 +431,26 @@ export function useEpubSourceView(
   });
   openSearchRef.current = search.openSearch;
 
+  // Turn the raw position into a press count. Until pagination lands, `total` is
+  // 0 so the reader hides the count, but `atStart`/`atEnd` stay live for the
+  // page-turn controls.
+  const location = useMemo<SourceLocation | null>(() => {
+    if (!raw) return null;
+    if (!pagination || pagination.total <= 0) {
+      return { page: 0, total: 0, percentage: 0, atStart: raw.atStart, atEnd: raw.atEnd };
+    }
+    const before = pagination.offsetByIndex.get(raw.index) ?? 0;
+    const within = Math.max(1, Math.ceil(raw.page / pagination.divisor));
+    const index = Math.min(pagination.total, before + within);
+    return {
+      page: index,
+      total: pagination.total,
+      percentage: index / pagination.total,
+      atStart: raw.atStart,
+      atEnd: raw.atEnd,
+    };
+  }, [raw, pagination]);
+
   return {
     containerRef,
     ready,
@@ -313,6 +460,7 @@ export function useEpubSourceView(
     next,
     prev,
     goTo,
+    flashHighlight,
     drawHighlight,
     eraseHighlight,
     selection,

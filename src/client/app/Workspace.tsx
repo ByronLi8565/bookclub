@@ -43,6 +43,18 @@ export interface WorkspaceProps {
   viewer: NoteViewer;
 }
 
+function afterReaderPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+function scrollNoteIntoView(seq: number): void {
+  void afterReaderPaint().then(() => {
+    document.getElementById(`note-${seq}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 export function Workspace({
   name,
   groupName,
@@ -96,19 +108,20 @@ export function Workspace({
   useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open });
 
   const drawnRef = useRef<Map<string, HighlightAnchor>>(new Map());
+  const drawnSourceIdRef = useRef<string | null>(null);
 
   restoreAfterSearchClearRef.current = () => {
     for (const note of notes) {
       for (const h of note.highlights) {
         view.eraseHighlight(h.id);
-        view.drawHighlight(h.id, h.anchor, () => view.goTo(h.anchor));
+        view.drawHighlight(h.id, h.anchor, () => void view.goTo(h.anchor));
         drawnRef.current.set(h.id, h.anchor);
       }
     }
     const comp = composingRef.current;
     if (comp) {
       view.eraseHighlight(comp.id);
-      view.drawHighlight(comp.id, comp.anchor, () => view.goTo(comp.anchor));
+      view.drawHighlight(comp.id, comp.anchor, () => void view.goTo(comp.anchor));
       drawnRef.current.set(comp.id, comp.anchor);
     }
   };
@@ -122,7 +135,7 @@ export function Workspace({
         view.eraseHighlight(prev.id);
         drawnRef.current.delete(prev.id);
       }
-      view.drawHighlight(highlight.id, highlight.anchor, () => view.goTo(highlight.anchor));
+      view.drawHighlight(highlight.id, highlight.anchor, () => void view.goTo(highlight.anchor));
       drawnRef.current.set(highlight.id, highlight.anchor);
       setComposing(highlight);
       setPane("notes");
@@ -157,7 +170,15 @@ export function Workspace({
   }
 
   useEffect(() => {
-    if (!view.ready) return;
+    if (!view.ready) {
+      drawnRef.current.clear();
+      drawnSourceIdRef.current = null;
+      return;
+    }
+    if (drawnSourceIdRef.current !== sourceId) {
+      drawnRef.current.clear();
+      drawnSourceIdRef.current = sourceId;
+    }
     let cancelled = false;
 
     const desired: DesiredHighlight[] = [];
@@ -168,7 +189,7 @@ export function Workspace({
     if (comp) desired.push({ noteId: null, highlight: comp });
 
     const painter: HighlightPainter = {
-      draw: (id, anchor) => view.drawHighlight(id, anchor, () => view.goTo(anchor)),
+      draw: (id, anchor) => view.drawHighlight(id, anchor, () => void view.goTo(anchor)),
       erase: (id) => view.eraseHighlight(id),
     };
 
@@ -184,7 +205,7 @@ export function Workspace({
     };
 
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes, view.ready]);
+  }, [notes, view.ready, sourceId]);
 
   useEffect(() => {
     drawnRef.current.clear();
@@ -214,18 +235,32 @@ export function Workspace({
     [byId, references],
   );
 
-  const { goTo } = view;
+  const { flashHighlight, goTo, reader: sourceReader } = view;
   const [pendingReferenceSeq, setPendingReferenceSeq] = useState<number | null>(null);
+
+  const jumpToHighlight = useCallback(
+    (highlight: Highlight) => {
+      const expectedSourceId = highlight.sourceId;
+      if (!file || !view.ready || sourceIdRef.current !== expectedSourceId) return;
+      setPane("reader");
+      void Effect.runPromise(sourceReader.locateHighlight(highlight)).then(async (located) => {
+        if (sourceIdRef.current !== expectedSourceId) return;
+        const anchor = located ?? highlight.anchor;
+        await goTo(anchor);
+        await afterReaderPaint();
+        if (sourceIdRef.current !== expectedSourceId) return;
+        flashHighlight(anchor);
+      });
+    },
+    [file, flashHighlight, goTo, sourceReader, view.ready],
+  );
 
   const onJump = useCallback(
     (note: Note) => {
       const hl = effectiveHighlight(note, byId);
-      if (hl) {
-        goTo(hl.anchor);
-        setPane("reader");
-      }
+      if (hl) jumpToHighlight(hl);
     },
-    [byId, goTo],
+    [byId, jumpToHighlight],
   );
 
   useEffect(() => {
@@ -235,16 +270,31 @@ export function Workspace({
       setPendingReferenceSeq(null);
       return;
     }
-    if (target.sourceId !== sourceId || !view.ready) return;
+    if (target.sourceId !== sourceId) return;
+    if (isMobile) {
+      setPane("notes");
+      scrollNoteIntoView(target.seq);
+      setPendingReferenceSeq(null);
+      return;
+    }
+    if (!file || !view.ready) return;
     const hl = effectiveHighlight(target, allById);
     if (hl) {
-      goTo(hl.anchor);
-      setPane("reader");
+      jumpToHighlight(hl);
     } else {
       setPane("notes");
     }
     setPendingReferenceSeq(null);
-  }, [pendingReferenceSeq, allBySeq, allById, sourceId, view.ready, goTo]);
+  }, [
+    pendingReferenceSeq,
+    allBySeq,
+    allById,
+    sourceId,
+    file,
+    view.ready,
+    isMobile,
+    jumpToHighlight,
+  ]);
 
   const onReference = useCallback(
     (seq: number) => {
@@ -253,16 +303,18 @@ export function Workspace({
       if (target.sourceId !== sourceId) {
         setPendingReferenceSeq(seq);
         onSelectBook(target.sourceId);
-        setPane("reader");
+        setPane(isMobile ? "notes" : "reader");
+        return;
+      }
+      if (isMobile) {
+        setPane("notes");
+        scrollNoteIntoView(target.seq);
         return;
       }
       const hl = effectiveHighlight(target, allById);
-      if (hl) {
-        goTo(hl.anchor);
-        setPane("reader");
-      }
+      if (hl) jumpToHighlight(hl);
     },
-    [allBySeq, allById, sourceId, onSelectBook, goTo],
+    [allBySeq, allById, sourceId, onSelectBook, isMobile, jumpToHighlight],
   );
 
   const composeInitialBody = composing

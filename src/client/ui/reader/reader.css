@@ -1,4 +1,6 @@
 .reader {
+  --reader-jump-flash-duration: 700ms;
+
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -19,6 +21,8 @@
   gap: 8px;
   padding: 8px;
   border-bottom: var(--line);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .reader-bar .spacer {
@@ -40,11 +44,13 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 40%;
 }
 
 .book-menu .reader-title {
+  flex: 0 1 auto;
   max-width: none;
   min-width: 0;
   overflow: hidden;
@@ -172,11 +178,15 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  z-index: 2;
+  z-index: 6;
   width: clamp(44px, 7vw, 84px);
   border: none;
   background: transparent;
   padding: 0;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .reader-page-turn:hover {
@@ -196,9 +206,24 @@
   right: 0;
 }
 
+@media (pointer: coarse), (max-width: 700px) {
+  .reader-bar {
+    gap: 6px;
+  }
+
+  .book-menu {
+    flex: 0 1 auto;
+    max-width: none;
+  }
+
+  .reader-bar .page-count {
+    flex: none;
+  }
+}
+
 @media (pointer: coarse) {
   .reader-page-turn {
-    width: 64px;
+    width: min(112px, 26vw);
   }
 }
 
@@ -215,13 +240,61 @@
   mix-blend-mode: multiply;
 }
 
+.bc-jump-flash {
+  animation: reader-jump-flash var(--reader-jump-flash-duration) linear;
+  background: var(--highlight);
+  fill: var(--highlight);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.bc-highlight-jump-flash {
+  animation: reader-highlight-pulse var(--reader-jump-flash-duration) linear;
+}
+
+@keyframes reader-jump-flash {
+  0%,
+  15% {
+    opacity: 0.72;
+    fill-opacity: 0.72;
+  }
+
+  100% {
+    opacity: 0;
+    fill-opacity: 0;
+  }
+}
+
+@keyframes reader-highlight-pulse {
+  0%,
+  55% {
+    filter: brightness(0.82) saturate(1.35);
+    opacity: 0.8;
+    fill-opacity: 0.8;
+  }
+
+  100% {
+    filter: brightness(1) saturate(1);
+  }
+}
+
+/* The scroller and page are the non-text "frame". Keeping them unselectable
+   confines native selection to the text layer alone, so a long-press or drag
+   can never escalate into selecting the whole reader (the canvas, overlays, and
+   empty margins). This mirrors the isolation an EPUB gets for free from its
+   iframe. Only .textLayer (and its spans) opt back in to user-select: text. */
 .pdf-scroller {
   position: absolute;
   inset: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  touch-action: pan-x pan-y;
+  /* Allow vertical scroll, but NOT browser pinch-zoom — we handle pinch
+     ourselves to zoom the PDF content, not the whole page/viewport. */
+  touch-action: pan-y;
   scrollbar-width: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .pdf-scroller::-webkit-scrollbar {
@@ -230,6 +303,8 @@
 
 .pdf-page {
   position: relative;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .pdf-page .textLayer {
@@ -242,6 +317,10 @@
   forced-color-adjust: none;
   transform-origin: 0 0;
   z-index: 2;
+  pointer-events: auto;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  user-select: text;
   --min-font-size: 1;
   --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
   --min-font-size-inv: calc(1 / var(--min-font-size));
@@ -253,6 +332,9 @@
   color: transparent;
   transform-origin: 0% 0%;
   cursor: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  user-select: text;
 }
 
 .pdf-page .textLayer > :not(.markedContent),
@@ -262,31 +344,55 @@
   --scale-x: 1;
   --rotate: 0deg;
   font-size: calc(var(--text-scale-factor) * var(--font-height));
-  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+    scale(var(--min-font-size-inv));
 }
 
 .pdf-page .textLayer .markedContent {
   display: contents;
 }
 
+/* pdf.js's selection sink. The builder parks this element below the text and,
+   during a selection, stretches it to the layer's size and moves it next to the
+   selection anchor. That absorbs the selection so dragging across absolutely
+   positioned spans extends word-by-word instead of grabbing the entire page. */
+.pdf-page .textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pdf-page .textLayer.selecting .endOfContent {
+  top: 0;
+}
+
 .pdf-page .textLayer ::selection {
-  background: transparent;
+  background: color-mix(
+    in srgb,
+    var(--highlight) calc(var(--highlight-opacity) * 100%),
+    transparent
+  );
 }
 
 .pdf-highlights,
-.pdf-underlines,
-.pdf-composing {
+.pdf-jump-flash,
+.pdf-underlines {
   z-index: 1;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-.pdf-highlights,
-.pdf-composing {
+.pdf-highlights {
   opacity: var(--highlight-opacity);
   mix-blend-mode: multiply;
 }
 
-.pdf-highlights .bc-highlight,
-.pdf-composing .bc-highlight {
+.pdf-highlights .bc-highlight {
   background: var(--highlight);
 
   mix-blend-mode: normal;

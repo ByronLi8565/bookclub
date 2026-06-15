@@ -1,5 +1,7 @@
 import type * as PdfjsModule from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import type * as PdfViewerModule from "pdfjs-dist/web/pdf_viewer.mjs";
+import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import {
   healthError,
   healthOk,
@@ -15,6 +17,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 export type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 
 let pdfjsPromise: Promise<typeof PdfjsModule> | null = null;
+let viewerPromise: Promise<typeof PdfViewerModule> | null = null;
 
 const EMPTY_METADATA: SourceMetadata = { title: null, author: null, wordCount: null, cover: null };
 
@@ -43,8 +46,15 @@ function pdfjsLib(): Promise<typeof PdfjsModule> {
   return pdfjsPromise;
 }
 
-export async function loadTextLayerCtor(): Promise<typeof PdfjsModule.TextLayer> {
-  return (await pdfjsLib()).TextLayer;
+// The viewer components (TextLayerBuilder et al.) read their pdf.js primitives
+// from `globalThis.pdfjsLib` at import time, so we must publish the *same* core
+// instance there before importing the viewer. This keeps a single pdf.js copy,
+// so `viewport instanceof PageViewport` and the page-proxy APIs line up.
+export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilder> {
+  const lib = await pdfjsLib();
+  (globalThis as { pdfjsLib?: typeof PdfjsModule }).pdfjsLib = lib;
+  viewerPromise ??= import("pdfjs-dist/web/pdf_viewer.mjs");
+  return (await viewerPromise).TextLayerBuilder;
 }
 
 export function isPasswordException(error: unknown): boolean {
@@ -81,7 +91,22 @@ export async function pageTextItems(page: PDFPageProxy): Promise<PdfTextItem[]> 
 }
 
 export async function pageText(page: PDFPageProxy): Promise<string> {
-  return (await pageTextItems(page)).map((item) => item.str).join("");
+  return joinPdfTextItems(await pageTextItems(page)).text;
+}
+
+function shouldInsertBoundarySpace(text: string, next: string): boolean {
+  return text.length > 0 && next.length > 0 && /\S$/u.test(text) && /^\S/u.test(next);
+}
+
+function joinPdfTextItems(items: PdfTextItem[]): { text: string; starts: number[] } {
+  const starts: number[] = [];
+  let text = "";
+  for (const item of items) {
+    if (shouldInsertBoundarySpace(text, item.str)) text += " ";
+    starts.push(text.length);
+    text += item.str;
+  }
+  return { text, starts };
 }
 
 export interface PageTextRun {
@@ -101,11 +126,10 @@ export interface PageGeometry {
 export async function pageGeometry(page: PDFPageProxy): Promise<PageGeometry> {
   const { width, height } = page.getViewport({ scale: 1 });
   const items = await pageTextItems(page);
+  const joined = joinPdfTextItems(items);
   const runs: PageTextRun[] = [];
-  let text = "";
-  for (const item of items) {
-    const start = text.length;
-    text += item.str;
+  for (const [index, item] of items.entries()) {
+    const start = joined.starts[index] ?? 0;
     const baselineX = item.transform[4] ?? 0;
     const baselineY = item.transform[5] ?? 0;
     const h = item.height || Math.hypot(item.transform[2] ?? 0, item.transform[3] ?? 0);
@@ -118,7 +142,7 @@ export async function pageGeometry(page: PDFPageProxy): Promise<PageGeometry> {
       height: h / height,
     });
   }
-  return { text, runs };
+  return { text: joined.text, runs };
 }
 
 export function rectsForRange(

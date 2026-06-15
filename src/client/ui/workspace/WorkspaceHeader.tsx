@@ -46,7 +46,7 @@ export function WorkspaceHeader({
         inputClassName="topbar-title-edit"
       />
       {canInvite && (
-        <button type="button" className="topbar-invite" onClick={onInvite}>
+        <button type="button" className="topbar-invite" onClick={onInvite} title="Invite people">
           invite
         </button>
       )}
@@ -55,6 +55,7 @@ export function WorkspaceHeader({
         className="presence-indicator"
         onClick={onShowPresence}
         aria-label={`${onlineCount} online — show who's online`}
+        title="Show who's online"
       >
         <span className="presence-count">{onlineCount}</span>
         <span className="presence-dot" aria-hidden="true" />
@@ -64,6 +65,7 @@ export function WorkspaceHeader({
         className={`sync-badge sync-badge--${syncStatus}`}
         onClick={onSyncClick}
         aria-label="show sync status"
+        title="Show sync status"
       >
         {syncStatus}
       </button>
@@ -72,6 +74,7 @@ export function WorkspaceHeader({
         className="settings-button icon-button"
         onClick={() => setSettingsOpen(true)}
         aria-label="settings"
+        title="Settings"
       >
         <img src={settingsIcon} alt="" aria-hidden="true" />
       </button>
@@ -79,6 +82,7 @@ export function WorkspaceHeader({
         type="button"
         className="workspace-info-button"
         aria-label="open info"
+        title="About & release log"
         onClick={() => setInfoOpen(true)}
       >
         i

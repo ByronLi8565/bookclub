@@ -84,10 +84,16 @@ function Chrome({
       <HistoryPlugin />
       <MarkdownShortcutPlugin transformers={[referenceTransformer]} />
       <div className="note-editor-actions">
-        <button type="button" className="primary" onClick={submit} disabled={!canSubmit}>
+        <button
+          type="button"
+          className="primary"
+          onClick={submit}
+          disabled={!canSubmit}
+          title={`${submitLabel} (⌘↵)`}
+        >
           {submitLabel}
         </button>
-        <button type="button" onClick={onCancel}>
+        <button type="button" onClick={onCancel} title="Cancel">
           Cancel
         </button>
       </div>

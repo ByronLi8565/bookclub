@@ -189,6 +189,7 @@ function NoteRow({
                         type="button"
                         onClick={() => setConfirmingDelete(false)}
                         aria-label="cancel delete"
+                        title="Keep note"
                       >
                         ✕
                       </button>
@@ -200,6 +201,7 @@ function NoteRow({
                           actions.onDelete(note);
                         }}
                         aria-label="confirm delete"
+                        title="Delete note"
                         disabled={!canWrite}
                       >
                         ✓
