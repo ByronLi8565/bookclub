@@ -2,14 +2,11 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import type { Session } from "../../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
-import { infoCards } from "../../info/infoCards.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
-import { NoteCardView, noteHeading } from "../notes/NoteThread.tsx";
+import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
-
-const EMPTY_REFS = new Map<number, string>();
 
 const NAME_ERRORS: Record<string, string> = {
   empty: "Enter a name for your club.",
@@ -20,7 +17,6 @@ const NAME_ERRORS: Record<string, string> = {
   reserved: "That name is reserved — pick another.",
   name_taken: "That name is already taken — pick another.",
 };
-
 
 export function Home({ session }: { session: Session }): React.ReactElement {
   const authed = session.status === "authed";
@@ -169,47 +165,6 @@ export function Home({ session }: { session: Session }): React.ReactElement {
           onClose={() => setInviting(null)}
         />
       )}
-    </div>
-  );
-}
-
-function InfoScreen({ onClose }: { onClose: () => void }): React.ReactElement {
-  return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal home-info-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="home-info-title"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong id="home-info-title">RELEASE LOG</strong>
-          <button type="button" onClick={onClose} aria-label="close info">
-            ✕
-          </button>
-        </div>
-
-        <div className="modal-body note-panel home-info-cards">
-          {infoCards.length === 0 ? (
-            <p className="home-info-empty">no info cards yet</p>
-          ) : (
-            <ul>
-              {infoCards.map((card, index) => (
-                <li key={card.path} title={card.title}>
-                  <NoteCardView
-                    seq={card.seq ?? index + 1}
-                    title={noteHeading(card.author, "posted", card.date)}
-                    body={card.body}
-                    refs={EMPTY_REFS}
-                    onReference={() => {}}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

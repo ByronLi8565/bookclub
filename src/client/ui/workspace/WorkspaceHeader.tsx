@@ -1,12 +1,12 @@
 import { useState } from "react";
 import settingsIcon from "@assets/settings.svg";
+import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
 import { SettingsModal } from "./SettingsModal.tsx";
 
 type BookRef = { sourceId: string; name: string };
 
 type SyncStatus = "syncing" | "online" | "offline";
-
 
 export function WorkspaceHeader({
   displayName,
@@ -30,6 +30,7 @@ export function WorkspaceHeader({
   book: BookRef;
 }): React.ReactElement {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   return (
     <header className="topbar">
@@ -74,7 +75,16 @@ export function WorkspaceHeader({
       >
         <img src={settingsIcon} alt="" aria-hidden="true" />
       </button>
+      <button
+        type="button"
+        className="workspace-info-button"
+        aria-label="open info"
+        onClick={() => setInfoOpen(true)}
+      >
+        i
+      </button>
       {settingsOpen && <SettingsModal book={book} onClose={() => setSettingsOpen(false)} />}
+      {infoOpen && <InfoScreen onClose={() => setInfoOpen(false)} />}
     </header>
   );
 }

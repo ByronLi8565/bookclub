@@ -1,16 +1,24 @@
-
 .presence-indicator,
 .sync-badge,
-.settings-button {
+.settings-button,
+.workspace-info-button {
   height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-
 .settings-button {
   width: 32px;
+}
+
+.workspace-info-button {
+  width: 32px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .settings-button img {
@@ -27,7 +35,6 @@
 .settings-body {
   min-height: 220px;
 }
-
 
 .settings-item {
   display: flex;
@@ -59,7 +66,6 @@
   color: var(--gray);
 }
 
-
 .settings-action {
   width: 100%;
   font: inherit;
@@ -70,7 +76,6 @@
   padding: 5px 8px;
   cursor: pointer;
 }
-
 
 .settings-dropdown {
   display: block;
@@ -88,12 +93,10 @@
   white-space: nowrap;
 }
 
-
 .settings-dropdown-trigger > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 
 .settings-dropdown-trigger .book-menu-arrow {
   padding: 0;

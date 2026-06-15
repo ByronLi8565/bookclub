@@ -150,10 +150,15 @@ export function useEpubSourceView(
       const start = loc?.start;
       if (!start?.displayed) return;
       const generated = book.locations.length();
-      const percentage = generated ? book.locations.percentageFromCfi(start.cfi) : 0;
+      const rawLocation = generated ? Number(book.locations.locationFromCfi(start.cfi)) : 0;
+      const page = generated
+        ? Math.min(generated, Math.max(1, rawLocation + 1))
+        : start.displayed.page;
+      const total = generated || start.displayed.total;
+      const percentage = generated ? (book.locations.percentageFromCfi(start.cfi) ?? 0) : 0;
       setLocation({
-        page: start.displayed.page,
-        total: start.displayed.total,
+        page,
+        total,
         percentage,
         atStart: loc?.atStart ?? false,
         atEnd: loc?.atEnd ?? false,
