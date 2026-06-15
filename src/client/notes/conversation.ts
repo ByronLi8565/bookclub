@@ -8,22 +8,17 @@ export interface Conversation {
   bySeq: Map<number, Note>;
 }
 
-// Which notes a view wants to show. `"all"` spans every book the group reads
-// (per the group-global model in ADR-0002); a list restricts to those sources.
 export interface NoteSelection {
   sources: "all" | readonly string[];
 }
 
-// The set of notes a view should display, decoupled from any single open book.
+// The set of notes a view should display
 export function selectNotes(notes: Note[], selection: NoteSelection): Note[] {
   if (selection.sources === "all") return notes;
   const wanted = new Set(selection.sources);
   return notes.filter((n) => wanted.has(n.sourceId));
 }
 
-// The group-global `[[n]]` reference space: every seq that can be linked and the
-// snippet shown for it. Derived from the full note set so references resolve the
-// same way in any view, regardless of which notes are currently selected.
 export interface ReferenceSpace {
   validSeqs: Set<number>;
   refs: Map<number, string>;
