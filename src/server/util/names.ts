@@ -33,7 +33,7 @@ export function parseName(raw: unknown): NameResult {
   const display = raw.trim();
   if (display === "") return { ok: false, error: "empty" };
 
-  const key = display.toLowerCase();
+  const key = display.toLowerCase().replaceAll(/\s+/gu, "-");
   if (key.length < MIN_LENGTH) return { ok: false, error: "too_short" };
   if (key.length > MAX_LENGTH) return { ok: false, error: "too_long" };
   if (!SHAPE.test(key)) return { ok: false, error: "bad_charset" };

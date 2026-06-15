@@ -1,0 +1,20 @@
+import { defineConfig, devices } from "@playwright/test";
+
+// Mobile Safari emulation per https://playwright.dev/docs/emulation
+export default defineConfig({
+  testDir: "./src/tests/playwright",
+  testMatch: "**/*.pw.ts",
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: 0,
+  workers: 1,
+  reporter: [["list"]],
+  use: { baseURL: "http://localhost:5173", trace: "on-first-retry" },
+  projects: [{ name: "Mobile Safari", use: { ...devices["iPhone 14"] } }],
+  webServer: {
+    command: "vite --port 5173 --strictPort",
+    url: "http://localhost:5173",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
+});

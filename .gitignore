@@ -13,3 +13,8 @@ docs
 
 # bombadil
 .bombadil
+
+# playwright
+test-results
+playwright-report
+.playwright

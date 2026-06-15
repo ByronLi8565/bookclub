@@ -307,6 +307,14 @@
   user-select: none;
 }
 
+.pdf-page canvas {
+  /* Vertical scroll only — never let the browser pinch-zoom the viewport; we
+     handle pinch ourselves to zoom the PDF content. touch-action is not
+     inherited, so it must be set on the actual touched elements, not just the
+     scroller. */
+  touch-action: pan-y;
+}
+
 .pdf-page .textLayer {
   position: absolute;
   inset: 0;
@@ -318,6 +326,7 @@
   transform-origin: 0 0;
   z-index: 2;
   pointer-events: auto;
+  touch-action: pan-y;
   -webkit-user-select: text;
   -webkit-touch-callout: default;
   user-select: text;
@@ -344,8 +353,7 @@
   --scale-x: 1;
   --rotate: 0deg;
   font-size: calc(var(--text-scale-factor) * var(--font-height));
-  transform: rotate(var(--rotate)) scaleX(var(--scale-x))
-    scale(var(--min-font-size-inv));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 
 .pdf-page .textLayer .markedContent {

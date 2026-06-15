@@ -80,6 +80,8 @@
 .home-main {
   position: absolute;
   left: 48px;
+  width: calc(50% - 72px);
+  max-width: calc(100% - 96px);
   top: 52%;
   transform: translateY(-50%);
   display: flex;
@@ -89,10 +91,12 @@
 }
 
 .home-title {
+  max-width: 100%;
   margin: 0 0 10px;
   font-size: clamp(40px, 8vw, 72px);
   line-height: 1;
   letter-spacing: -1px;
+  white-space: nowrap;
 }
 
 .home-action {

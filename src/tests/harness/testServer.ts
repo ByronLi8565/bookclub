@@ -3,7 +3,10 @@ import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import type { Plugin } from "vite";
 
-const TYPES: Record<string, string> = { ".epub": "application/epub+zip" };
+const TYPES: Record<string, string> = {
+  ".epub": "application/epub+zip",
+  ".pdf": "application/pdf",
+};
 
 export function fixtureServer(assetsDir: string): Plugin {
   return {

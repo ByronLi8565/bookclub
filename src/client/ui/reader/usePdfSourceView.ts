@@ -3,7 +3,6 @@ import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   expandToWordBoundaries,
-  isTextSelectionIn,
   pdfAnchor,
   popupPoint,
   scanText,
@@ -42,19 +41,13 @@ const READER_NAV = {
 
 const PDF_RECT_Y_NUDGE_PX = 4;
 
-interface WebKitGestureEvent extends Event {
-  scale?: number;
-}
-
-// Client rects for only the *text* inside a range. Walking text nodes (rather
-// than calling range.getClientRects() directly) ignores element boxes — notably
-// pdf.js's `.endOfContent` selection sink, which is stretched to the full layer
-// during a drag and would otherwise inflate a highlight to the whole page.
-function textClientRects(range: Range): DOMRect[] {
-  const common = range.commonAncestorContainer;
-  const root = common.nodeType === Node.TEXT_NODE ? common.parentNode : common;
-  if (!root) return [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+// Client rects for only the *text* inside a range that lives within `within`.
+// Walking text nodes (rather than calling range.getClientRects() directly)
+// ignores element boxes — notably pdf.js's `.endOfContent` selection sink, which
+// is stretched to the full layer during a drag and would otherwise inflate a
+// highlight to the whole page — and confines rects to the page's own text.
+function textClientRects(range: Range, within: Node): DOMRect[] {
+  const walker = document.createTreeWalker(within, NodeFilter.SHOW_TEXT);
   const rects: DOMRect[] = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (!range.intersectsNode(node)) continue;
@@ -65,6 +58,22 @@ function textClientRects(range: Range): DOMRect[] {
     rects.push(...sub.getClientRects());
   }
   return rects;
+}
+
+// Union of a set of client rects, used to anchor the selection popup without
+// pulling in pdf.js's stretched `.endOfContent` box.
+function boundingRect(rects: DOMRect[]): DOMRect {
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const r of rects) {
+    left = Math.min(left, r.left);
+    top = Math.min(top, r.top);
+    right = Math.max(right, r.right);
+    bottom = Math.max(bottom, r.bottom);
+  }
+  return new DOMRect(left, top, right - left, bottom - top);
 }
 
 export function usePdfSourceView(
@@ -407,25 +416,31 @@ export function usePdfSourceView(
       const wrap = wrapRef.current;
       if (!textLayer || !wrap) return;
       const sel = window.getSelection();
+      // Only a genuinely empty/collapsed selection dismisses the popup. Every
+      // other case refreshes it or is ignored, so transient selectionchange
+      // churn — notably pdf.js relocating its `.endOfContent` sink to a boundary
+      // mid-drag, which leaves the range endpoints on non-text nodes — can't make
+      // the "Add note" button flicker away while text is still selected.
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return clear();
       const raw = sel.getRangeAt(0);
-      if (!isTextSelectionIn(textLayer, raw)) return clear();
+      if (!raw.intersectsNode(textLayer)) return;
       const range = expandToWordBoundaries(raw);
 
+      const domRects = textClientRects(range, textLayer);
+      if (domRects.length === 0) return;
       const box = wrap.getBoundingClientRect();
-      const rects: PdfRect[] = textClientRects(range).map((r) => ({
+      const rects: PdfRect[] = domRects.map((r) => ({
         x: (r.left - box.left) / box.width,
         y: (r.top - box.top) / box.height,
         width: r.width / box.width,
         height: r.height / box.height,
       }));
-      if (rects.length === 0) return clear();
       pendingRef.current = {
         anchor: pdfAnchor(pageRef.current, rects),
         range,
         clear: () => sel.removeAllRanges(),
       };
-      setSelection(popupPoint(range.getBoundingClientRect()));
+      setSelection(popupPoint(boundingRect(domRects)));
     };
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
@@ -510,9 +525,19 @@ export function usePdfSourceView(
       );
     let pinchStartDist = 0;
     let pinchStartZoom = 100;
+    // Pinch-zoom is driven entirely by the raw two-finger touch geometry, on
+    // every platform including iOS. iOS Safari ignores `user-scalable=no` and
+    // pinch-zooms the *whole viewport* unless the two-finger `touchmove` is
+    // preventDefault()-ed — the native zoom is the default action of the touch
+    // sequence, not of the proprietary `gesture*` events. Once those touchmoves
+    // are prevented iOS stops firing `gesture*` anyway, so an earlier attempt to
+    // zoom from `GestureEvent.scale` could never also suppress the viewport
+    // zoom (preventing the touches that would zoom the page also killed the
+    // gesture events). Computing the scale ourselves from finger distance keeps
+    // one code path that both suppresses the native zoom and zooms only the PDF.
+    //
     // Single-finger touches are left entirely to the browser so native text
     // selection (long-press to pick a word, drag the handles to extend) works.
-    // We only intercept two-finger gestures for pinch-zoom.
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
       e.preventDefault();
@@ -538,16 +563,14 @@ export function usePdfSourceView(
     const onTouchCancel = () => {
       pinchStartDist = 0;
     };
-    const onGestureStart = (e: Event) => {
+    // Defense in depth: should iOS still emit `gesture*` events (e.g. when a
+    // pinch begins before the second touch is seen as a `touchmove`), swallow
+    // them so they can't trigger a viewport zoom. We deliberately never read
+    // `GestureEvent.scale` here — the touch handlers above own the zoom — so the
+    // two paths can't fight over setFontSize.
+    const swallowGesture = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
-      pinchStartDist = 0;
-      pinchStartZoom = fontSizeRef.current;
-    };
-    const onGestureChange = (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setFontSize(pinchStartZoom * ((e as WebKitGestureEvent).scale ?? 1));
     };
 
     scroller.addEventListener("wheel", onWheel, { passive: false });
@@ -555,16 +578,18 @@ export function usePdfSourceView(
     scroller.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
     scroller.addEventListener("touchend", onTouchEnd, { capture: true });
     scroller.addEventListener("touchcancel", onTouchCancel, { capture: true });
-    scroller.addEventListener("gesturestart", onGestureStart, { passive: false, capture: true });
-    scroller.addEventListener("gesturechange", onGestureChange, { passive: false, capture: true });
+    scroller.addEventListener("gesturestart", swallowGesture, { passive: false, capture: true });
+    scroller.addEventListener("gesturechange", swallowGesture, { passive: false, capture: true });
+    scroller.addEventListener("gestureend", swallowGesture, { passive: false, capture: true });
     return () => {
       scroller.removeEventListener("wheel", onWheel);
       scroller.removeEventListener("touchstart", onTouchStart, { capture: true });
       scroller.removeEventListener("touchmove", onTouchMove, { capture: true });
       scroller.removeEventListener("touchend", onTouchEnd, { capture: true });
       scroller.removeEventListener("touchcancel", onTouchCancel, { capture: true });
-      scroller.removeEventListener("gesturestart", onGestureStart, { capture: true });
-      scroller.removeEventListener("gesturechange", onGestureChange, { capture: true });
+      scroller.removeEventListener("gesturestart", swallowGesture, { capture: true });
+      scroller.removeEventListener("gesturechange", swallowGesture, { capture: true });
+      scroller.removeEventListener("gestureend", swallowGesture, { capture: true });
     };
   }, [ready, setFontSize]);
 

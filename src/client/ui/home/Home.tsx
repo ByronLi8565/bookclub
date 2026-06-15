@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import * as Effect from "effect/Effect";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import type { Session } from "../../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
@@ -10,10 +11,9 @@ import { spawnToast } from "../shared/toast/store.ts";
 
 const NAME_ERRORS: Record<string, string> = {
   empty: "Enter a name for your club.",
-  too_short: "That name is too short — use at least 2 characters.",
-  too_long: "That name is too long — 32 characters max.",
-  bad_charset:
-    "Club names go in the URL, so use only lowercase letters, numbers, and single hyphens (no spaces or symbols).",
+  too_short: "That name is too short! Use at least 2 characters.",
+  too_long: "That name is too long! 32 characters max.",
+  bad_charset: "Club names do not support symbols",
   reserved: "That name is reserved — pick another.",
   name_taken: "That name is already taken — pick another.",
 };
@@ -25,9 +25,11 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createPending, setCreatePending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviting, setInviting] = useState<GroupSummary | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
+  const createInFlight = useRef(false);
   const [, navigate] = useLocation();
 
   useEffect(() => {
@@ -50,8 +52,23 @@ export function Home({ session }: { session: Session }): React.ReactElement {
 
   async function onCreate(e: React.FormEvent): Promise<void> {
     e.preventDefault();
+    if (createInFlight.current) return;
     setError(null);
-    const result = await createGroup(name);
+    createInFlight.current = true;
+    setCreatePending(true);
+    const result = await Effect.runPromise(
+      Effect.tryPromise({
+        try: () => createGroup(name),
+        catch: () => ({ ok: false as const, error: "network" }),
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            createInFlight.current = false;
+            setCreatePending(false);
+          }),
+        ),
+      ),
+    );
     if (!result.ok) {
       const message = NAME_ERRORS[result.error] ?? "Couldn't create that club. Try again.";
       setError(message);
@@ -107,7 +124,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
                   className="home-create-confirm"
                   aria-label="create"
                   title="Create club"
-                  disabled={name === ""}
+                  disabled={name === "" || createPending}
                 >
                   +
                 </button>

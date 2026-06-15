@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
 import {
   fetchGroup,
@@ -30,6 +30,8 @@ interface LoadedFile {
 }
 
 const SELECTED_SOURCE_PREFIX = "bookclub.selectedSource";
+const HOME_TITLE_MAX_SIZE = 72;
+const HOME_TITLE_MIN_SIZE = 36;
 
 function selectedSourceKey(groupId: string): string {
   return `${SELECTED_SOURCE_PREFIX}.${groupId}`;
@@ -45,6 +47,41 @@ function takeInviteToken(): string | null {
   const token = params.get("invite");
   if (token) window.history.replaceState(null, "", window.location.pathname);
   return token;
+}
+
+function FittedHomeTitle({ children }: { children: string }): React.ReactElement {
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const [fontSize, setFontSize] = useState(HOME_TITLE_MAX_SIZE);
+
+  useLayoutEffect(() => {
+    const title = titleRef.current;
+    const container = title?.parentElement;
+    if (!title || !container) return;
+    const titleEl = title;
+    const containerEl = container;
+
+    function fit(): void {
+      titleEl.style.fontSize = `${HOME_TITLE_MAX_SIZE}px`;
+      const available = containerEl.clientWidth;
+      const actual = titleEl.scrollWidth;
+      const next =
+        actual > available && available > 0
+          ? Math.max(HOME_TITLE_MIN_SIZE, Math.floor((HOME_TITLE_MAX_SIZE * available) / actual))
+          : HOME_TITLE_MAX_SIZE;
+      setFontSize(next);
+    }
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(containerEl);
+    return () => observer.disconnect();
+  }, [children]);
+
+  return (
+    <h1 ref={titleRef} className="home-title" style={{ fontSize }}>
+      {children}
+    </h1>
+  );
 }
 
 export function GroupView({
@@ -284,7 +321,7 @@ function NoBook({
           ‹
         </a>
         <div className="home-main">
-          <h1 className="home-title">{group.displayName}</h1>
+          <FittedHomeTitle>{group.displayName}</FittedHomeTitle>
           <button
             type="button"
             className="home-upload-link plain-button"

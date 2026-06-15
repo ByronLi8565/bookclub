@@ -57,6 +57,35 @@ export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: numb
 
 const CONTEXT = 32;
 
+function shouldInsertBoundarySpace(text: string, next: string): boolean {
+  return text.length > 0 && next.length > 0 && /\S$/u.test(text) && /^\S/u.test(next);
+}
+
+function rangeText(range: Range): string {
+  const root = range.commonAncestorContainer;
+  if (root.nodeType === root.TEXT_NODE) {
+    return (root.textContent ?? "").slice(range.startOffset, range.endOffset);
+  }
+
+  const filter = range.startContainer.ownerDocument!.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+  const walker = range.startContainer.ownerDocument!.createTreeWalker(root, filter);
+  let text = "";
+
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!range.intersectsNode(node)) continue;
+
+    let str = node.textContent ?? "";
+    if (node === range.startContainer) str = str.slice(range.startOffset);
+    if (node === range.endContainer) str = str.slice(0, range.endOffset);
+    if (str.length === 0) continue;
+
+    if (shouldInsertBoundarySpace(text, str)) text += " ";
+    text += str;
+  }
+
+  return text;
+}
+
 export function deriveQuote(range: Range): QuoteSelector {
   const doc = range.startContainer.ownerDocument;
   const root = doc?.body;
@@ -80,6 +109,29 @@ export function deriveQuote(range: Range): QuoteSelector {
   };
 }
 
+function derivePdfQuote(range: Range): QuoteSelector {
+  const doc = range.startContainer.ownerDocument;
+  const root = doc?.body;
+  if (!root) {
+    return { type: "TextQuoteSelector", exact: rangeText(range), prefix: "", suffix: "" };
+  }
+
+  const before = doc.createRange();
+  before.setStart(root, 0);
+  before.setEnd(range.startContainer, range.startOffset);
+
+  const after = doc.createRange();
+  after.setStart(range.endContainer, range.endOffset);
+  after.setEnd(root, root.childNodes.length);
+
+  return {
+    type: "TextQuoteSelector",
+    exact: rangeText(range),
+    prefix: rangeText(before).slice(-CONTEXT),
+    suffix: rangeText(after).slice(0, CONTEXT),
+  };
+}
+
 export const captureHighlight = (
   sourceId: string,
   anchor: HighlightAnchor,
@@ -89,7 +141,7 @@ export const captureHighlight = (
     id: crypto.randomUUID(),
     sourceId,
     anchor,
-    quote: deriveQuote(range),
+    quote: anchor.kind === "pdf-text" ? derivePdfQuote(range) : deriveQuote(range),
     createdAt: new Date().toISOString(),
   }));
 
