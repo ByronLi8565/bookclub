@@ -5,18 +5,15 @@ import * as Ref from "effect/Ref";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSwipeable } from "react-swipeable";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
-import type Section from "epubjs/types/section";
 import {
   epubAnchor,
   expandToWordBoundaries,
-  findAllRanges,
   popupPoint,
-  searchQuote,
   type HighlightAnchor,
-  type SearchMatch,
   type SourceReader,
 } from "../../notes/highlights.ts";
 import type Navigation from "epubjs/types/navigation";
+import { makeEpubReader } from "./epubReader.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { OnSelect, SourceView } from "./sourceView.ts";
 
@@ -33,11 +30,6 @@ interface ResizableView {
   on: (e: string, cb: () => void) => void;
   pane?: { render: () => void };
   contents?: Contents;
-}
-
-interface SectionHandle {
-  document: Document;
-  cfiFromRange(range: Range): string | null;
 }
 
 export function useEpubSourceView(
@@ -294,66 +286,13 @@ export function useEpubSourceView(
     dismissSelection();
   }, [dismissSelection]);
 
-  const reader = useMemo<SourceReader>(() => {
-    const withBook = <A>(fallback: A, f: (book: Book) => Effect.Effect<A>): Effect.Effect<A> =>
-      Effect.flatMap(Ref.get(viewRef.current), (view) =>
-        Option.isSome(view) ? f(view.value.book) : Effect.succeed(fallback),
-      );
-    const findInSections = <A>(pick: (section: SectionHandle) => A[]): Effect.Effect<A[]> =>
-      withBook<A[]>([], (book) =>
-        Effect.gen(function* () {
-          const items = (book.spine as unknown as { spineItems: { index: number }[] }).spineItems;
-          const results: A[] = [];
-          for (const { index } of items) {
-            const found = yield* Effect.acquireUseRelease(
-              Effect.tryPromise(async () => {
-                const section: Section = book.spine.get(index);
-                const document = await section.load(book.load.bind(book));
-                return { section, document };
-              }),
-              ({ section, document }) =>
-                Effect.sync(() =>
-                  pick({ document, cfiFromRange: (r) => section.cfiFromRange(r) ?? null }),
-                ),
-              ({ section }) => Effect.sync(() => section.unload()),
-            ).pipe(Effect.orElseSucceed((): A[] => []));
-            results.push(...found);
-          }
-          return results;
-        }),
-      );
-    return {
-      locateHighlight: (h) =>
-        withBook<HighlightAnchor | null>(null, (book) =>
-          Effect.gen(function* () {
-            if (h.anchor.kind === "epub-cfi") {
-              const cfi = h.anchor.value;
-              const range = yield* Effect.tryPromise(() => book.getRange(cfi)).pipe(
-                Effect.map((r) => r ?? null),
-                Effect.orElseSucceed(() => null),
-              );
-              if (range) return epubAnchor(cfi);
-            }
-            const fresh = yield* findInSections((section) => {
-              const found = searchQuote(section.document, h.quote);
-              const cfi = found ? section.cfiFromRange(found) : null;
-              return cfi ? [cfi] : [];
-            });
-            const first = fresh[0];
-            return first ? epubAnchor(first) : null;
-          }),
-        ),
-      search: (query) =>
-        query.trim() === ""
-          ? Effect.succeed<SearchMatch[]>([])
-          : findInSections((section) =>
-              findAllRanges(section.document, query).flatMap(({ range, excerpt }) => {
-                const cfi = section.cfiFromRange(range);
-                return cfi ? [{ anchor: epubAnchor(cfi), excerpt }] : [];
-              }),
-            ),
-    };
-  }, []);
+  const reader = useMemo<SourceReader>(
+    () =>
+      makeEpubReader(
+        () => Option.getOrNull(Effect.runSync(Ref.get(viewRef.current)))?.book ?? null,
+      ),
+    [],
+  );
 
   const search = useReaderSearch({
     reader,

@@ -1,42 +1,24 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import editIcon from "@assets/edit.svg";
-import { effectiveHighlight, type Note } from "../../notes/render.ts";
+import {
+  canDeleteNote,
+  canEditNote,
+  effectiveHighlight,
+  noteTitle,
+  type Note,
+  type NoteViewer,
+} from "../../notes/render.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";
 
+export type { NoteViewer } from "../../notes/render.ts";
+
 const MAX_INDENT = 4;
-
-export function noteTitle(note: Note): string {
-  const verb = note.parent === null ? "posted" : "replied";
-  return noteHeading(note.author.name, verb, note.createdAt);
-}
-
-export function noteHeading(
-  authorName: string,
-  verb: "posted" | "replied",
-  createdAt: string,
-): string {
-  return `${authorName} ${verb} ${formatNoteTimestamp(createdAt)}`;
-}
-
-export function formatNoteTimestamp(createdAt: string): string {
-  return new Date(createdAt).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
 
 export interface NoteRefs {
   validSeqs: Set<number>;
   byId: Map<string, Note>;
   refs: Map<number, string>;
-}
-
-export interface NoteViewer {
-  userId: string;
-  isOwner: boolean;
 }
 
 export interface NoteActions {
@@ -112,9 +94,8 @@ function NoteRow({
 }) {
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
-  const isAuthor = note.author.id === viewer.userId;
-  const canEdit = isAuthor;
-  const canDelete = isAuthor || viewer.isOwner;
+  const canEdit = canEditNote(note, viewer);
+  const canDelete = canDeleteNote(note, viewer);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmRef = useRef<HTMLDivElement | null>(null);
 

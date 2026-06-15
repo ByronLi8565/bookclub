@@ -5,6 +5,43 @@ import { escapeHtml } from "../../shared/util.ts";
 
 export type { Note, NoteAuthor } from "../../shared/types/notes.ts";
 
+export interface NoteViewer {
+  userId: string;
+  isOwner: boolean;
+}
+
+// Only its author can edit a note
+export function canEditNote(note: Note, viewer: NoteViewer): boolean {
+  return note.author.id === viewer.userId;
+}
+
+// Only its author, or the group owner moderating can delete a note
+export function canDeleteNote(note: Note, viewer: NoteViewer): boolean {
+  return note.author.id === viewer.userId || viewer.isOwner;
+}
+
+export function noteTitle(note: Note): string {
+  const verb = note.parent === null ? "posted" : "replied";
+  return noteHeading(note.author.name, verb, note.createdAt);
+}
+
+export function noteHeading(
+  authorName: string,
+  verb: "posted" | "replied",
+  createdAt: string,
+): string {
+  return `${authorName} ${verb} ${formatNoteTimestamp(createdAt)}`;
+}
+
+export function formatNoteTimestamp(createdAt: string): string {
+  return new Date(createdAt).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function effectiveHighlight(note: Note, byId: Map<string, Note>): Highlight | null {
   const seen = new Set<string>();
   let current: Note | undefined = note;

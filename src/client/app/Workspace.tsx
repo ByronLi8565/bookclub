@@ -5,9 +5,9 @@ import type { Note } from "../../shared/types/notes.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
 import { renameGroup, type RosterEntry } from "../groups/api.ts";
 import { useNoteAgent } from "../notes/agent.ts";
-import { buildConversation } from "../notes/conversation.ts";
+import { buildConversation, referenceSpace, selectNotes } from "../notes/conversation.ts";
 import { captureHighlight, type Highlight, type HighlightAnchor } from "../notes/highlights.ts";
-import { effectiveHighlight, noteSnippet } from "../notes/render.ts";
+import { effectiveHighlight, type NoteViewer } from "../notes/render.ts";
 import { InviteModal } from "../ui/group/InviteModal.tsx";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
 import { MobilePager, type Pane } from "../ui/shared/MobilePager.tsx";
@@ -16,7 +16,7 @@ import { spawnToast, showSyncStatusToast } from "../ui/shared/toast/store.ts";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { useIsMobile } from "../ui/shared/hooks/useIsMobile.ts";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
-import type { NoteRefs, NoteViewer } from "../ui/notes/NoteThread.tsx";
+import type { NoteRefs } from "../ui/notes/NoteThread.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
 import {
   updateHighlights,
@@ -67,7 +67,7 @@ export function Workspace({
   const [displayName, setDisplayName] = useState(groupName);
   const agent = useNoteAgent(groupId);
   const notes = useMemo(
-    () => agent.notes.filter((n) => n.sourceId === sourceId),
+    () => selectNotes(agent.notes, { sources: [sourceId] }),
     [agent.notes, sourceId],
   );
   const canWriteNotes = agent.syncStatus === "online";
@@ -208,13 +208,10 @@ export function Workspace({
   const { byId } = conversation;
   const allConversation = useMemo(() => buildConversation(agent.notes), [agent.notes]);
   const { byId: allById, bySeq: allBySeq } = allConversation;
+  const references = useMemo(() => referenceSpace(agent.notes), [agent.notes]);
   const noteRefs = useMemo<NoteRefs>(
-    () => ({
-      validSeqs: new Set(allBySeq.keys()),
-      byId,
-      refs: new Map([...allBySeq].map(([seq, n]) => [seq, noteSnippet(n)] as const)),
-    }),
-    [byId, allBySeq],
+    () => ({ validSeqs: references.validSeqs, byId, refs: references.refs }),
+    [byId, references],
   );
 
   const { goTo } = view;

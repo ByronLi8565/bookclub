@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildConversation } from "../client/notes/conversation.ts";
+import { buildConversation, referenceSpace, selectNotes } from "../client/notes/conversation.ts";
 import type { Note } from "../shared/types/notes.ts";
 
 function note(over: Partial<Note> & { id: string }): Note {
@@ -51,5 +51,46 @@ describe("buildConversation", () => {
 
     expect(conv.byId.get("a")?.seq).toBe(7);
     expect(conv.bySeq.get(7)?.id).toBe("a");
+  });
+});
+
+describe("selectNotes", () => {
+  const notes = [
+    note({ id: "a", sourceId: "book-1" }),
+    note({ id: "b", sourceId: "book-2" }),
+    note({ id: "c", sourceId: "book-1" }),
+  ];
+
+  it("returns every note when selecting all sources", () => {
+    expect(selectNotes(notes, { sources: "all" }).map((n) => n.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("restricts to the chosen sources", () => {
+    expect(selectNotes(notes, { sources: ["book-1"] }).map((n) => n.id)).toEqual(["a", "c"]);
+  });
+
+  it("spans multiple chosen sources", () => {
+    expect(selectNotes(notes, { sources: ["book-1", "book-2"] }).map((n) => n.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+});
+
+describe("referenceSpace", () => {
+  it("collects every seq across all sources as linkable", () => {
+    const space = referenceSpace([
+      note({ id: "a", seq: 1, sourceId: "book-1" }),
+      note({ id: "b", seq: 2, sourceId: "book-2" }),
+    ]);
+
+    expect(space.validSeqs).toEqual(new Set([1, 2]));
+  });
+
+  it("maps each seq to its snippet", () => {
+    const space = referenceSpace([note({ id: "a", seq: 5, body: "hello world" })]);
+
+    expect(space.refs.get(5)).toBe("hello world");
   });
 });

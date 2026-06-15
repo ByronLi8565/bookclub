@@ -1,5 +1,6 @@
 import { infoCards } from "../../info/infoCards.ts";
-import { NoteCardView, noteHeading } from "../notes/NoteThread.tsx";
+import { noteHeading } from "../../notes/render.ts";
+import { NoteCardView } from "../notes/NoteThread.tsx";
 
 const EMPTY_REFS = new Map<number, string>();
 
