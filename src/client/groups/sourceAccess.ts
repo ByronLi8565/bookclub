@@ -1,4 +1,5 @@
 import { fetchSource, uploadSource, type ApiResult, type GroupSummary } from "./api.ts";
+import { groupUrlName } from "../../shared/groupUrls.ts";
 import { deleteCachedSource, getCachedSource, putCachedSource } from "./sourceCache.ts";
 import { currentSourceId, sourceById, sourceRefById } from "../../shared/sources.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
@@ -34,7 +35,7 @@ export async function loadSource(
   const cached = await getCachedSource(ref.id);
   if (cached) return { source: summaryFor(group, ref.id, cached), file: cached, fromCache: true };
 
-  const fetched = await fetchSource(group.name, ref.id);
+  const fetched = await fetchSource(groupUrlName(group), ref.id);
   if (!fetched) return null;
   const id = fetched.sourceId ?? ref.id;
   void putCachedSource(id, fetched.file);
@@ -53,7 +54,7 @@ export async function uploadCurrentSource(
   title: string | null,
   author: string | null,
 ): Promise<ApiResult<LoadedSource>> {
-  const uploaded = await uploadSource(group.name, file, health, title, author);
+  const uploaded = await uploadSource(groupUrlName(group), file, health, title, author);
   if (!uploaded.ok) return uploaded;
   await putCachedSource(uploaded.value, file);
   return {
@@ -67,11 +68,11 @@ export async function cachedSourceSize(sourceId: string): Promise<number | null>
 }
 
 export async function refreshSource(
-  groupName: string,
+  groupRef: string,
   sourceId: string,
 ): Promise<ApiResult<LoadedSource>> {
   await deleteCachedSource(sourceId);
-  const fetched = await fetchSource(groupName, sourceId);
+  const fetched = await fetchSource(groupRef, sourceId);
   if (!fetched) return { ok: false, error: "no_source" };
   const id = fetched.sourceId ?? sourceId;
   await putCachedSource(id, fetched.file);

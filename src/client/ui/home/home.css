@@ -96,7 +96,8 @@
   font-size: clamp(40px, 8vw, 72px);
   line-height: 1;
   letter-spacing: -1px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .home-action {

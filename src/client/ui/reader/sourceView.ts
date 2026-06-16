@@ -1,4 +1,5 @@
 import type { HighlightAnchor, SourceReader } from "../../notes/highlights.ts";
+import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import type { ReaderSearch } from "./useReaderSearch.ts";
 
 export interface SourceLocation {
@@ -25,6 +26,7 @@ export interface SourceView {
   commitSelection: () => void;
   dismissSelection: () => void;
   location: SourceLocation | null;
+  position: SourceReadingPosition | null;
   reader: SourceReader;
   search: ReaderSearch;
 }

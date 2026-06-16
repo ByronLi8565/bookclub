@@ -15,6 +15,7 @@ import {
 import type Navigation from "epubjs/types/navigation";
 import { makeEpubReader } from "./epubReader.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
+import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import type { OnSelect, SourceLocation, SourceView } from "./sourceView.ts";
 
 function firstChapterHref(nav: Navigation): string | undefined {
@@ -24,6 +25,7 @@ function firstChapterHref(nav: Navigation): string | undefined {
 // Where the reader currently sits, before it is turned into a press count.
 interface RawLocation {
   index: number;
+  cfi: string | null;
   page: number;
   atStart: boolean;
   atEnd: boolean;
@@ -104,6 +106,7 @@ export function useEpubSourceView(
   onSelect: OnSelect,
   onSwipe?: (dir: "left" | "right") => void,
   onSearchHighlightCleared?: () => void,
+  initialPosition?: SourceReadingPosition | null,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
@@ -128,9 +131,11 @@ export function useEpubSourceView(
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
   const drawnCfiRef = useRef<Map<string, string>>(new Map());
   const [raw, setRaw] = useState<RawLocation | null>(null);
+  const [position, setPosition] = useState<SourceReadingPosition | null>(null);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [viewportTick, setViewportTick] = useState(0);
   const measureSeqRef = useRef(0);
+  const initialEpubCfi = initialPosition?.kind === "epub" ? initialPosition.cfi : null;
 
   const publish = (view: Option.Option<LiveView>) => {
     Effect.runSync(Ref.set(viewRef.current, view));
@@ -143,6 +148,7 @@ export function useEpubSourceView(
 
     publish(Option.none());
     setRaw(null);
+    setPosition(null);
     setPagination(null);
     setTitle(null);
     drawnCfiRef.current.clear();
@@ -205,7 +211,7 @@ export function useEpubSourceView(
     const showLocation = () => {
       const loc = rendition.currentLocation() as unknown as
         | {
-            start?: { index: number; displayed?: { page: number } };
+            start?: { index: number; cfi?: string; displayed?: { page: number } };
             atStart?: boolean;
             atEnd?: boolean;
           }
@@ -214,6 +220,7 @@ export function useEpubSourceView(
       if (!start?.displayed) return;
       setRaw({
         index: start.index,
+        cfi: start.cfi ?? null,
         page: start.displayed.page,
         atStart: loc?.atStart ?? false,
         atEnd: loc?.atEnd ?? false,
@@ -255,7 +262,17 @@ export function useEpubSourceView(
         // oxlint-disable-next-line no-useless-undefined
         Effect.orElseSucceed(() => undefined),
       );
-      yield* Effect.tryPromise(() => rendition.display(start));
+      yield* Effect.tryPromise(async () => {
+        if (!initialEpubCfi) {
+          await rendition.display(start);
+          return;
+        }
+        try {
+          await rendition.display(initialEpubCfi);
+        } catch {
+          await rendition.display(start);
+        }
+      });
       yield* Effect.sync(() => publish(Option.some({ book, rendition })));
       yield* Effect.sync(showLocation);
     }).pipe(
@@ -275,7 +292,7 @@ export function useEpubSourceView(
       rendition.destroy();
       book.destroy();
     };
-  }, [file]);
+  }, [file, initialEpubCfi]);
 
   // Recompute the page-turn total whenever the book opens, the zoom changes, or
   // the viewport resizes. Each run is a forked fiber; a newer trigger interrupts
@@ -451,6 +468,14 @@ export function useEpubSourceView(
     };
   }, [raw, pagination]);
 
+  useEffect(() => {
+    if (!raw?.cfi) {
+      setPosition(null);
+      return;
+    }
+    setPosition({ kind: "epub", cfi: raw.cfi, percentage: location?.percentage ?? 0 });
+  }, [raw, location?.percentage]);
+
   return {
     containerRef,
     ready,
@@ -467,6 +492,7 @@ export function useEpubSourceView(
     commitSelection,
     dismissSelection,
     location,
+    position,
     reader,
     search,
   };

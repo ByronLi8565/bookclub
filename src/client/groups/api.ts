@@ -35,7 +35,8 @@ const SourceMeta = Schema.Struct({
 
 const GroupSummary = Schema.Struct({
   groupId: Schema.String,
-  name: Schema.String,
+  slug: Schema.String,
+  publicId: Schema.String,
   displayName: Schema.String,
   ownerId: Schema.String,
   sources: Schema.mutable(Schema.Array(Schema.String)),
@@ -104,11 +105,11 @@ export async function listMyGroups(): Promise<GroupSummary[]> {
   return groups;
 }
 
-export async function createGroup(name: string): Promise<ApiResult<GroupSummary>> {
+export async function createGroup(displayName: string): Promise<ApiResult<GroupSummary>> {
   const r = await fetch("/groups", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ displayName }),
   });
   if (!r.ok) {
     const body = await parseJson(r, ErrorBody);
@@ -119,16 +120,19 @@ export async function createGroup(name: string): Promise<ApiResult<GroupSummary>
 }
 
 export async function fetchGroup(
-  name: string,
+  groupRef: string,
 ): Promise<{ group: GroupSummary; membership: Membership; members: RosterEntry[] } | null> {
-  const r = await fetch(`/groups/${name}`);
+  const r = await fetch(`/groups/${groupRef}`);
   if (r.status === 404) return null;
   if (!r.ok) return null;
   return parseJson(r, FetchGroupResponse);
 }
 
-export async function redeemInvite(name: string, token: string): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${name}/join`, {
+export async function redeemInvite(
+  groupRef: string,
+  token: string,
+): Promise<ApiResult<GroupSummary>> {
+  const r = await fetch(`/groups/${groupRef}/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -138,8 +142,8 @@ export async function redeemInvite(name: string, token: string): Promise<ApiResu
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-export async function inviteToGroup(name: string, email: string): Promise<ApiResult<null>> {
-  const r = await fetch(`/groups/${name}/invite`, {
+export async function inviteToGroup(groupRef: string, email: string): Promise<ApiResult<null>> {
+  const r = await fetch(`/groups/${groupRef}/invite`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -148,10 +152,10 @@ export async function inviteToGroup(name: string, email: string): Promise<ApiRes
 }
 
 export async function getInviteLink(
-  name: string,
+  groupRef: string,
   rotate = false,
 ): Promise<ApiResult<{ token: string; link: string }>> {
-  const r = await fetch(`/groups/${name}/invite-link${rotate ? "?rotate=1" : ""}`, {
+  const r = await fetch(`/groups/${groupRef}/invite-link${rotate ? "?rotate=1" : ""}`, {
     method: "POST",
   });
   if (!r.ok) return { ok: false, error: await readError(r) };
@@ -159,8 +163,11 @@ export async function getInviteLink(
   return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
 }
 
-export async function renameGroup(name: string, title: string): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${name}/title`, {
+export async function renameGroup(
+  groupRef: string,
+  title: string,
+): Promise<ApiResult<GroupSummary>> {
+  const r = await fetch(`/groups/${groupRef}/title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -171,11 +178,11 @@ export async function renameGroup(name: string, title: string): Promise<ApiResul
 }
 
 export async function renameBook(
-  name: string,
+  groupRef: string,
   sourceId: string,
   title: string,
 ): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${name}/book/title`, {
+  const r = await fetch(`/groups/${groupRef}/book/title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sourceId, title }),
@@ -186,11 +193,11 @@ export async function renameBook(
 }
 
 export async function resolveBookTitle(
-  name: string,
+  groupRef: string,
   sourceId: string,
   title: string,
 ): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${name}/book/parsed-title`, {
+  const r = await fetch(`/groups/${groupRef}/book/parsed-title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sourceId, title }),
@@ -201,7 +208,7 @@ export async function resolveBookTitle(
 }
 
 export async function uploadSource(
-  name: string,
+  groupRef: string,
   file: File,
   health: SourceHealth,
   title: string | null,
@@ -213,15 +220,18 @@ export async function uploadSource(
   };
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
   if (author) headers["X-Source-Author"] = encodeURIComponent(author);
-  const r = await fetch(`/groups/${name}/book`, { method: "PUT", headers, body: file });
+  const r = await fetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
   if (!r.ok) return { ok: false, error: await readError(r) };
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
 }
 
-export async function fetchSource(name: string, requestId?: string): Promise<FetchedSource | null> {
+export async function fetchSource(
+  groupRef: string,
+  requestId?: string,
+): Promise<FetchedSource | null> {
   const query = requestId ? `?sourceId=${encodeURIComponent(requestId)}` : "";
-  const r = await fetch(`/groups/${name}/book${query}`);
+  const r = await fetch(`/groups/${groupRef}/book${query}`);
   if (!r.ok) return null;
   const sourceId = r.headers.get("X-Source-Id");
   const contentType = r.headers.get("Content-Type") ?? EPUB_CONTENT_TYPE;
@@ -230,6 +240,6 @@ export async function fetchSource(name: string, requestId?: string): Promise<Fet
   return {
     sourceId,
     contentType,
-    file: new File([blob], `${sourceId ?? name}.${extensionFor(kind)}`, { type: contentType }),
+    file: new File([blob], `${sourceId ?? groupRef}.${extensionFor(kind)}`, { type: contentType }),
   };
 }

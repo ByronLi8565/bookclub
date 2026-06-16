@@ -72,7 +72,7 @@ function SettingDropdown<T extends string>({
 
 export interface SettingsBook {
   sourceId: string;
-  name: string;
+  groupRef: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -121,7 +121,7 @@ export function SettingsModal({
 
   async function onRedownload(): Promise<void> {
     setBusy(true);
-    const result = await refreshSource(book.name, book.sourceId);
+    const result = await refreshSource(book.groupRef, book.sourceId);
     setBusy(false);
     if (result.ok) {
       spawnToast("Book redownloaded", "The local copy was refreshed from storage.", {

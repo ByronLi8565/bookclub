@@ -1,5 +1,6 @@
 .reader {
   --reader-jump-flash-duration: 700ms;
+  --reader-page-turn-hit-width: clamp(20px, 2.5vw, 32px);
 
   display: flex;
   flex-direction: column;
@@ -179,7 +180,7 @@
   top: 0;
   bottom: 0;
   z-index: 6;
-  width: clamp(44px, 7vw, 84px);
+  width: var(--reader-page-turn-hit-width);
   border: none;
   background: transparent;
   padding: 0;
@@ -194,8 +195,7 @@
 }
 
 .reader-page-turn:focus-visible {
-  outline: 2px solid var(--black);
-  outline-offset: -6px;
+  outline: none;
 }
 
 .reader-page-turn--prev {
@@ -218,12 +218,6 @@
 
   .reader-bar .page-count {
     flex: none;
-  }
-}
-
-@media (pointer: coarse) {
-  .reader-page-turn {
-    width: min(112px, 26vw);
   }
 }
 

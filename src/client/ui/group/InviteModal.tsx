@@ -4,11 +4,11 @@ import { Loading } from "../shared/Loading.tsx";
 import { spawnToast } from "../shared/toast/store.ts";
 
 export function InviteModal({
-  name,
+  groupRef,
   displayName,
   onClose,
 }: {
-  name: string;
+  groupRef: string;
   displayName: string;
   onClose: () => void;
 }): React.ReactElement {
@@ -26,12 +26,12 @@ export function InviteModal({
     setLinkLoading(true);
     setMembers([]);
     setMembersLoading(true);
-    void getInviteLink(name).then((r) => {
+    void getInviteLink(groupRef).then((r) => {
       if (cancelled) return;
       if (r.ok) setLink(r.value.link);
       setLinkLoading(false);
     });
-    void fetchGroup(name).then((g) => {
+    void fetchGroup(groupRef).then((g) => {
       if (cancelled) return;
       if (g) setMembers(g.members);
       setMembersLoading(false);
@@ -39,12 +39,12 @@ export function InviteModal({
     return () => {
       cancelled = true;
     };
-  }, [name]);
+  }, [groupRef]);
 
   async function onSendEmail(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     setBusy(true);
-    const result = await inviteToGroup(name, email);
+    const result = await inviteToGroup(groupRef, email);
     setBusy(false);
     if (result.ok) {
       spawnToast("Invite sent", `Invited ${email}.`, { type: "info" });
@@ -63,7 +63,7 @@ export function InviteModal({
 
   async function onRotate(): Promise<void> {
     setBusy(true);
-    const result = await getInviteLink(name, true);
+    const result = await getInviteLink(groupRef, true);
     setBusy(false);
     if (result.ok) setLink(result.value.link);
     else spawnToast("Failed", "Couldn't regenerate the link.", { type: "error" });

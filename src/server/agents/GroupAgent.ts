@@ -5,9 +5,8 @@ import type {
   RosterEntry,
   SourceMeta,
 } from "../../shared/types/groups.ts";
+import { slugForGroup } from "../../shared/groupUrls.ts";
 import type { Env } from "../env.ts";
-import { REGISTRY_ID } from "./GroupRegistry.ts";
-import type { NormalizedName } from "../util/names.ts";
 
 export interface Member {
   role: GroupRole;
@@ -24,6 +23,7 @@ interface Invite {
 export interface GroupState {
   groupId: string;
   name: string;
+  publicId: string;
   displayName: string;
   ownerId: string;
   members: Record<string, Member>;
@@ -43,7 +43,7 @@ export interface Identity {
 
 export type CreateResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: "exists" | "name_taken" };
+  | { ok: false; reason: "exists" | "empty" };
 export type InviteResult =
   | { ok: true; token: string }
   | { ok: false; reason: "not_member" | "not_found" };
@@ -74,6 +74,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
   initialState: GroupState = {
     groupId: "",
     name: "",
+    publicId: "",
     displayName: "",
     ownerId: "",
     members: {},
@@ -85,18 +86,17 @@ export class GroupAgent extends Agent<Env, GroupState> {
     createdAt: "",
   };
 
-  async create(name: NormalizedName, owner: Identity): Promise<CreateResult> {
+  async create(displayName: string, publicId: string, owner: Identity): Promise<CreateResult> {
     if (this.state.groupId !== "") return { ok: false, reason: "exists" };
-
-    const registry = await getAgentByName(this.env.GroupRegistry, REGISTRY_ID);
-    const reserved = await registry.reserve(name.key, this.name);
-    if (!reserved.ok) return { ok: false, reason: "name_taken" };
+    const title = displayName.trim();
+    if (title === "") return { ok: false, reason: "empty" };
 
     const now = new Date().toISOString();
     this.setState({
       groupId: this.name,
-      name: name.key,
-      displayName: name.display,
+      name: slugForGroup(title),
+      publicId,
+      displayName: title.slice(0, MAX_TITLE_LENGTH),
       ownerId: owner.id,
       members: {
         [owner.id]: { role: "owner", name: owner.name, email: owner.email, joinedAt: now },
@@ -187,8 +187,19 @@ export class GroupAgent extends Agent<Env, GroupState> {
     if (!guard.ok) return guard;
     const title = rawTitle.trim();
     if (title === "") return { ok: false, reason: "empty" };
-    this.setState({ ...this.state, displayName: title.slice(0, MAX_TITLE_LENGTH) });
+    this.setState({
+      ...this.state,
+      name: slugForGroup(title),
+      displayName: title.slice(0, MAX_TITLE_LENGTH),
+    });
     return { ok: true, summary: this.summary() };
+  }
+
+  assignPublicUrl(publicId: string): GroupSummary | null {
+    if (this.state.groupId === "") return null;
+    if (this.state.publicId) return this.summary();
+    this.setState({ ...this.state, name: slugForGroup(this.state.displayName), publicId });
+    return this.summary();
   }
 
   renameBook(callerId: string, sourceId: string, rawTitle: string): RenameResult {
@@ -261,7 +272,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   private summary(): GroupSummary {
     return {
       groupId: this.state.groupId,
-      name: this.state.name,
+      slug: this.state.name || slugForGroup(this.state.displayName),
+      publicId: this.state.publicId ?? "",
       displayName: this.state.displayName,
       ownerId: this.state.ownerId,
       sources: this.state.sources ?? [],

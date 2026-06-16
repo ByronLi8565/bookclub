@@ -1,4 +1,5 @@
 import type { SourceRef } from "../../../shared/types/sources.ts";
+import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { useEpubSourceView } from "./useEpubSourceView.ts";
 import { usePdfSourceView } from "./usePdfSourceView.ts";
 import type { OnSelect, SourceView } from "./sourceView.ts";
@@ -11,9 +12,22 @@ export function useSourceView(
   onSelect: OnSelect,
   onSwipe?: (dir: "left" | "right") => void,
   onSearchHighlightCleared?: () => void,
+  initialPosition?: SourceReadingPosition | null,
 ): SourceView {
   const isPdf = source?.kind === "pdf";
-  const epub = useEpubSourceView(isPdf ? null : file, onSelect, onSwipe, onSearchHighlightCleared);
-  const pdf = usePdfSourceView(isPdf ? file : null, onSelect, onSwipe, onSearchHighlightCleared);
+  const epub = useEpubSourceView(
+    isPdf ? null : file,
+    onSelect,
+    onSwipe,
+    onSearchHighlightCleared,
+    initialPosition?.kind === "epub" ? initialPosition : null,
+  );
+  const pdf = usePdfSourceView(
+    isPdf ? file : null,
+    onSelect,
+    onSwipe,
+    onSearchHighlightCleared,
+    initialPosition?.kind === "pdf" ? initialPosition : null,
+  );
   return isPdf ? pdf : epub;
 }

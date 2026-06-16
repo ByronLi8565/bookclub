@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
 import {
   fetchGroup,
@@ -10,6 +10,7 @@ import {
 } from "../../groups/api.ts";
 import { books, loadSource } from "../../groups/sourceAccess.ts";
 import { useBookUpload } from "../../groups/useBookUpload.ts";
+import { getReadingPosition, setReadingPosition } from "../../settings/readingPositions.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
@@ -31,7 +32,7 @@ interface LoadedFile {
 
 const SELECTED_SOURCE_PREFIX = "bookclub.selectedSource";
 const HOME_TITLE_MAX_SIZE = 72;
-const HOME_TITLE_MIN_SIZE = 36;
+const HOME_TITLE_MIN_SIZE = 28;
 
 function selectedSourceKey(groupId: string): string {
   return `${SELECTED_SOURCE_PREFIX}.${groupId}`;
@@ -59,8 +60,12 @@ function FittedHomeTitle({ children }: { children: string }): React.ReactElement
     if (!title || !container) return;
     const titleEl = title;
     const containerEl = container;
+    let cancelled = false;
 
     function fit(): void {
+      if (cancelled) return;
+      const previousWhiteSpace = titleEl.style.whiteSpace;
+      titleEl.style.whiteSpace = "nowrap";
       titleEl.style.fontSize = `${HOME_TITLE_MAX_SIZE}px`;
       const available = containerEl.clientWidth;
       const actual = titleEl.scrollWidth;
@@ -68,13 +73,20 @@ function FittedHomeTitle({ children }: { children: string }): React.ReactElement
         actual > available && available > 0
           ? Math.max(HOME_TITLE_MIN_SIZE, Math.floor((HOME_TITLE_MAX_SIZE * available) / actual))
           : HOME_TITLE_MAX_SIZE;
+      titleEl.style.fontSize = `${next}px`;
+      titleEl.style.whiteSpace = previousWhiteSpace;
       setFontSize(next);
     }
 
     fit();
+    requestAnimationFrame(() => requestAnimationFrame(fit));
+    void document.fonts?.ready.then(fit);
     const observer = new ResizeObserver(fit);
     observer.observe(containerEl);
-    return () => observer.disconnect();
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
   }, [children]);
 
   return (
@@ -85,10 +97,10 @@ function FittedHomeTitle({ children }: { children: string }): React.ReactElement
 }
 
 export function GroupView({
-  name,
+  groupRef,
   session,
 }: {
-  name: string;
+  groupRef: string;
   session: Session;
 }): React.ReactElement {
   const [resolved, setResolved] = useState<Resolved>({ k: "loading" });
@@ -98,8 +110,8 @@ export function GroupView({
   const userId = session.user?.id ?? null;
 
   const group = resolved.k === "member" ? resolved.group : null;
-  const groupRef = useRef<GroupSummary | null>(null);
-  groupRef.current = group;
+  const groupStateRef = useRef<GroupSummary | null>(null);
+  groupStateRef.current = group;
   const effectiveId = group ? (selectedId ?? currentSourceId(group)) : null;
 
   function selectBook(sourceId: string): void {
@@ -108,7 +120,7 @@ export function GroupView({
   }
 
   async function onUploaded(newSourceId: string): Promise<void> {
-    const refreshed = await fetchGroup(name);
+    const refreshed = await fetchGroup(groupRef);
     if (refreshed?.membership.isMember) {
       setResolved({
         k: "member",
@@ -136,7 +148,7 @@ export function GroupView({
         },
       };
     });
-    void resolveBookTitle(name, sourceId, title);
+    void resolveBookTitle(groupRef, sourceId, title);
   }
 
   function onRenameBook(sourceId: string, title: string): void {
@@ -148,7 +160,7 @@ export function GroupView({
           }
         : prev,
     );
-    void renameBook(name, sourceId, title).then((result) => {
+    void renameBook(groupRef, sourceId, title).then((result) => {
       if (result.ok) {
         setResolved((prev) => (prev.k === "member" ? { ...prev, group: result.value } : prev));
       } else {
@@ -170,7 +182,7 @@ export function GroupView({
     setLoaded(null);
 
     void (async () => {
-      let view = await fetchGroup(name);
+      let view = await fetchGroup(groupRef);
       if (!view) {
         if (!cancelled) setResolved({ k: "notfound" });
         return;
@@ -178,8 +190,8 @@ export function GroupView({
       if (!view.membership.isMember) {
         const token = takeInviteToken();
         if (token) {
-          const joined = await redeemInvite(name, token);
-          if (joined.ok) view = (await fetchGroup(name)) ?? view;
+          const joined = await redeemInvite(groupRef, token);
+          if (joined.ok) view = (await fetchGroup(groupRef)) ?? view;
           else spawnToast("Invite failed", "That invite link isn't valid.", { type: "error" });
         }
       }
@@ -200,10 +212,10 @@ export function GroupView({
     return () => {
       cancelled = true;
     };
-  }, [name, session.status, userId]);
+  }, [groupRef, session.status, userId]);
 
   useEffect(() => {
-    const loadGroup = groupRef.current;
+    const loadGroup = groupStateRef.current;
     if (!loadGroup || !effectiveId) return;
     let cancelled = false;
     setLoaded(null);
@@ -214,7 +226,20 @@ export function GroupView({
     return () => {
       cancelled = true;
     };
-  }, [group?.name, effectiveId]);
+  }, [group?.groupId, effectiveId]);
+
+  const source =
+    effectiveId && group ? (sourceById(group, effectiveId) ?? currentSource(group)) : null;
+  const groupId = group?.groupId ?? null;
+  const restoreSourceId = source?.id ?? null;
+  const sourceKind = source?.kind ?? null;
+  const initialReadingPosition = useMemo(
+    () =>
+      userId && groupId && restoreSourceId && sourceKind
+        ? getReadingPosition(userId, groupId, restoreSourceId, sourceKind)
+        : null,
+    [userId, groupId, restoreSourceId, sourceKind],
+  );
 
   if (resolved.k === "loading") {
     return (
@@ -230,26 +255,27 @@ export function GroupView({
   if (resolved.k === "anon")
     return <GroupGate session={session} message="Sign in to open this club." />;
   if (resolved.k === "notfound")
-    return <GroupMessage title="No such club" body={`"${name}" doesn't exist.`} />;
+    return <GroupMessage title="No such club" body={`"${groupRef}" doesn't exist.`} />;
   if (resolved.k === "refused") {
     return <GroupMessage title="Members only" body="You need an invite to join this club." />;
   }
-
-  const source =
-    effectiveId && group ? (sourceById(group, effectiveId) ?? currentSource(group)) : null;
 
   const content =
     !group || !source ? (
       <NoBook group={resolved.group} onUpload={() => setUploadOpen(true)} />
     ) : (
       <Workspace
-        name={group.name}
         groupName={group.displayName}
+        groupRef={groupRef}
         groupId={group.groupId}
         source={source}
         file={loaded?.sourceId === source.id ? loaded.file : null}
         storedBookTitle={source.title}
         onTitleParsed={onTitleParsed}
+        initialReadingPosition={initialReadingPosition}
+        onReadingPosition={(sourceId, position) => {
+          if (userId) setReadingPosition(userId, group.groupId, sourceId, position);
+        }}
         books={books(group)}
         selectedSourceId={source.id}
         onSelectBook={selectBook}

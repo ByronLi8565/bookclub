@@ -14,8 +14,8 @@ export default function App() {
       ) : (
         <Switch>
           <Route path="/">{() => <Home session={session} />}</Route>
-          <Route path="/:name">
-            {(params) => <GroupView name={params.name} session={session} />}
+          <Route path="/clubs/:groupRef">
+            {(params) => <GroupView groupRef={params.groupRef} session={session} />}
           </Route>
         </Switch>
       )}

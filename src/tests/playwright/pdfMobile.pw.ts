@@ -94,3 +94,27 @@ test("pinching out zooms the PDF content without changing the page", async ({ pa
   // Zooming must not flip the page.
   expect(await readPage(page)).toBe(startPage);
 });
+
+// Reproduces the on-device failure observed via Safari Web Inspector: the PDF
+// canvas paints, but the separately-chunked pdf.js text layer (pdf_viewer.mjs)
+// fails to load, so the reader was left stuck at ready=false — every control
+// (zoom, page-turn, pinch) disabled even though the page is visible. The reader
+// must stay fully interactive for viewing/zoom/paging when the text layer is
+// unavailable; only selection/search degrade. Blocking that request here makes
+// WebKit emulation exhibit the same condition as the iPhone.
+test("reader stays interactive when the pdf.js text layer chunk fails to load", async ({ page }) => {
+  await page.route(/pdfjs-dist_web_pdf.*viewer.*\.js/u, (route) => route.abort());
+
+  await page.goto(HARNESS);
+
+  // The canvas still paints from the worker render path.
+  await expect(page.locator(".pdf-page canvas")).toBeVisible({ timeout: 30_000 });
+  // Despite the text layer failing, the reader must become ready: zoom enabled,
+  // page-turn mounted, and paging works.
+  await expect(page.getByTitle("Increase text size")).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator(".reader-page-turn--next")).toBeVisible();
+  expect(await readPage(page)).toBe(1);
+
+  await page.getByTitle("Increase text size").click();
+  await expect.poll(() => readZoom(page)).toBeGreaterThan(100);
+});

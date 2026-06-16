@@ -4,7 +4,7 @@ import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
 import { SettingsModal } from "./SettingsModal.tsx";
 
-type BookRef = { sourceId: string; name: string };
+type BookRef = { sourceId: string; groupRef: string };
 
 type SyncStatus = "syncing" | "online" | "offline";
 

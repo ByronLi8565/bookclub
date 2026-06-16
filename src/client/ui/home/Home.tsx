@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
+import { groupUrlName } from "../../../shared/groupUrls.ts";
 import type { Session } from "../../auth/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
@@ -11,11 +12,7 @@ import { spawnToast } from "../shared/toast/store.ts";
 
 const NAME_ERRORS: Record<string, string> = {
   empty: "Enter a name for your club.",
-  too_short: "That name is too short! Use at least 2 characters.",
-  too_long: "That name is too long! 32 characters max.",
-  bad_charset: "Club names do not support symbols",
-  reserved: "That name is reserved — pick another.",
-  name_taken: "That name is already taken — pick another.",
+  too_long: "That name is too long! 100 characters max.",
 };
 
 export function Home({ session }: { session: Session }): React.ReactElement {
@@ -75,7 +72,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
       spawnToast("Invalid club name", message, { type: "error", durationMs: 6000 });
       return;
     }
-    navigate(`/${result.value.name}`);
+    navigate(`/clubs/${groupUrlName(result.value)}`);
   }
 
   return (
@@ -154,7 +151,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
                 <ul className="home-club-list">
                   {groups.map((g) => (
                     <li key={g.groupId}>
-                      <a href={`/${g.name}`}>{g.displayName}</a>
+                      <a href={`/clubs/${groupUrlName(g)}`}>{g.displayName}</a>
                       <button
                         type="button"
                         className="login-link plain-button"
@@ -181,7 +178,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
       {loginOpen && <LoginModal session={session} onClose={() => setLoginOpen(false)} />}
       {inviting && (
         <InviteModal
-          name={inviting.name}
+          groupRef={groupUrlName(inviting)}
           displayName={inviting.displayName}
           onClose={() => setInviting(null)}
         />

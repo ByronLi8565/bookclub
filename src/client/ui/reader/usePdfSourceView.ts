@@ -12,6 +12,7 @@ import {
   type SourceReader,
 } from "../../notes/highlights.ts";
 import { useReaderPrefs } from "../../settings/readerPrefs.ts";
+import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import {
   destroyPdf,
   loadPdf,
@@ -81,6 +82,7 @@ export function usePdfSourceView(
   onSelect: OnSelect,
   onSwipe?: (dir: "left" | "right") => void,
   onSearchHighlightCleared?: () => void,
+  initialPosition?: SourceReadingPosition | null,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
@@ -95,6 +97,7 @@ export function usePdfSourceView(
   const [title, setTitle] = useState<string | null>(null);
   const [fontSize, setFontSizeState] = useState(100);
   const [location, setLocation] = useState<SourceLocation | null>(null);
+  const [position, setPosition] = useState<SourceReadingPosition | null>(null);
   const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
 
   const docRef = useRef<PDFDocumentProxy | null>(null);
@@ -116,6 +119,11 @@ export function usePdfSourceView(
     null,
   );
   const renderSeqRef = useRef(0);
+  const initialPdfPage = initialPosition?.kind === "pdf" ? initialPosition.page : null;
+  const initialPdfScrollRatio =
+    initialPosition?.kind === "pdf" ? initialPosition.scrollRatio : null;
+  const initialPdfZoom = initialPosition?.kind === "pdf" ? initialPosition.zoom : null;
+  const initialPdfPercentage = initialPosition?.kind === "pdf" ? initialPosition.percentage : 0;
 
   const geometryFor = useCallback(async (pageNum: number): Promise<PageGeometry | null> => {
     const doc = docRef.current;
@@ -152,6 +160,33 @@ export function usePdfSourceView(
     if (!scroller || pageNum !== pageRef.current) return;
     scroller.scrollTop = scrollBounds().floor;
   }, [geometryFor, scrollBounds]);
+
+  const publishPosition = useCallback((): void => {
+    const doc = docRef.current;
+    const scroller = scrollerRef.current;
+    if (!doc || !scroller) return;
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const scrollRatio = maxScroll > 0 ? scroller.scrollTop / maxScroll : 0;
+    setPosition({
+      kind: "pdf",
+      page: pageRef.current,
+      scrollRatio: Math.min(1, Math.max(0, scrollRatio)),
+      zoom: fontSizeRef.current,
+      percentage: doc.numPages > 0 ? (pageRef.current - 1 + scrollRatio) / doc.numPages : 0,
+    });
+  }, []);
+
+  const scrollToPdfPosition = useCallback(
+    (target: SourceReadingPosition): void => {
+      if (target.kind !== "pdf") return;
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollTop = Math.min(maxScroll, Math.max(0, target.scrollRatio * maxScroll));
+      publishPosition();
+    },
+    [publishPosition],
+  );
 
   const scrollToAnchor = useCallback(
     async (anchor: HighlightAnchor): Promise<void> => {
@@ -255,25 +290,8 @@ export function usePdfSourceView(
     await page.render({ canvas, canvasContext: ctx, viewport }).promise;
     if (seq !== renderSeqRef.current) return;
 
-    // Render the text layer through pdf.js's TextLayerBuilder rather than the
-    // bare TextLayer class. The builder appends the `.endOfContent` selection
-    // sink and registers pdf.js's global selection handler, which is what makes
-    // touch/drag selection grab individual words instead of the whole page.
-    const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
-    if (seq !== renderSeqRef.current) return;
-    const builder = new TextLayerBuilderCtor({ pdfPage: page });
-    await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
-    if (seq !== renderSeqRef.current) {
-      builder.cancel();
-      builder.div.remove();
-      return;
-    }
-    textLayerBuilderRef.current?.cancel();
-    textLayerBuilderRef.current?.div.remove();
-    textLayerBuilderRef.current = builder;
-    textLayerRef.current = builder.div;
-    wrap.appendChild(builder.div);
-
+    // The page is now painted and viewable. Reflect its location and repaint
+    // any highlights immediately — none of that depends on the text layer.
     repaintHighlights();
     repaintUnderline();
     setLocation({
@@ -283,7 +301,39 @@ export function usePdfSourceView(
       atStart: pageNum <= 1,
       atEnd: pageNum >= doc.numPages,
     });
-  }, [repaintHighlights, repaintUnderline]);
+    publishPosition();
+
+    // Render the text layer through pdf.js's TextLayerBuilder rather than the
+    // bare TextLayer class. The builder appends the `.endOfContent` selection
+    // sink and registers pdf.js's global selection handler, which is what makes
+    // touch/drag selection grab individual words instead of the whole page.
+    //
+    // This lives in a separate dynamically-imported chunk (pdf_viewer.mjs). If
+    // it fails to load or render (e.g. the chunk 404/403s on a deploy), the page
+    // must still be fully usable for viewing, zoom and paging — text selection
+    // and in-page search highlighting are the only casualties. So a failure here
+    // is swallowed and must never reject renderPage(): rejecting would leave the
+    // reader stuck with ready=false, disabling every control even though the PDF
+    // is visible on screen.
+    try {
+      const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
+      if (seq !== renderSeqRef.current) return;
+      const builder = new TextLayerBuilderCtor({ pdfPage: page });
+      await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
+      if (seq !== renderSeqRef.current) {
+        builder.cancel();
+        builder.div.remove();
+        return;
+      }
+      textLayerBuilderRef.current?.cancel();
+      textLayerBuilderRef.current?.div.remove();
+      textLayerBuilderRef.current = builder;
+      textLayerRef.current = builder.div;
+      wrap.appendChild(builder.div);
+    } catch (error) {
+      console.error("pdf text layer unavailable; selection and search disabled", error);
+    }
+  }, [repaintHighlights, repaintUnderline, publishPosition]);
 
   const goToPage = useCallback(
     async (pageNum: number, afterRender: () => Promise<void> = scrollToTextTop): Promise<void> => {
@@ -300,8 +350,9 @@ export function usePdfSourceView(
       clearFlash();
       await renderPage();
       await afterRender();
+      publishPosition();
     },
-    [renderPage, location, clearFlash, scrollToTextTop],
+    [renderPage, location, clearFlash, scrollToTextTop, publishPosition],
   );
 
   const scrollWithinPage = useCallback(
@@ -332,11 +383,20 @@ export function usePdfSourceView(
 
     setReady(false);
     setLocation(null);
+    setPosition(null);
     setTitle(null);
     geometryRef.current.clear();
     drawnRef.current.clear();
     underlineRef.current = null;
-    pageRef.current = 1;
+    pageRef.current = initialPdfPage === null ? 1 : Math.max(1, Math.round(initialPdfPage));
+    if (initialPdfZoom !== null) {
+      const zoom = Math.min(
+        READER_NAV.maxZoom,
+        Math.max(READER_NAV.minZoom, Math.round(initialPdfZoom)),
+      );
+      setFontSizeState(zoom);
+      fontSizeRef.current = zoom;
+    }
 
     const scroller = document.createElement("div");
     scroller.className = "pdf-scroller";
@@ -378,8 +438,27 @@ export function usePdfSourceView(
         const meta = yield* Effect.promise(() => doc.getMetadata().catch(() => null));
         const info = meta?.info as { Title?: string } | undefined;
         setTitle(info?.Title?.trim() || null);
+        if (initialPdfPage !== null) {
+          pageRef.current = Math.min(Math.max(1, pageRef.current), doc.numPages);
+        }
         yield* Effect.promise(() => renderPage());
-        yield* Effect.promise(() => scrollToTextTop());
+        yield* Effect.promise(async () => {
+          if (
+            initialPdfPage !== null &&
+            initialPdfScrollRatio !== null &&
+            initialPdfZoom !== null
+          ) {
+            scrollToPdfPosition({
+              kind: "pdf",
+              page: initialPdfPage,
+              scrollRatio: initialPdfScrollRatio,
+              zoom: initialPdfZoom,
+              percentage: initialPdfPercentage,
+            });
+          } else {
+            await scrollToTextTop();
+          }
+        });
         setReady(true);
       }).pipe(Effect.catchCause(() => Effect.sync(() => console.error("failed to open pdf")))),
     );
@@ -400,7 +479,17 @@ export function usePdfSourceView(
       flashLayerRef.current = null;
       setReady(false);
     };
-  }, [file, renderPage, scrollToTextTop, clearFlash]);
+  }, [
+    file,
+    renderPage,
+    scrollToTextTop,
+    scrollToPdfPosition,
+    clearFlash,
+    initialPdfPage,
+    initialPdfScrollRatio,
+    initialPdfZoom,
+    initialPdfPercentage,
+  ]);
 
   // Native selection drives everything: the browser paints the live highlight
   // (via .textLayer ::selection) and we just read the resulting range to place
@@ -513,6 +602,7 @@ export function usePdfSourceView(
     const scroller = scrollerRef.current;
     if (!scroller) return;
 
+    const onScroll = () => publishPosition();
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return; // a real scroll, leave it to the container
       e.preventDefault();
@@ -573,6 +663,7 @@ export function usePdfSourceView(
       e.stopPropagation();
     };
 
+    scroller.addEventListener("scroll", onScroll);
     scroller.addEventListener("wheel", onWheel, { passive: false });
     scroller.addEventListener("touchstart", onTouchStart, { passive: false, capture: true });
     scroller.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
@@ -582,6 +673,7 @@ export function usePdfSourceView(
     scroller.addEventListener("gesturechange", swallowGesture, { passive: false, capture: true });
     scroller.addEventListener("gestureend", swallowGesture, { passive: false, capture: true });
     return () => {
+      scroller.removeEventListener("scroll", onScroll);
       scroller.removeEventListener("wheel", onWheel);
       scroller.removeEventListener("touchstart", onTouchStart, { capture: true });
       scroller.removeEventListener("touchmove", onTouchMove, { capture: true });
@@ -591,7 +683,7 @@ export function usePdfSourceView(
       scroller.removeEventListener("gesturechange", swallowGesture, { capture: true });
       scroller.removeEventListener("gestureend", swallowGesture, { capture: true });
     };
-  }, [ready, setFontSize]);
+  }, [ready, setFontSize, publishPosition]);
 
   useEffect(() => {
     let startX = 0;
@@ -693,6 +785,7 @@ export function usePdfSourceView(
     commitSelection,
     dismissSelection,
     location,
+    position,
     reader,
     search,
   };

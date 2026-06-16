@@ -12,7 +12,8 @@ export interface SourceMeta {
 
 export interface GroupSummary {
   groupId: string;
-  name: string;
+  slug: string;
+  publicId: string;
   displayName: string;
   ownerId: string;
   sources: string[];

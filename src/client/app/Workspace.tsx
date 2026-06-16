@@ -2,6 +2,7 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
+import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
 import { renameGroup, type RosterEntry } from "../groups/api.ts";
 import { useNoteAgent } from "../notes/agent.ts";
@@ -27,13 +28,15 @@ import { useSourceView } from "../ui/reader/useSourceView.ts";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
 
 export interface WorkspaceProps {
-  name: string;
   groupName: string;
+  groupRef: string;
   groupId: string;
   source: SourceRef;
   file: File | null;
   storedBookTitle: string | null;
   onTitleParsed: (sourceId: string, title: string) => void;
+  initialReadingPosition?: SourceReadingPosition | null;
+  onReadingPosition?: (sourceId: string, position: SourceReadingPosition) => void;
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
@@ -56,13 +59,15 @@ function scrollNoteIntoView(seq: number): void {
 }
 
 export function Workspace({
-  name,
   groupName,
+  groupRef,
   groupId,
   source,
   file,
   storedBookTitle,
   onTitleParsed,
+  initialReadingPosition = null,
+  onReadingPosition = () => {},
   books,
   selectedSourceId,
   onSelectBook,
@@ -83,7 +88,6 @@ export function Workspace({
     [agent.notes, sourceId],
   );
   const canWriteNotes = agent.syncStatus === "online";
-
   const [composing, setComposing] = useState<Highlight | null>(null);
   const composingRef = useRef<Highlight | null>(null);
   composingRef.current = composing;
@@ -91,7 +95,6 @@ export function Workspace({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
-
   const onSelectRef = useRef<(anchor: HighlightAnchor, range: Range) => void>(() => {});
   const restoreAfterSearchClearRef = useRef<() => void>(() => {});
   const view = useSourceView(
@@ -100,6 +103,7 @@ export function Workspace({
     (anchor, range) => onSelectRef.current(anchor, range),
     (dir) => setPane(dir === "left" ? "notes" : "reader"),
     () => restoreAfterSearchClearRef.current(),
+    initialReadingPosition,
   );
 
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
@@ -109,7 +113,6 @@ export function Workspace({
 
   const drawnRef = useRef<Map<string, HighlightAnchor>>(new Map());
   const drawnSourceIdRef = useRef<string | null>(null);
-
   restoreAfterSearchClearRef.current = () => {
     for (const note of notes) {
       for (const h of note.highlights) {
@@ -180,19 +183,16 @@ export function Workspace({
       drawnSourceIdRef.current = sourceId;
     }
     let cancelled = false;
-
     const desired: DesiredHighlight[] = [];
     for (const note of notes) {
       for (const h of note.highlights) desired.push({ noteId: note.id, highlight: h });
     }
     const comp = composingRef.current;
     if (comp) desired.push({ noteId: null, highlight: comp });
-
     const painter: HighlightPainter = {
       draw: (id, anchor) => view.drawHighlight(id, anchor, () => void view.goTo(anchor)),
       erase: (id) => view.eraseHighlight(id),
     };
-
     void updateHighlights(desired, drawnRef.current, {
       reader: view.reader,
       painter,
@@ -203,14 +203,11 @@ export function Workspace({
     return () => {
       cancelled = true;
     };
-
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [notes, view.ready, sourceId]);
-
   useEffect(() => {
     drawnRef.current.clear();
   }, [sourceId]);
-
   const titleRepairedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!view.title || storedBookTitle) return;
@@ -218,6 +215,11 @@ export function Workspace({
     titleRepairedRef.current = sourceId;
     onTitleParsed(sourceId, view.title);
   }, [view.title, storedBookTitle, sourceId, onTitleParsed]);
+
+  useEffect(() => {
+    if (!view.position) return;
+    onReadingPosition(sourceId, view.position);
+  }, [sourceId, view.position, onReadingPosition]);
 
   function onDelete(note: Note) {
     if (!agent.removeNote(note.id)) return;
@@ -237,7 +239,6 @@ export function Workspace({
 
   const { flashHighlight, goTo, reader: sourceReader } = view;
   const [pendingReferenceSeq, setPendingReferenceSeq] = useState<number | null>(null);
-
   const jumpToHighlight = useCallback(
     (highlight: Highlight) => {
       const expectedSourceId = highlight.sourceId;
@@ -254,7 +255,6 @@ export function Workspace({
     },
     [file, flashHighlight, goTo, sourceReader, view.ready],
   );
-
   const onJump = useCallback(
     (note: Note) => {
       const hl = effectiveHighlight(note, byId);
@@ -262,7 +262,6 @@ export function Workspace({
     },
     [byId, jumpToHighlight],
   );
-
   useEffect(() => {
     if (pendingReferenceSeq === null) return;
     const target = allBySeq.get(pendingReferenceSeq);
@@ -320,9 +319,8 @@ export function Workspace({
   const composeInitialBody = composing
     ? `> ${composing.quote.exact.replaceAll(/\s+/gu, " ").trim()}\n\n`
     : "";
-
   async function onRenameGroup(title: string): Promise<void> {
-    const result = await renameGroup(name, title);
+    const result = await renameGroup(groupRef, title);
     if (result.ok) setDisplayName(title);
     else spawnToast("Rename failed", "Couldn't rename the club.", { type: "error" });
   }
@@ -338,7 +336,7 @@ export function Workspace({
         onShowPresence={() => setShowingPresence(true)}
         syncStatus={agent.syncStatus}
         onSyncClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
-        book={{ sourceId, name }}
+        book={{ sourceId, groupRef }}
       />
       {(() => {
         const reader = (
@@ -394,7 +392,11 @@ export function Workspace({
         );
       })()}
       {inviting && (
-        <InviteModal name={name} displayName={displayName} onClose={() => setInviting(false)} />
+        <InviteModal
+          groupRef={groupRef}
+          displayName={displayName}
+          onClose={() => setInviting(false)}
+        />
       )}
       {showingPresence && (
         <PresenceModal
