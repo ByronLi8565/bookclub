@@ -1,6 +1,8 @@
 import { Agent } from "agents";
 import { monotonicFactory } from "ulidx";
 import { constantTimeEqual, sha256Hex } from "../../shared/util.ts";
+import type { StoredReadingPosition } from "../../shared/types/readingPositions.ts";
+import { mergeUserPrefs, type UserPrefs } from "../../shared/types/userPrefs.ts";
 import type { Env } from "../env.ts";
 import { sendLoginCode } from "../services/email.ts";
 
@@ -13,6 +15,10 @@ export interface User {
   displayName: string;
   createdAt: string;
   groupIds: string[];
+}
+
+function positionKey(groupId: string, sourceId: string): string {
+  return `${groupId}:${sourceId}`;
 }
 
 interface PendingCode {
@@ -30,6 +36,8 @@ export interface AuthState {
   user: User | null;
   pending: PendingCode | null;
   rate: RateWindow | null;
+  prefs?: UserPrefs;
+  readingPositions?: Record<string, StoredReadingPosition>;
 }
 
 export type VerifyResult =
@@ -103,6 +111,33 @@ export class AuthAgent extends Agent<Env, AuthState> {
 
   getUser(): User | null {
     return this.state.user;
+  }
+
+  getPrefs(): UserPrefs {
+    return mergeUserPrefs(this.state.prefs);
+  }
+
+  setPrefs(prefs: UserPrefs): UserPrefs {
+    const merged = mergeUserPrefs(prefs);
+    this.setState({ ...this.state, prefs: merged });
+    return merged;
+  }
+
+  getReadingPosition(groupId: string, sourceId: string): StoredReadingPosition | null {
+    return this.state.readingPositions?.[positionKey(groupId, sourceId)] ?? null;
+  }
+
+  setReadingPosition(position: StoredReadingPosition): StoredReadingPosition {
+    const key = positionKey(position.groupId, position.sourceId);
+    const existing = this.state.readingPositions?.[key];
+    if (existing && Date.parse(existing.updatedAt) > Date.parse(position.updatedAt)) {
+      return existing;
+    }
+    this.setState({
+      ...this.state,
+      readingPositions: { ...this.state.readingPositions, [key]: position },
+    });
+    return position;
   }
 
   addGroup(groupId: string): void {

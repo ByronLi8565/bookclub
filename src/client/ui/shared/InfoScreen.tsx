@@ -1,46 +1,43 @@
+import { useState } from "react";
+import type { InfoCardPage } from "../../info/infoCards.ts";
 import { infoCards } from "../../info/infoCards.ts";
 import { noteHeading } from "../../notes/render.ts";
 import { NoteCardView } from "../notes/NoteThread.tsx";
+import { Modal, ModalPagerTabs } from "./Modal.tsx";
 
 const EMPTY_REFS = new Map<number, string>();
+const PAGES: { id: InfoCardPage; label: string; empty: string }[] = [
+  { id: "info", label: "INFO", empty: "no info cards yet" },
+  { id: "release", label: "RELEASE LOG", empty: "no release cards yet" },
+];
 
 export function InfoScreen({ onClose }: { onClose: () => void }): React.ReactElement {
-  return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal home-info-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="home-info-title"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong id="home-info-title">RELEASE LOG</strong>
-          <button type="button" onClick={onClose} aria-label="close info" title="Close">
-            ✕
-          </button>
-        </div>
+  const [page, setPage] = useState<InfoCardPage>("info");
+  const activePage = PAGES.find((p) => p.id === page) ?? PAGES[0];
+  const cards = infoCards.filter((card) => card.page === page);
 
-        <div className="modal-body note-panel home-info-cards">
-          {infoCards.length === 0 ? (
-            <p className="home-info-empty">no info cards yet</p>
-          ) : (
-            <ul>
-              {infoCards.map((card, index) => (
-                <li key={card.path} title={card.title}>
-                  <NoteCardView
-                    seq={card.seq ?? index + 1}
-                    title={noteHeading(card.author, "posted", card.date)}
-                    body={card.body}
-                    refs={EMPTY_REFS}
-                    onReference={() => {}}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+  return (
+    <Modal title={activePage.label} className="home-info-panel" onClose={onClose}>
+      <div className="modal-body note-panel home-info-cards">
+        {cards.length === 0 ? (
+          <p className="home-info-empty">{activePage.empty}</p>
+        ) : (
+          <ul>
+            {cards.map((card, index) => (
+              <li key={card.path} title={card.title}>
+                <NoteCardView
+                  seq={index + 1}
+                  title={noteHeading(card.author, "posted", card.date)}
+                  body={card.body}
+                  refs={EMPTY_REFS}
+                  onReference={() => {}}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-    </div>
+      <ModalPagerTabs tabs={PAGES} active={page} onChange={setPage} className="settings-tabs" />
+    </Modal>
   );
 }

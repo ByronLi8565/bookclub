@@ -37,13 +37,21 @@
     left: 10%;
   }
 
+  /* Let the content use the full width of the card (left-aligned) instead of
+     being squeezed into a narrow centered column. */
   .home-main {
-    left: -10px;
+    left: 0;
     right: 0;
     width: auto;
-    align-items: center;
-    text-align: center;
-    padding: 0 24px;
+    align-items: flex-start;
+    text-align: left;
+    padding: 0 32px;
+  }
+
+  /* Pull the info button out of the card and into the very top-right corner. */
+  .home-info-button {
+    top: 14px;
+    right: 14px;
   }
 
   .home-info-panel {

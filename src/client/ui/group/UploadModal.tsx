@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { BookUpload, InspectedBook } from "../../groups/useBookUpload.ts";
 import type { SourceCapabilities, SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { Loading } from "../shared/Loading.tsx";
+import { Modal } from "../shared/Modal.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
 
 interface InfoRow {
@@ -101,108 +102,94 @@ export function UploadModal({
   const inspected = upload.inspected;
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal modal--upload"
-        role="dialog"
-        aria-modal="true"
-        aria-label="add a book"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong>add a book</strong>
-          <button type="button" onClick={onClose} aria-label="close" title="Close">
-            ✕
+    <Modal title="add a book" className="modal--upload" onClose={onClose}>
+      <div className="modal-body upload-body">
+        <label
+          className={dragging ? "upload-drop is-dragging" : "upload-drop"}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+        >
+          {inspected?.metadata.cover ? (
+            <img className="upload-cover" src={inspected.metadata.cover} alt="" />
+          ) : (
+            <UploadIcon />
+          )}
+          <span className="upload-drop-label">
+            {inspected ? inspected.file.name : "attach book here"}
+          </span>
+          <span className="upload-drop-hint">supported filetypes: pdf, epub</span>
+          <input
+            type="file"
+            accept={ACCEPT}
+            disabled={upload.busy}
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void upload.select(f);
+
+              e.target.value = "";
+            }}
+          />
+        </label>
+
+        {upload.error && <p className="upload-error">{upload.error}</p>}
+
+        {upload.status === "checking" && (
+          <div className="upload-checking">
+            <Loading className="loading--inline" progress={upload.progress} />
+            <span>checking whether highlights will work…</span>
+          </div>
+        )}
+
+        {inspected && (
+          <div className="upload-info">
+            <h2 className="upload-info-head">upload info</h2>
+            <dl className="upload-info-table">
+              {infoRows(inspected).map((row, i) => (
+                <div className="upload-info-row" key={`${row.label}-${i}`}>
+                  <dt>{row.label}</dt>
+                  <dd className={row.status ? `upload-status--${row.status}` : undefined}>
+                    {row.editable ? (
+                      <RenamableText
+                        value={row.value}
+                        onRename={(value) => {
+                          const next = value.trim() || null;
+                          if (row.editable === "title") upload.updateMetadata({ title: next });
+                          else upload.updateMetadata({ author: next });
+                        }}
+                        allowEmpty
+                        placeholder={row.placeholder}
+                        title={`Double-click to edit ${row.label.toLowerCase()}`}
+                        ariaLabel={row.label.toLowerCase()}
+                        inputClassName="upload-info-edit"
+                      />
+                    ) : (
+                      row.value
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+
+        <div className="upload-actions">
+          <button
+            type="button"
+            className="primary upload-submit"
+            disabled={!upload.canUpload || upload.busy}
+            onClick={() => void onConfirm()}
+            title="Upload book"
+          >
+            {upload.status === "uploading" ? "uploading…" : "upload"}
           </button>
         </div>
-        <div className="modal-body upload-body">
-          <label
-            className={dragging ? "upload-drop is-dragging" : "upload-drop"}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-          >
-            {inspected?.metadata.cover ? (
-              <img className="upload-cover" src={inspected.metadata.cover} alt="" />
-            ) : (
-              <UploadIcon />
-            )}
-            <span className="upload-drop-label">
-              {inspected ? inspected.file.name : "attach book here"}
-            </span>
-            <span className="upload-drop-hint">supported filetypes: pdf, epub</span>
-            <input
-              type="file"
-              accept={ACCEPT}
-              disabled={upload.busy}
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void upload.select(f);
-
-                e.target.value = "";
-              }}
-            />
-          </label>
-
-          {upload.error && <p className="upload-error">{upload.error}</p>}
-
-          {upload.status === "checking" && (
-            <div className="upload-checking">
-              <Loading className="loading--inline" progress={upload.progress} />
-              <span>checking whether highlights will work…</span>
-            </div>
-          )}
-
-          {inspected && (
-            <div className="upload-info">
-              <h2 className="upload-info-head">upload info</h2>
-              <dl className="upload-info-table">
-                {infoRows(inspected).map((row, i) => (
-                  <div className="upload-info-row" key={`${row.label}-${i}`}>
-                    <dt>{row.label}</dt>
-                    <dd className={row.status ? `upload-status--${row.status}` : undefined}>
-                      {row.editable ? (
-                        <RenamableText
-                          value={row.value}
-                          onRename={(value) => {
-                            const next = value.trim() || null;
-                            if (row.editable === "title") upload.updateMetadata({ title: next });
-                            else upload.updateMetadata({ author: next });
-                          }}
-                          allowEmpty
-                          placeholder={row.placeholder}
-                          title={`Double-click to edit ${row.label.toLowerCase()}`}
-                          ariaLabel={row.label.toLowerCase()}
-                          inputClassName="upload-info-edit"
-                        />
-                      ) : (
-                        row.value
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          )}
-
-          <div className="upload-actions">
-            <button
-              type="button"
-              className="primary upload-submit"
-              disabled={!upload.canUpload || upload.busy}
-              onClick={() => void onConfirm()}
-              title="Upload book"
-            >
-              {upload.status === "uploading" ? "uploading…" : "upload"}
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

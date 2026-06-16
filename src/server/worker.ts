@@ -3,6 +3,7 @@ import { Hono, type Context } from "hono";
 import type { User as AuthUser } from "./agents/AuthAgent.ts";
 import type { Env } from "./env.ts";
 import { registerGroupRoutes } from "./routes/groupRoutes.ts";
+import { registerUserRoutes } from "./routes/userRoutes.ts";
 import { clearedCookie, currentIdentity, sessionCookie } from "./auth/cookies.ts";
 import { normalizeEmail, readJson } from "./util/http.ts";
 import { signSession, SESSION_TTL_MS } from "./auth/session.ts";
@@ -75,6 +76,7 @@ app.get("/auth/me", async (c) => {
   return c.json({ user: { id: me.id, email: me.email, name: me.name } });
 });
 
+registerUserRoutes(app);
 registerGroupRoutes(app);
 
 const noteGate = async (c: Context<{ Bindings: Env }>): Promise<Response> => {

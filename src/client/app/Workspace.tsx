@@ -13,8 +13,9 @@ import { InviteModal } from "../ui/group/InviteModal.tsx";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
 import { MobilePager, type Pane } from "../ui/shared/MobilePager.tsx";
 import { SplitPane } from "../ui/shared/SplitPane.tsx";
-import { spawnToast, showSyncStatusToast } from "../ui/shared/toast/store.ts";
+import { spawnToast, showSyncStatusToast } from "../ui/shared/toast/toastStore.ts";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
+import { useDelayedFlag } from "../ui/shared/hooks/useDelayedFlag.ts";
 import { useIsMobile } from "../ui/shared/hooks/useIsMobile.ts";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
 import type { NoteRefs } from "../ui/notes/NoteThread.tsx";
@@ -37,6 +38,7 @@ export interface WorkspaceProps {
   onTitleParsed: (sourceId: string, title: string) => void;
   initialReadingPosition?: SourceReadingPosition | null;
   onReadingPosition?: (sourceId: string, position: SourceReadingPosition) => void;
+  onSyncReadingPosition?: (sourceId: string) => Effect.Effect<boolean, unknown>;
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
@@ -68,6 +70,7 @@ export function Workspace({
   onTitleParsed,
   initialReadingPosition = null,
   onReadingPosition = () => {},
+  onSyncReadingPosition = () => Effect.succeed(false),
   books,
   selectedSourceId,
   onSelectBook,
@@ -105,10 +108,16 @@ export function Workspace({
     () => restoreAfterSearchClearRef.current(),
     initialReadingPosition,
   );
+  const readerPending = file === null || !view.ready;
+  const showReaderLoading = useDelayedFlag(readerPending, 300);
 
   useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
   useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: view.ready, preventDefault: true });
+  useHotkey("Mod+S", () => void Effect.runPromise(onSyncReadingPosition(sourceId)), {
+    enabled: view.ready,
+    preventDefault: true,
+  });
   useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open });
 
   const drawnRef = useRef<Map<string, HighlightAnchor>>(new Map());
@@ -342,8 +351,8 @@ export function Workspace({
         const reader = (
           <Reader
             view={view}
-            hasFile={file !== null}
-            loading={file === null || !view.ready}
+            hasFile
+            loading={showReaderLoading}
             floatingNote={!isMobile}
             books={books}
             selectedSourceId={selectedSourceId}

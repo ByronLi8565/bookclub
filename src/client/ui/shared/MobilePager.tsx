@@ -1,7 +1,22 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { useSwipeable } from "react-swipeable";
 
 export type Pane = "reader" | "notes";
+
+// A pane swipe must not steal a gesture that is panning a scrollable child
+// (notably a zoomed-in PDF, which scrolls horizontally). Walk up from the touch
+// target and bail if any ancestor can actually scroll on the x-axis.
+function startedOnHorizontalScroller(target: EventTarget | null): boolean {
+  let el = target instanceof Element ? target : null;
+  while (el) {
+    if (el.scrollWidth - el.clientWidth > 1) {
+      const overflowX = getComputedStyle(el).overflowX;
+      if (overflowX === "auto" || overflowX === "scroll") return true;
+    }
+    el = el.parentElement;
+  }
+  return false;
+}
 
 export function MobilePager({
   pane,
@@ -19,10 +34,20 @@ export function MobilePager({
   selecting: boolean;
   onAddNote: () => void;
 }) {
+  const lockedRef = useRef(false);
   const swipe = useSwipeable({
-    onSwipedLeft: () => onPane("notes"),
-    onSwipedRight: () => onPane("reader"),
-    delta: 60,
+    onSwipeStart: (e) => {
+      lockedRef.current = startedOnHorizontalScroller(e.event.target);
+    },
+    onSwipedLeft: () => {
+      if (!lockedRef.current) onPane("notes");
+    },
+    onSwipedRight: () => {
+      if (!lockedRef.current) onPane("reader");
+    },
+    delta: 100,
+    //Swipes have a max duration
+    swipeDuration: 250,
     trackMouse: false,
   });
 

@@ -1,5 +1,6 @@
 import type { RosterEntry } from "../../groups/api.ts";
 import type { OnlinePeer } from "../../notes/agent.ts";
+import { Modal } from "../shared/Modal.tsx";
 
 interface Person {
   id: string;
@@ -35,43 +36,29 @@ export function PresenceModal({
   const onlineCount = people.filter((p) => p.isOnline).length;
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal modal--invite"
-        role="dialog"
-        aria-modal="true"
-        aria-label="who's online"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong>online now</strong>
-          <button type="button" onClick={onClose} aria-label="close" title="Close">
-            ✕
-          </button>
-        </div>
-        <div className="modal-body">
-          <div className="invite-people">
-            <p className="invite-people-head">
-              {onlineCount} of {people.length} online
-            </p>
-            <ul className="invite-people-list">
-              {people.map((p) => (
-                <li key={p.id} className={p.isOnline ? "" : "person--offline"}>
-                  <span className="invite-avatar">
-                    {p.name.slice(0, 1).toUpperCase()}
-                    <span className={`presence-pip presence-pip--${p.isOnline ? "on" : "off"}`} />
-                  </span>
-                  <span className="invite-person-text">
-                    <span className="invite-person-name truncate">{p.name}</span>
-                    {p.email && <span className="invite-person-email truncate">{p.email}</span>}
-                  </span>
-                  <span className="invite-person-role">{p.isOnline ? p.role : "offline"}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+    <Modal title="online now" className="modal--invite" onClose={onClose}>
+      <div className="modal-body">
+        <div className="invite-people">
+          <p className="invite-people-head">
+            {onlineCount} of {people.length} online
+          </p>
+          <ul className="invite-people-list">
+            {people.map((p) => (
+              <li key={p.id} className={p.isOnline ? "" : "person--offline"}>
+                <span className="invite-avatar">
+                  {p.name.slice(0, 1).toUpperCase()}
+                  <span className={`presence-pip presence-pip--${p.isOnline ? "on" : "off"}`} />
+                </span>
+                <span className="invite-person-text">
+                  <span className="invite-person-name truncate">{p.name}</span>
+                  {p.email && <span className="invite-person-email truncate">{p.email}</span>}
+                </span>
+                <span className="invite-person-role">{p.isOnline ? p.role : "offline"}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

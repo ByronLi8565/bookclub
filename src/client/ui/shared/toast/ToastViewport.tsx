@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { dismissToast, subscribe, type Toast } from "./store.ts";
+import { dismissToast, subscribe, type Toast } from "./toastStore.ts";
 
 export function ToastViewport() {
   const [visible, setVisible] = useState<Toast[]>([]);

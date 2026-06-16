@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Loading } from "../shared/Loading.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
+import { DropdownMenu, type DropdownItem } from "../shared/DropdownMenu.tsx";
 import type { SourceSummary } from "../../../shared/types/sources.ts";
 import type { SourceView } from "./useSourceView.ts";
 
@@ -187,18 +188,6 @@ function BookMenu({
   onRenameBook: (sourceId: string, title: string) => void;
   onAddBook: (() => void) | null;
 }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [open]);
-
   const active = books.find((b) => b.id === selectedSourceId) ?? null;
   const label = active ? bookLabel(active, activeTitle, true) : (activeTitle ?? "");
 
@@ -221,58 +210,42 @@ function BookMenu({
 
   if (!interactive) return title;
 
+  const items: DropdownItem[] = books.map((book) => ({
+    key: book.id,
+    label: bookLabel(book, activeTitle, book.id === selectedSourceId),
+    title: `Open ${bookLabel(book, activeTitle, book.id === selectedSourceId)}`,
+    checked: book.id === selectedSourceId,
+    className: book.id === selectedSourceId ? "book-menu-item is-active" : "book-menu-item",
+    onSelect: () => onSelectBook(book.id),
+  }));
+  if (onAddBook) {
+    items.push({
+      key: "add-book",
+      label: "+ Add a book",
+      title: "Add a book",
+      itemClassName: "book-menu-add",
+      onSelect: onAddBook,
+    });
+  }
+
   return (
-    <div className="book-menu" ref={ref}>
-      {title}
-      <button
-        type="button"
-        className="book-menu-arrow"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="switch book"
-        title="Switch book"
-        onClick={() => setOpen((v) => !v)}
-      >
-        ▾
-      </button>
-      {open && (
-        <ul className="book-menu-list" role="menu">
-          {books.map((book) => (
-            <li key={book.id} role="none">
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={book.id === selectedSourceId}
-                className={
-                  book.id === selectedSourceId ? "book-menu-item is-active" : "book-menu-item"
-                }
-                title={`Open ${bookLabel(book, activeTitle, book.id === selectedSourceId)}`}
-                onClick={() => {
-                  onSelectBook(book.id);
-                  setOpen(false);
-                }}
-              >
-                {bookLabel(book, activeTitle, book.id === selectedSourceId)}
-              </button>
-            </li>
-          ))}
-          {onAddBook && (
-            <li role="none" className="book-menu-add">
-              <button
-                type="button"
-                className="book-menu-item"
-                title="Add a book"
-                onClick={() => {
-                  onAddBook();
-                  setOpen(false);
-                }}
-              >
-                + Add a book
-              </button>
-            </li>
-          )}
-        </ul>
+    <DropdownMenu
+      items={items}
+      renderTrigger={({ open, toggle }) => (
+        <button
+          type="button"
+          className="book-menu-arrow"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label="switch book"
+          title="Switch book"
+          onClick={toggle}
+        >
+          ▾
+        </button>
       )}
-    </div>
+    >
+      {title}
+    </DropdownMenu>
   );
 }

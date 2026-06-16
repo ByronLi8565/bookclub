@@ -95,14 +95,9 @@ test("pinching out zooms the PDF content without changing the page", async ({ pa
   expect(await readPage(page)).toBe(startPage);
 });
 
-// Reproduces the on-device failure observed via Safari Web Inspector: the PDF
-// canvas paints, but the separately-chunked pdf.js text layer (pdf_viewer.mjs)
-// fails to load, so the reader was left stuck at ready=false — every control
-// (zoom, page-turn, pinch) disabled even though the page is visible. The reader
-// must stay fully interactive for viewing/zoom/paging when the text layer is
-// unavailable; only selection/search degrade. Blocking that request here makes
-// WebKit emulation exhibit the same condition as the iPhone.
-test("reader stays interactive when the pdf.js text layer chunk fails to load", async ({ page }) => {
+test("reader stays interactive when the pdf.js text layer chunk fails to load", async ({
+  page,
+}) => {
   await page.route(/pdfjs-dist_web_pdf.*viewer.*\.js/u, (route) => route.abort());
 
   await page.goto(HARNESS);
@@ -117,4 +112,38 @@ test("reader stays interactive when the pdf.js text layer chunk fails to load", 
 
   await page.getByTitle("Increase text size").click();
   await expect.poll(() => readZoom(page)).toBeGreaterThan(100);
+});
+
+const scrollTop = (page: Page) => page.locator(".pdf-scroller").evaluate((el) => el.scrollTop);
+
+test("turning to a new page lands at the top, not the previous page's offset", async ({ page }) => {
+  await openPdf(page);
+
+  // Zoom in so the page is taller than the viewport and can be scrolled.
+  for (let i = 0; i < 3; i++) await page.getByTitle("Increase text size").click();
+  await expect.poll(() => readZoom(page)).toBeGreaterThan(100);
+
+  // Jump to the bottom of the current page so the next edge-tap turns the page
+  // (rather than smart-scrolling within it).
+  await page.locator(".pdf-scroller").evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect.poll(() => scrollTop(page)).toBeGreaterThan(50);
+  const bottom = await scrollTop(page);
+  const before = (await readPage(page))!;
+
+  const size = page.viewportSize()!;
+  await page.touchscreen.tap(size.width - 10, size.height / 2);
+
+  await expect.poll(() => readPage(page)).toBeGreaterThan(before);
+  // The freshly-entered page must rest at its text-top
+  await expect.poll(() => scrollTop(page)).toBeLessThan(bottom - 20);
+});
+
+test("the PDF scroller allows tap-and-drag panning in both axes", async ({ page }) => {
+  await openPdf(page);
+  const touchAction = await page
+    .locator(".pdf-scroller")
+    .evaluate((el) => getComputedStyle(el).touchAction);
+  expect(touchAction).toBe("pan-x pan-y");
 });

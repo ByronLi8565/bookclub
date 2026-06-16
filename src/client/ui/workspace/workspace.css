@@ -49,7 +49,8 @@
 }
 
 .settings-item-control {
-  flex: 0 0 240px;
+  flex: 0 0 40%;
+  max-width: 40%;
   display: flex;
   justify-content: flex-end;
 }
@@ -70,6 +71,7 @@
   width: 100%;
   font: inherit;
   font-size: var(--font-xs);
+  text-align: left;
   background: var(--white);
   color: var(--black);
   border: var(--line);
@@ -82,6 +84,11 @@
   position: relative;
   max-width: none;
   width: 100%;
+}
+
+.settings-item-control .settings-dropdown {
+  flex: 0 0 100%;
+  max-width: none;
 }
 
 .settings-dropdown-trigger {

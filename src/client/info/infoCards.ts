@@ -6,11 +6,14 @@ interface RawInfoCard {
 export interface InfoCard {
   path: string;
   seq: number | null;
+  page: InfoCardPage;
   title: string;
   author: string;
   date: string;
   body: string;
 }
+
+export type InfoCardPage = "info" | "release";
 
 const rawInfoCards = import.meta.glob("../../../info_cards/*.md", {
   query: "?raw",
@@ -26,18 +29,23 @@ function parseInfoCard({ path, raw }: RawInfoCard): InfoCard {
   const [headerBlock = "", ...bodyParts] = raw.replaceAll("\r\n", "\n").split(/\n\s*\n/u);
   const headers = new Map<string, string>();
   for (const line of headerBlock.split("\n")) {
-    const match = /^(TITLE|AUTHOR|DATE):\s*(.*)$/u.exec(line.trim());
+    const match = /^(TITLE|AUTHOR|DATE|PAGE):\s*(.*)$/u.exec(line.trim());
     if (match) headers.set(match[1], match[2].trim());
   }
 
   return {
     path,
     seq: infoSeq(path),
+    page: parsePage(headers.get("PAGE")),
     title: headers.get("TITLE") || "Untitled",
     author: headers.get("AUTHOR") || "Unknown",
     date: headers.get("DATE") || "Undated",
     body: unquoteBody(bodyParts.join("\n\n").trim()),
   };
+}
+
+function parsePage(value: string | undefined): InfoCardPage {
+  return value === "info" ? "info" : "release";
 }
 
 function infoSeq(path: string): number | null {

@@ -11,7 +11,7 @@ import {
   type SearchMatch,
   type SourceReader,
 } from "../../notes/highlights.ts";
-import { useReaderPrefs } from "../../settings/readerPrefs.ts";
+import { useReaderPrefs } from "../../settings/userPrefs.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import {
   destroyPdf,
@@ -77,18 +77,19 @@ function boundingRect(rects: DOMRect[]): DOMRect {
   return new DOMRect(left, top, right - left, bottom - top);
 }
 
+function bumpSeq(ref: { current: number }): void {
+  ref.current += 1;
+}
+
 export function usePdfSourceView(
   file: File | null,
   onSelect: OnSelect,
-  onSwipe?: (dir: "left" | "right") => void,
   onSearchHighlightCleared?: () => void,
   initialPosition?: SourceReadingPosition | null,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
-  const onSwipeRef = useRef(onSwipe);
-  onSwipeRef.current = onSwipe;
   const { smartArrows } = useReaderPrefs();
   const smartArrowsRef = useRef(smartArrows);
   smartArrowsRef.current = smartArrows;
@@ -257,83 +258,130 @@ export function usePdfSourceView(
     [clearFlash],
   );
 
-  const renderPage = useCallback(async () => {
-    const doc = docRef.current;
-    const wrap = wrapRef.current;
-    const canvas = canvasRef.current;
-    if (!doc || !wrap || !canvas) return;
-
-    const seq = ++renderSeqRef.current;
-    const pageNum = pageRef.current;
-    const page = await doc.getPage(pageNum);
-    if (seq !== renderSeqRef.current) return;
-
-    const base = page.getViewport({ scale: 1 });
-    const fit = (wrap.parentElement?.clientWidth ?? base.width) / base.width;
-    const scale = fit * (fontSizeRef.current / 100);
-    const viewport = page.getViewport({ scale });
-    const dpr = window.devicePixelRatio || 1;
-
-    wrap.style.width = `${viewport.width}px`;
-    wrap.style.height = `${viewport.height}px`;
-    // The text-layer spans size their glyphs off this CSS var; set it on the
-    // page so the builder's freshly-created layer inherits it.
-    wrap.style.setProperty("--total-scale-factor", String(scale));
-    wrap.style.setProperty("--scale-factor", String(scale));
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = `${viewport.width}px`;
-    canvas.style.height = `${viewport.height}px`;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-    if (seq !== renderSeqRef.current) return;
-
-    // The page is now painted and viewable. Reflect its location and repaint
-    // any highlights immediately — none of that depends on the text layer.
-    repaintHighlights();
-    repaintUnderline();
-    setLocation({
-      page: pageNum,
-      total: doc.numPages,
-      percentage: doc.numPages > 0 ? pageNum / doc.numPages : 0,
-      atStart: pageNum <= 1,
-      atEnd: pageNum >= doc.numPages,
-    });
-    publishPosition();
-
-    // Render the text layer through pdf.js's TextLayerBuilder rather than the
-    // bare TextLayer class. The builder appends the `.endOfContent` selection
-    // sink and registers pdf.js's global selection handler, which is what makes
-    // touch/drag selection grab individual words instead of the whole page.
-    //
-    // This lives in a separate dynamically-imported chunk (pdf_viewer.mjs). If
-    // it fails to load or render (e.g. the chunk 404/403s on a deploy), the page
-    // must still be fully usable for viewing, zoom and paging — text selection
-    // and in-page search highlighting are the only casualties. So a failure here
-    // is swallowed and must never reject renderPage(): rejecting would leave the
-    // reader stuck with ready=false, disabling every control even though the PDF
-    // is visible on screen.
-    try {
-      const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
-      if (seq !== renderSeqRef.current) return;
-      const builder = new TextLayerBuilderCtor({ pdfPage: page });
-      await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
-      if (seq !== renderSeqRef.current) {
-        builder.cancel();
-        builder.div.remove();
-        return;
+  // Build (but do not display) the text layer for a page, then swap it into the
+  // page box once ready. Lives in a separate dynamically-imported chunk
+  // (pdf_viewer.mjs); if it 404/403s on a deploy the page must still be fully
+  // usable for viewing/zoom/paging — selection and in-page search are the only
+  // casualties — so failures here are swallowed and never propagate.
+  const renderTextLayer = useCallback(
+    async (page: Awaited<ReturnType<PDFDocumentProxy["getPage"]>>, viewport: unknown, seq: number) => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      try {
+        const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
+        if (seq !== renderSeqRef.current) return;
+        const builder = new TextLayerBuilderCtor({ pdfPage: page });
+        await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
+        if (seq !== renderSeqRef.current) {
+          builder.cancel();
+          builder.div.remove();
+          return;
+        }
+        textLayerBuilderRef.current?.cancel();
+        textLayerBuilderRef.current?.div.remove();
+        textLayerBuilderRef.current = builder;
+        textLayerRef.current = builder.div;
+        wrap.appendChild(builder.div);
+      } catch (error) {
+        console.error("pdf text layer unavailable; selection and search disabled", error);
       }
-      textLayerBuilderRef.current?.cancel();
-      textLayerBuilderRef.current?.div.remove();
-      textLayerBuilderRef.current = builder;
-      textLayerRef.current = builder.div;
-      wrap.appendChild(builder.div);
-    } catch (error) {
-      console.error("pdf text layer unavailable; selection and search disabled", error);
-    }
-  }, [repaintHighlights, repaintUnderline, publishPosition]);
+    },
+    [],
+  );
+
+  // `doubleBuffer` renders the new scale into a *detached* canvas and swaps it
+  // in only once fully painted, instead of resizing/blanking the on-screen
+  // canvas in place. It's used for the pinch commit, where the live page is
+  // still CSS-scaled and must stay untouched until the crisp bitmap is ready —
+  // otherwise the box resizes (and the canvas blanks) under the transform,
+  // flashing a ballooned/empty frame. This mirrors pdf.js, which renders the
+  // next scale off-screen and swaps when ready. For +/- and page turns the
+  // in-place path is kept: it resizes the page box immediately, so layout
+  // (scrollHeight, page-turn scroll math) stays correct with no deferral.
+  const renderPage = useCallback(
+    async (opts?: { doubleBuffer?: boolean }) => {
+      const doc = docRef.current;
+      const wrap = wrapRef.current;
+      if (!doc || !wrap) return;
+
+      const seq = ++renderSeqRef.current;
+      const pageNum = pageRef.current;
+      const page = await doc.getPage(pageNum);
+      if (seq !== renderSeqRef.current) return;
+
+      const base = page.getViewport({ scale: 1 });
+      const fit = (wrap.parentElement?.clientWidth ?? base.width) / base.width;
+      const scale = fit * (fontSizeRef.current / 100);
+      const viewport = page.getViewport({ scale });
+      const dpr = window.devicePixelRatio || 1;
+      const applyWrapSize = () => {
+        wrap.style.width = `${viewport.width}px`;
+        wrap.style.height = `${viewport.height}px`;
+        // The text-layer spans size their glyphs off this CSS var.
+        wrap.style.setProperty("--total-scale-factor", String(scale));
+        wrap.style.setProperty("--scale-factor", String(scale));
+      };
+
+      if (opts?.doubleBuffer) {
+        const next = document.createElement("canvas");
+        next.width = Math.floor(viewport.width * dpr);
+        next.height = Math.floor(viewport.height * dpr);
+        next.style.width = `${viewport.width}px`;
+        next.style.height = `${viewport.height}px`;
+        const ctx = next.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
+        if (seq !== renderSeqRef.current) return;
+        // Atomic swap: replace the visible canvas and resize the box together,
+        // so the browser only ever composites the old or the final frame. The
+        // caller clears its transform / fixes scroll in the same microtask right
+        // after this resolves — hence the text layer below must NOT be awaited
+        // here (awaiting it would delay that reconciliation and flash).
+        const prev = canvasRef.current;
+        if (prev?.parentNode === wrap) wrap.replaceChild(next, prev);
+        else wrap.insertBefore(next, wrap.firstChild);
+        if (prev) {
+          prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
+        }
+        canvasRef.current = next;
+        applyWrapSize();
+      } else {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        applyWrapSize();
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        if (seq !== renderSeqRef.current) return;
+      }
+
+      repaintHighlights();
+      repaintUnderline();
+      setLocation({
+        page: pageNum,
+        total: doc.numPages,
+        percentage: doc.numPages > 0 ? pageNum / doc.numPages : 0,
+        atStart: pageNum <= 1,
+        atEnd: pageNum >= doc.numPages,
+      });
+      publishPosition();
+
+      // Fire-and-forget so renderPage resolves at the swap (see above).
+      void renderTextLayer(page, viewport, seq);
+    },
+    [repaintHighlights, repaintUnderline, publishPosition, renderTextLayer],
+  );
+
+  // Latest renderPage for use inside imperative touch handlers without making
+  // the pinch effect re-subscribe on every renderPage identity change.
+  const renderPageRef = useRef(renderPage);
+  renderPageRef.current = renderPage;
 
   const goToPage = useCallback(
     async (pageNum: number, afterRender: () => Promise<void> = scrollToTextTop): Promise<void> => {
@@ -348,6 +396,8 @@ export function usePdfSourceView(
       setSelection(null);
       pendingRef.current = null;
       clearFlash();
+      // Land at the top of the freshly-entered page.
+      if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
       await renderPage();
       await afterRender();
       publishPosition();
@@ -465,7 +515,7 @@ export function usePdfSourceView(
 
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
-      renderSeqRef.current++;
+      bumpSeq(renderSeqRef);
       clearFlash();
       textLayerBuilderRef.current?.cancel();
       textLayerBuilderRef.current = null;
@@ -491,9 +541,6 @@ export function usePdfSourceView(
     initialPdfPercentage,
   ]);
 
-  // Native selection drives everything: the browser paints the live highlight
-  // (via .textLayer ::selection) and we just read the resulting range to place
-  // the confirm popup and remember what to capture on commit.
   useEffect(() => {
     const clear = () => {
       if (!pendingRef.current) return;
@@ -505,11 +552,6 @@ export function usePdfSourceView(
       const wrap = wrapRef.current;
       if (!textLayer || !wrap) return;
       const sel = window.getSelection();
-      // Only a genuinely empty/collapsed selection dismisses the popup. Every
-      // other case refreshes it or is ignored, so transient selectionchange
-      // churn — notably pdf.js relocating its `.endOfContent` sink to a boundary
-      // mid-drag, which leaves the range endpoints on non-text nodes — can't make
-      // the "Add note" button flicker away while text is still selected.
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return clear();
       const raw = sel.getRangeAt(0);
       if (!raw.intersectsNode(textLayer)) return;
@@ -613,51 +655,110 @@ export function usePdfSourceView(
         (t[0]?.clientX ?? 0) - (t[1]?.clientX ?? 0),
         (t[0]?.clientY ?? 0) - (t[1]?.clientY ?? 0),
       );
+    const clampZoom = (z: number) =>
+      Math.min(READER_NAV.maxZoom, Math.max(READER_NAV.minZoom, z));
+    const midpoint = (t: TouchList) => ({
+      x: ((t[0]?.clientX ?? 0) + (t[1]?.clientX ?? 0)) / 2,
+      y: ((t[0]?.clientY ?? 0) + (t[1]?.clientY ?? 0)) / 2,
+    });
+
+    // Pinch state. We deliberately do NOT re-rasterize the PDF on every move —
+    // that per-frame canvas render is what made pinch choppy and lag behind the
+    // fingers. Instead, following pdf.js's TouchManager/PDFViewer approach, we
+    // apply a cheap GPU `transform: scale()` to the already-rendered page during
+    // the gesture (canvas + text/highlight layers scale together, anchored at
+    // the pinch midpoint via transform-origin) and re-render crisply exactly
+    // once when the pinch ends, fixing up scroll so the pinched point stays put.
+    let pinching = false;
     let pinchStartDist = 0;
     let pinchStartZoom = 100;
-    // Pinch-zoom is driven entirely by the raw two-finger touch geometry, on
-    // every platform including iOS. iOS Safari ignores `user-scalable=no` and
-    // pinch-zooms the *whole viewport* unless the two-finger `touchmove` is
-    // preventDefault()-ed — the native zoom is the default action of the touch
-    // sequence, not of the proprietary `gesture*` events. Once those touchmoves
-    // are prevented iOS stops firing `gesture*` anyway, so an earlier attempt to
-    // zoom from `GestureEvent.scale` could never also suppress the viewport
-    // zoom (preventing the touches that would zoom the page also killed the
-    // gesture events). Computing the scale ourselves from finger distance keeps
-    // one code path that both suppresses the native zoom and zooms only the PDF.
-    //
-    // Single-finger touches are left entirely to the browser so native text
-    // selection (long-press to pick a word, drag the handles to extend) works.
+    let liveZoom = 100;
+    let focalX = 0;
+    let focalY = 0;
+    let focalFracX = 0.5;
+    let focalFracY = 0.5;
+
+    const beginPinch = (t: TouchList) => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      pinchStartDist = dist(t) || 1;
+      pinchStartZoom = fontSizeRef.current;
+      liveZoom = pinchStartZoom;
+      const mid = midpoint(t);
+      focalX = mid.x;
+      focalY = mid.y;
+      const r = wrap.getBoundingClientRect();
+      focalFracX = r.width > 0 ? (focalX - r.left) / r.width : 0.5;
+      focalFracY = r.height > 0 ? (focalY - r.top) / r.height : 0.5;
+      wrap.style.transformOrigin = `${focalX - r.left}px ${focalY - r.top}px`;
+      wrap.style.willChange = "transform";
+      pinching = true;
+    };
+
+    const commitPinch = async () => {
+      pinching = false;
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const clearTransform = () => {
+        wrap.style.transform = "";
+        wrap.style.transformOrigin = "";
+        wrap.style.willChange = "";
+      };
+      const clamped = Math.round(clampZoom(liveZoom));
+      if (clamped === fontSizeRef.current) {
+        clearTransform();
+        return;
+      }
+      const sRect = scroller.getBoundingClientRect();
+      const fx = focalX - sRect.left;
+      const fy = focalY - sRect.top;
+      setFontSizeState(clamped);
+      fontSizeRef.current = clamped;
+      // Re-render at the new scale off-screen and swap atomically, then drop the
+      // temporary transform and place the focal content point back under the
+      // fingers (fraction-based so it is robust to the auto-centering margins).
+      // Double-buffering keeps the live (CSS-scaled) page visible until the
+      // crisp bitmap is ready, so there is no flash at the end of the pinch.
+      await renderPageRef.current({ doubleBuffer: true });
+      clearTransform();
+      const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.scrollLeft = Math.min(
+        maxLeft,
+        Math.max(0, wrap.offsetLeft + focalFracX * wrap.offsetWidth - fx),
+      );
+      scroller.scrollTop = Math.min(
+        maxTop,
+        Math.max(0, wrap.offsetTop + focalFracY * wrap.offsetHeight - fy),
+      );
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
       e.preventDefault();
       e.stopPropagation();
-      pinchStartDist = dist(e.touches);
-      pinchStartZoom = fontSizeRef.current;
+      beginPinch(e.touches);
     };
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
       e.preventDefault();
       e.stopPropagation();
-      if (pinchStartDist <= 0) {
-        pinchStartDist = dist(e.touches);
-        pinchStartZoom = fontSizeRef.current;
+      const wrap = wrapRef.current;
+      if (!pinching || !wrap) {
+        beginPinch(e.touches);
         return;
       }
-      setFontSize((pinchStartZoom * dist(e.touches)) / pinchStartDist);
+      liveZoom = clampZoom((pinchStartZoom * dist(e.touches)) / pinchStartDist);
+      wrap.style.transform = `scale(${liveZoom / pinchStartZoom})`;
     };
     const onTouchEnd = (e: TouchEvent) => {
-      if (pinchStartDist > 0) e.stopPropagation();
-      if (e.touches.length < 2) pinchStartDist = 0;
+      if (!pinching) return;
+      e.stopPropagation();
+      if (e.touches.length < 2) void commitPinch();
     };
     const onTouchCancel = () => {
-      pinchStartDist = 0;
+      if (pinching) void commitPinch();
     };
-    // Defense in depth: should iOS still emit `gesture*` events (e.g. when a
-    // pinch begins before the second touch is seen as a `touchmove`), swallow
-    // them so they can't trigger a viewport zoom. We deliberately never read
-    // `GestureEvent.scale` here — the touch handlers above own the zoom — so the
-    // two paths can't fight over setFontSize.
     const swallowGesture = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
@@ -684,30 +785,6 @@ export function usePdfSourceView(
       scroller.removeEventListener("gestureend", swallowGesture, { capture: true });
     };
   }, [ready, setFontSize, publishPosition]);
-
-  useEffect(() => {
-    let startX = 0;
-    let multiTouch = false;
-    const host = containerRef.current;
-    if (!host) return;
-    const onStart = (e: TouchEvent) => {
-      multiTouch = e.touches.length > 1;
-      if (multiTouch) return;
-      startX = e.changedTouches[0]?.clientX ?? 0;
-    };
-    const onEnd = (e: TouchEvent) => {
-      if (multiTouch || e.touches.length > 0) return;
-      const dx = (e.changedTouches[0]?.clientX ?? 0) - startX;
-      if (Math.abs(dx) < 60) return;
-      onSwipeRef.current?.(dx < 0 ? "left" : "right");
-    };
-    host.addEventListener("touchstart", onStart);
-    host.addEventListener("touchend", onEnd);
-    return () => {
-      host.removeEventListener("touchstart", onStart);
-      host.removeEventListener("touchend", onEnd);
-    };
-  }, []);
 
   const reader = useMemo<SourceReader>(() => {
     const locateOnPage = (

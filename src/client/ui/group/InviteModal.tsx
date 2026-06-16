@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchGroup, getInviteLink, inviteToGroup, type RosterEntry } from "../../groups/api.ts";
 import { Loading } from "../shared/Loading.tsx";
-import { spawnToast } from "../shared/toast/store.ts";
+import { Modal } from "../shared/Modal.tsx";
+import { spawnToast } from "../shared/toast/toastStore.ts";
 
 export function InviteModal({
   groupRef,
@@ -72,88 +73,74 @@ export function InviteModal({
   const shownLink = link ? link.replace(/^https?:\/\//u, "") : "";
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal modal--invite"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`invite to ${displayName}`}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong>invite to {displayName}</strong>
-          <button type="button" onClick={onClose} aria-label="close" title="Close">
-            ✕
+    <Modal title={`invite to ${displayName}`} className="modal--invite" onClose={onClose}>
+      <div className="modal-body">
+        <form onSubmit={(e) => void onSendEmail(e)}>
+          <input
+            type="email"
+            placeholder="invite by email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy || email === ""}
+            title="Send invite"
+          >
+            send invite
           </button>
+        </form>
+
+        <div className="invite-people">
+          <p className="invite-people-head">People with access</p>
+          {membersLoading ? (
+            <Loading className="loading--invite-people" />
+          ) : (
+            <ul className="invite-people-list">
+              {members.map((m) => (
+                <li key={m.id}>
+                  <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
+                  <span className="invite-person-name truncate">{m.name}</span>
+                  <span className="invite-person-role">{m.role}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        <div className="modal-body">
-          <form onSubmit={(e) => void onSendEmail(e)}>
-            <input
-              type="email"
-              placeholder="invite by email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="primary"
-              disabled={busy || email === ""}
-              title="Send invite"
-            >
-              send invite
-            </button>
-          </form>
 
-          <div className="invite-people">
-            <p className="invite-people-head">People with access</p>
-            {membersLoading ? (
-              <Loading className="loading--invite-people" />
-            ) : (
-              <ul className="invite-people-list">
-                {members.map((m) => (
-                  <li key={m.id}>
-                    <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
-                    <span className="invite-person-name truncate">{m.name}</span>
-                    <span className="invite-person-role">{m.role}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="invite-share">
-            <p className="modal-note">Or share a link anyone can use to join:</p>
-            {linkLoading ? (
-              <Loading className="loading--invite-link" />
-            ) : (
-              <div className="invite-link">
-                <input type="text" readOnly value={shownLink} aria-label="invite link" />
-                <button
-                  type="button"
-                  className="invite-icon icon-button"
-                  onClick={() => void onCopy()}
-                  disabled={!link}
-                  aria-label="copy link"
-                  title={copied ? "Copied" : "Copy link"}
-                >
-                  {copied ? <CheckIcon /> : <CopyIcon />}
-                </button>
-                <button
-                  type="button"
-                  className="invite-icon icon-button"
-                  onClick={() => void onRotate()}
-                  disabled={busy}
-                  aria-label="regenerate link"
-                  title="Regenerate link"
-                >
-                  <RotateIcon />
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="invite-share">
+          <p className="modal-note">Or share a link anyone can use to join:</p>
+          {linkLoading ? (
+            <Loading className="loading--invite-link" />
+          ) : (
+            <div className="invite-link">
+              <input type="text" readOnly value={shownLink} aria-label="invite link" />
+              <button
+                type="button"
+                className="invite-icon icon-button"
+                onClick={() => void onCopy()}
+                disabled={!link}
+                aria-label="copy link"
+                title={copied ? "Copied" : "Copy link"}
+              >
+                {copied ? <CheckIcon /> : <CopyIcon />}
+              </button>
+              <button
+                type="button"
+                className="invite-icon icon-button"
+                onClick={() => void onRotate()}
+                disabled={busy}
+                aria-label="regenerate link"
+                title="Regenerate link"
+              >
+                <RotateIcon />
+              </button>
+            </div>
+          )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

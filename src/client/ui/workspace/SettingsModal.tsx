@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { cachedSourceSize, refreshSource } from "../../groups/sourceAccess.ts";
-import { setReaderPref, useReaderPrefs, type SmartArrows } from "../../settings/readerPrefs.ts";
+import {
+  setReaderPref,
+  useReaderPrefs,
+  type ReadingPositionOpenPolicy,
+  type SmartArrows,
+} from "../../settings/userPrefs.ts";
 import { Loading } from "../shared/Loading.tsx";
-import { spawnToast } from "../shared/toast/store.ts";
+import { DropdownMenu } from "../shared/DropdownMenu.tsx";
+import { Modal, ModalPagerTabs } from "../shared/Modal.tsx";
+import { spawnToast } from "../shared/toast/toastStore.ts";
 
 function SettingDropdown<T extends string>({
   value,
@@ -15,58 +22,36 @@ function SettingDropdown<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
 }): React.ReactElement {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown);
-    return () => document.removeEventListener("pointerdown", onDown);
-  }, [open]);
-
   const active = options.find((o) => o.value === value);
 
   return (
-    <div className="book-menu settings-dropdown" ref={ref}>
-      <button
-        type="button"
-        className="settings-action settings-dropdown-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        title={ariaLabel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span>{active?.label ?? value}</span>
-        <span className="book-menu-arrow" aria-hidden="true">
-          ▾
-        </span>
-      </button>
-      {open && (
-        <ul className="book-menu-list" role="menu">
-          {options.map((option) => (
-            <li key={option.value} role="none">
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={option.value === value}
-                className={option.value === value ? "book-menu-item is-active" : "book-menu-item"}
-                title={option.label}
-                onClick={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-              >
-                {option.label}
-              </button>
-            </li>
-          ))}
-        </ul>
+    <DropdownMenu
+      className="book-menu settings-dropdown"
+      items={options.map((option) => ({
+        key: option.value,
+        label: option.label,
+        title: option.label,
+        checked: option.value === value,
+        className: option.value === value ? "book-menu-item is-active" : "book-menu-item",
+        onSelect: () => onChange(option.value),
+      }))}
+      renderTrigger={({ open, toggle }) => (
+        <button
+          type="button"
+          className="settings-action settings-dropdown-trigger"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={ariaLabel}
+          title={ariaLabel}
+          onClick={toggle}
+        >
+          <span>{active?.label ?? value}</span>
+          <span className="book-menu-arrow" aria-hidden="true">
+            ▾
+          </span>
+        </button>
       )}
-    </div>
+    />
   );
 }
 
@@ -105,7 +90,7 @@ export function SettingsModal({
   const [cachedSize, setCachedSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const { smartArrows } = useReaderPrefs();
+  const { readingPositionOpenPolicy, smartArrows } = useReaderPrefs();
 
   useEffect(() => {
     let cancelled = false;
@@ -136,22 +121,10 @@ export function SettingsModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="settings"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong>settings</strong>
-          <button type="button" onClick={onClose} aria-label="close" title="Close">
-            ✕
-          </button>
-        </div>
-        <div className="modal-body settings-body">
-          {category === "info" && (
+    <Modal title="settings" onClose={onClose}>
+      <div className="modal-body settings-body">
+        {category === "info" && (
+          <>
             <section className="settings-item">
               <div className="settings-item-text">
                 <h2 className="settings-item-head">Local book copy</h2>
@@ -160,9 +133,7 @@ export function SettingsModal({
                 ) : cachedSize === null ? (
                   <p className="settings-item-desc">Not stored.</p>
                 ) : (
-                  <p className="settings-item-desc">
-                    Stored in browser storage · {formatBytes(cachedSize)}
-                  </p>
+                  <p className="settings-item-desc">Browser storage · {formatBytes(cachedSize)}</p>
                 )}
               </div>
               <div className="settings-item-control">
@@ -176,47 +147,59 @@ export function SettingsModal({
                   {busy
                     ? "redownloading…"
                     : cachedSize === null
-                      ? "download a copy"
-                      : "delete local copy & redownload"}
+                      ? "Download a copy"
+                      : "delete local & redownload"}
                 </button>
               </div>
             </section>
-          )}
-          {category === "pdf" && (
             <section className="settings-item">
               <div className="settings-item-text">
-                <h2 className="settings-item-head">Smart arrow keys</h2>
-                <p className="settings-item-desc">Arrow keys try to scroll before turning page.</p>
+                <h2 className="settings-item-head">Opening position</h2>
+                <p className="settings-item-desc">
+                  Whether to sync reading position across browsers
+                </p>
               </div>
               <div className="settings-item-control">
-                <SettingDropdown<SmartArrows>
-                  value={smartArrows}
-                  onChange={(v) => setReaderPref("smartArrows", v)}
-                  ariaLabel="PDF smart arrow keys"
+                <SettingDropdown<ReadingPositionOpenPolicy>
+                  value={readingPositionOpenPolicy}
+                  onChange={(v) => setReaderPref("readingPositionOpenPolicy", v)}
+                  ariaLabel="Opening reading position"
                   options={[
-                    { value: "off", label: "Off" },
-                    { value: "smooth", label: "Smooth" },
-                    { value: "instant", label: "Instant" },
+                    { value: "prefer-sync", label: "Sync" },
+                    { value: "prefer-local", label: "Local" },
                   ]}
                 />
               </div>
             </section>
-          )}
-        </div>
-        <div className="pager-tabs settings-tabs">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              aria-pressed={category === c.id}
-              title={`${c.label} settings`}
-              onClick={() => setCategory(c.id)}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
+          </>
+        )}
+        {category === "pdf" && (
+          <section className="settings-item">
+            <div className="settings-item-text">
+              <h2 className="settings-item-head">Smart arrow keys</h2>
+              <p className="settings-item-desc">Arrow keys try to scroll before turning page.</p>
+            </div>
+            <div className="settings-item-control">
+              <SettingDropdown<SmartArrows>
+                value={smartArrows}
+                onChange={(v) => setReaderPref("smartArrows", v)}
+                ariaLabel="PDF smart arrow keys"
+                options={[
+                  { value: "off", label: "Off" },
+                  { value: "smooth", label: "Smooth" },
+                  { value: "instant", label: "Instant" },
+                ]}
+              />
+            </div>
+          </section>
+        )}
       </div>
-    </div>
+      <ModalPagerTabs
+        tabs={CATEGORIES.map((c) => ({ ...c, title: `${c.label} settings` }))}
+        active={category}
+        onChange={setCategory}
+        className="settings-tabs"
+      />
+    </Modal>
   );
 }

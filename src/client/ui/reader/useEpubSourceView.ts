@@ -101,6 +101,17 @@ interface ResizableView {
   contents?: Contents;
 }
 
+function bumpSeq(ref: { current: number }): void {
+  ref.current += 1;
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest('input, textarea, [contenteditable="true"]') !== null
+  );
+}
+
 export function useEpubSourceView(
   file: File | null,
   onSelect: OnSelect,
@@ -195,16 +206,26 @@ export function useEpubSourceView(
     rendition.on("rendered", (_section: unknown, view: ResizableView) => {
       view.on("resized", () => requestAnimationFrame(() => view.pane?.render()));
       if (view.contents) {
-        swipeRef.current(view.contents.document.body);
+        const doc = view.contents.document;
+        swipeRef.current(doc.body);
         const onKeyDown = (event: KeyboardEvent) => {
-          if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
-          event.preventDefault();
-          openSearchRef.current();
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+            event.preventDefault();
+            openSearchRef.current();
+            return;
+          }
+          if (event.altKey || event.metaKey || event.ctrlKey || isEditableTarget(event.target))
+            return;
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            void rendition.prev();
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            void rendition.next();
+          }
         };
-        view.contents.document.addEventListener("keydown", onKeyDown);
-        removeContentKeydowns.push(() =>
-          view.contents?.document.removeEventListener("keydown", onKeyDown),
-        );
+        doc.addEventListener("keydown", onKeyDown);
+        removeContentKeydowns.push(() => doc.removeEventListener("keydown", onKeyDown));
       }
     });
 
@@ -328,7 +349,7 @@ export function useEpubSourceView(
     );
 
     return () => {
-      measureSeqRef.current++;
+      bumpSeq(measureSeqRef);
       Effect.runFork(Fiber.interrupt(fiber));
     };
   }, [ready, fontSize, viewportTick]);

@@ -22,9 +22,9 @@ function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPag
 
 describe("PDF text extraction", () => {
   it("inserts spaces between adjacent text items at line boundaries", async () => {
-    await expect(pageText(textPage([{ str: "delightful" }, { str: "than philosophy" }]))).resolves.toBe(
-      "delightful than philosophy",
-    );
+    await expect(
+      pageText(textPage([{ str: "delightful" }, { str: "than philosophy" }])),
+    ).resolves.toBe("delightful than philosophy");
   });
 
   it("keeps geometry offsets aligned with inserted boundary spaces", async () => {
@@ -35,11 +35,15 @@ describe("PDF text extraction", () => {
   });
 
   it("does not add duplicate spaces around whitespace-only items", async () => {
-    await expect(pageText(textPage([{ str: "one" }, { str: " " }, { str: "two" }]))).resolves.toBe("one two");
+    await expect(pageText(textPage([{ str: "one" }, { str: " " }, { str: "two" }]))).resolves.toBe(
+      "one two",
+    );
   });
 
   it("inserts spaces between selected PDF text layer spans", async () => {
-    const dom = new JSDOM(`<body><div><span>What is</span><span>the chief element</span></div></body>`);
+    const dom = new JSDOM(
+      `<body><div><span>What is</span><span>the chief element</span></div></body>`,
+    );
     const range = dom.window.document.createRange();
     const first = dom.window.document.querySelectorAll("span")[0]!.firstChild!;
     const second = dom.window.document.querySelectorAll("span")[1]!.firstChild!;
@@ -64,14 +68,18 @@ describe("PDF text extraction", () => {
   });
 
   it("keeps EPUB quote extraction unchanged", async () => {
-    const dom = new JSDOM(`<body><div><span>What is</span><span>the chief element</span></div></body>`);
+    const dom = new JSDOM(
+      `<body><div><span>What is</span><span>the chief element</span></div></body>`,
+    );
     const range = dom.window.document.createRange();
     const first = dom.window.document.querySelectorAll("span")[0]!.firstChild!;
     const second = dom.window.document.querySelectorAll("span")[1]!.firstChild!;
     range.setStart(first, 0);
     range.setEnd(second, "the chief element".length);
 
-    const highlight = await Effect.runPromise(captureHighlight("book", epubAnchor("epubcfi(/6/2)"), range));
+    const highlight = await Effect.runPromise(
+      captureHighlight("book", epubAnchor("epubcfi(/6/2)"), range),
+    );
 
     expect(highlight.quote.exact).toBe("What isthe chief element");
   });

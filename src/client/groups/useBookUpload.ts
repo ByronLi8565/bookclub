@@ -4,7 +4,7 @@ import { uploadCurrentSource } from "./sourceAccess.ts";
 import { inspectSource, type SourceMetadata } from "../sources/checkHealth.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import type { SourceKind } from "../../shared/types/sources.ts";
-import { spawnToast } from "../ui/shared/toast/store.ts";
+import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 
 export type UploadStatus = "idle" | "checking" | "ready" | "uploading";
 

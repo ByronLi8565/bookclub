@@ -8,7 +8,7 @@ import { InviteModal } from "../group/InviteModal.tsx";
 import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
-import { spawnToast } from "../shared/toast/store.ts";
+import { spawnToast } from "../shared/toast/toastStore.ts";
 
 const NAME_ERRORS: Record<string, string> = {
   empty: "Enter a name for your club.",

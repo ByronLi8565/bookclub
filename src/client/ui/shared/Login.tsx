@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Session } from "../../auth/useSession.ts";
+import { Modal } from "./Modal.tsx";
 
 const MESSAGES: Record<string, string> = {
   invalid_email: "That doesn't look like an email.",
@@ -93,65 +94,51 @@ export function LoginModal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="sign in with email"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-head">
-          <strong>sign in with email</strong>
-          <button type="button" onClick={onClose} aria-label="close" title="Close">
-            ✕
-          </button>
-        </div>
-        <div className="modal-body">
-          {step === "done" ? (
-            <p className="modal-success">✓ Sign in successful</p>
-          ) : step === "email" ? (
-            <form onSubmit={(e) => void onSendCode(e)}>
-              <input
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-              />
-              <button
-                type="submit"
-                className="primary"
-                disabled={busy || email === ""}
-                title="Send code"
-              >
-                send code
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={(e) => void onVerify(e)}>
-              <p className="modal-note">Enter the code we sent to {email}.</p>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="6-digit code"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                autoFocus
-              />
-              <button
-                type="submit"
-                className="primary"
-                disabled={busy || code === ""}
-                title="Verify code"
-              >
-                verify
-              </button>
-            </form>
-          )}
-          {error && <p className="login-error">{error}</p>}
-        </div>
+    <Modal title="sign in with email" onClose={onClose}>
+      <div className="modal-body">
+        {step === "done" ? (
+          <p className="modal-success">✓ Sign in successful</p>
+        ) : step === "email" ? (
+          <form onSubmit={(e) => void onSendCode(e)}>
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="primary"
+              disabled={busy || email === ""}
+              title="Send code"
+            >
+              send code
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={(e) => void onVerify(e)}>
+            <p className="modal-note">Enter the code we sent to {email}.</p>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="6-digit code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="primary"
+              disabled={busy || code === ""}
+              title="Verify code"
+            >
+              verify
+            </button>
+          </form>
+        )}
+        {error && <p className="login-error">{error}</p>}
       </div>
-    </div>
+    </Modal>
   );
 }

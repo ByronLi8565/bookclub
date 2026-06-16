@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
 import type { NoteAgent, NoteState, OnlinePeer } from "../../server/agents/NoteAgent.ts";
 import type { Highlight, HighlightAnchor } from "./highlights.ts";
-import { spawnToast } from "../ui/shared/toast/store.ts";
+import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 
 export type { OnlinePeer } from "../../server/agents/NoteAgent.ts";
 

@@ -115,9 +115,14 @@
   white-space: nowrap;
 }
 
-.book-menu-item:hover {
+.book-menu-item:hover,
+.book-menu-item:focus-visible {
   background: var(--black);
   color: var(--white);
+}
+
+.book-menu-item:focus-visible {
+  outline: none;
 }
 
 .book-menu-item.is-active {
@@ -282,9 +287,10 @@
   inset: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  /* Allow vertical scroll, but NOT browser pinch-zoom — we handle pinch
-     ourselves to zoom the PDF content, not the whole page/viewport. */
-  touch-action: pan-y;
+  /* Allow tap-and-drag panning in both axes (so a zoomed-in page can be
+     dragged around), but NOT browser pinch-zoom — we handle pinch ourselves to
+     zoom the PDF content, not the whole page/viewport. */
+  touch-action: pan-x pan-y;
   scrollbar-width: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -302,11 +308,11 @@
 }
 
 .pdf-page canvas {
-  /* Vertical scroll only — never let the browser pinch-zoom the viewport; we
-     handle pinch ourselves to zoom the PDF content. touch-action is not
+  /* Drag to pan in both axes; never let the browser pinch-zoom the viewport —
+     we handle pinch ourselves to zoom the PDF content. touch-action is not
      inherited, so it must be set on the actual touched elements, not just the
      scroller. */
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
 }
 
 .pdf-page .textLayer {
@@ -320,7 +326,7 @@
   transform-origin: 0 0;
   z-index: 2;
   pointer-events: auto;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
   -webkit-user-select: text;
   -webkit-touch-callout: default;
   user-select: text;

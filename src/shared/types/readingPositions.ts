@@ -42,10 +42,32 @@ export const StoredReadingPosition = Schema.Union([
 export const SetReadingPositionRequest = Schema.Struct({
   groupId: Schema.String,
   sourceId: Schema.String,
-  position: SourceReadingPosition,
+  position: StoredReadingPosition,
 });
 
-export const ReadingPositionCache = Schema.Record(Schema.String, StoredReadingPosition);
+export const ReadingPositionResponse = Schema.Struct({
+  position: Schema.NullOr(StoredReadingPosition),
+});
+
+export const ReadingPositionSyncStatus = Schema.Union([
+  Schema.Literal("dirty"),
+  Schema.Literal("syncing"),
+  Schema.Literal("clean"),
+  Schema.Literal("error"),
+]);
+
+export const ReadingPositionRecord = Schema.Struct({
+  position: StoredReadingPosition,
+  lastSyncedPosition: Schema.NullOr(StoredReadingPosition),
+  sync: Schema.Struct({
+    status: ReadingPositionSyncStatus,
+    lastSyncAttemptAt: Schema.NullOr(Schema.String),
+    lastSyncError: Schema.NullOr(Schema.String),
+  }),
+});
+
+export const ReadingPositionCache = Schema.Record(Schema.String, ReadingPositionRecord);
 
 export type SourceReadingPosition = Schema.Schema.Type<typeof SourceReadingPosition>;
 export type StoredReadingPosition = Schema.Schema.Type<typeof StoredReadingPosition>;
+export type ReadingPositionRecord = Schema.Schema.Type<typeof ReadingPositionRecord>;
