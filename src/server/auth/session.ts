@@ -1,4 +1,5 @@
-import { base64urlDecode, base64urlEncode, constantTimeEqualBytes } from "../../shared/util.ts";
+import { base64urlDecode, base64urlEncode } from "../../shared/base64url.ts";
+import { constantTimeEqualBytes } from "../../shared/crypto.ts";
 
 export interface SessionClaims {
   userId: string;

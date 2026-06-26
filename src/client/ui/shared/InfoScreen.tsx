@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { InfoCardPage } from "../../info/infoCards.ts";
-import { infoCards } from "../../info/infoCards.ts";
-import { noteHeading } from "../../notes/render.ts";
+import type { InfoCardPage } from "../../logic/info/infoCards.ts";
+import { infoCards } from "../../logic/info/infoCards.ts";
+import { noteHeading } from "../../logic/notes/format.ts";
 import { NoteCardView } from "../notes/NoteThread.tsx";
 import { Modal, ModalPagerTabs } from "./Modal.tsx";
 

@@ -123,3 +123,8 @@ button:disabled:hover {
 
   height: 100dvh;
 }
+
+.app--chrome-hidden .topbar,
+.reader--chrome-hidden .reader-bar {
+  display: none;
+}

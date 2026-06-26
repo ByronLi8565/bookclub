@@ -17,9 +17,10 @@ import type {
   RedeemResult,
   RenameGroupResult,
   RenameResult,
-} from "../agents/GroupAgent.ts";
-import { REGISTRY_ID, type GroupRegistry } from "../agents/GroupRegistry.ts";
-import { normalizeEmail, randomId } from "../../shared/util.ts";
+} from "../state/GroupAgent.ts";
+import { REGISTRY_ID, type GroupRegistry } from "../state/GroupRegistry.ts";
+import { randomId } from "../../shared/crypto.ts";
+import { normalizeEmail } from "../../shared/email.ts";
 import {
   fail,
   requireIdentity,
@@ -29,9 +30,9 @@ import {
   type WorkflowEffect,
   type WorkflowFailure,
   type WorkflowResult,
-} from "./shared.ts";
+} from "./runtime.ts";
 
-export type { WorkflowFailure } from "./shared.ts";
+export type { WorkflowFailure } from "./runtime.ts";
 
 const MAX_GROUP_TITLE_LENGTH = 100;
 const PUBLIC_ID_LENGTH = 6;
@@ -218,6 +219,9 @@ export function resolveGroupView(
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, groupId);
       const membership = yield* tryPromise(() => group.membership(me.id));
+      // Self-heal the caller's club index if it drifted out of sync (e.g. a
+      // club created while their AuthAgent record was missing).
+      if (membership.isMember) yield* tryPromise(() => group.reindexMember(me));
       const members = membership.isMember ? yield* tryPromise(() => group.roster()) : [];
       return { group: summary, membership, members };
     }),

@@ -57,4 +57,12 @@
   .home-info-panel {
     max-height: 88dvh;
   }
+
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .modal {
+    width: min(400px, calc(100vw - 24px));
+  }
 }

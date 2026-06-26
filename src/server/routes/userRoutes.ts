@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { Env } from "../env.ts";
-import { readJson } from "../util/http.ts";
+import { readJson } from "../http.ts";
 import {
   getReadingPosition,
   getUserPrefs,

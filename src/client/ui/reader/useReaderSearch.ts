@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { HighlightAnchor, SearchMatch, SourceReader } from "../../notes/highlights.ts";
+import type { HighlightAnchor, SearchMatch, SourceReader } from "../../logic/notes/highlights.ts";
 
 export interface ReaderSearch {
   open: boolean;

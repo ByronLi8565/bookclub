@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { noteSnippet, renderNoteBody, type Note } from "../client/notes/render.ts";
+import type { Note } from "../shared/types/notes.ts";
+import { renderNoteBody } from "../client/logic/notes/renderHtml.ts";
+import { noteSnippet } from "../client/logic/notes/format.ts";
 
 function note(over: Partial<Note>): Note {
   return {

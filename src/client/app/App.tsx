@@ -1,8 +1,8 @@
 import * as Effect from "effect/Effect";
 import { useEffect } from "react";
 import { Route, Switch } from "wouter";
-import { useSession } from "../auth/useSession.ts";
-import { hydrateUserPrefs } from "../settings/userPrefs.ts";
+import { useSession } from "./useSession.ts";
+import { hydrateUserPrefs } from "../logic/settings/userPrefs.ts";
 import { GroupView } from "../ui/group/GroupView.tsx";
 import { Home } from "../ui/home/Home.tsx";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";

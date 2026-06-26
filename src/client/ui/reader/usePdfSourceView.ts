@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   expandToWordBoundaries,
   pdfAnchor,
@@ -10,8 +10,8 @@ import {
   type PdfRect,
   type SearchMatch,
   type SourceReader,
-} from "../../notes/highlights.ts";
-import { useReaderPrefs } from "../../settings/userPrefs.ts";
+} from "../../logic/notes/highlights.ts";
+import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import {
   destroyPdf,
@@ -22,9 +22,17 @@ import {
   type PageGeometry,
   type PDFDocumentProxy,
   type PDFPageProxy,
-} from "../../sources/pdf.ts";
-import { getCachedPdfDocument, hasCachedPdfDocument, putCachedPdfDocument } from "./renderCache.ts";
-import { getRenderSnapshot, putRenderSnapshot, type RenderSnapshot } from "./renderSnapshot.ts";
+} from "../../logic/sources/pdf.ts";
+import {
+  getCachedPdfDocument,
+  hasCachedPdfDocument,
+  putCachedPdfDocument,
+} from "./engine/renderCache.ts";
+import {
+  getRenderSnapshot,
+  putRenderSnapshot,
+  type RenderSnapshot,
+} from "./engine/renderSnapshot.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import {
   SPREAD_GUTTER_PX,
@@ -33,9 +41,12 @@ import {
   spreadFits,
   spreadPages,
   spreadStart,
-} from "./pdfSpread.ts";
-import { bumpSeq, type OnSelect, type SourceLocation, type SourceView } from "./sourceView.ts";
-import { clamp } from "../../../shared/util.ts";
+} from "./engine/pdfSpread.ts";
+import { bumpSeq } from "./engine/seq.ts";
+import { type OnSelect } from "./types.ts";
+import { type SourceView } from "./types.ts";
+import { type SourceLocation } from "./types.ts";
+import { clamp } from "../../../shared/format.ts";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 
 interface Drawn {
@@ -126,9 +137,7 @@ function createPane(): Pane {
   const mkLayer = (cls: string) => {
     const layer = document.createElement("div");
     layer.className = cls;
-    layer.style.position = "absolute";
-    layer.style.inset = "0";
-    layer.style.pointerEvents = "none";
+    layer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
     return layer;
   };
   const highlight = mkLayer("pdf-highlights");
@@ -211,6 +220,10 @@ function pdfSnapshotDataUrl(canvas: HTMLCanvasElement): string {
   return webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
 }
 
+function setCanvasCssSize(canvas: HTMLCanvasElement, width: number, height: number): void {
+  canvas.style.cssText = `width:${width}px;height:${height}px;`;
+}
+
 function capturePdfSnapshot(
   sourceId: string,
   scroller: HTMLDivElement,
@@ -278,6 +291,58 @@ function pdfRenderCacheKey(sourceId: string | null, file: File | null): string |
   return sourceId && file ? `${sourceId}:${file.name}:${file.size}:${file.lastModified}` : null;
 }
 
+interface CapturedPdfSnapshot {
+  sourceId: string | null;
+  snapshot: RenderSnapshot | null;
+}
+
+interface PdfViewState {
+  ready: boolean;
+  title: string | null;
+  location: SourceLocation | null;
+  position: SourceReadingPosition | null;
+  selection: { x: number; y: number } | null;
+  capturedSnapshot: CapturedPdfSnapshot;
+}
+
+type PdfViewAction =
+  | { type: "reset"; sourceId: string | null }
+  | { type: "ready"; ready: boolean }
+  | { type: "title"; title: string | null }
+  | { type: "location"; location: SourceLocation | null }
+  | { type: "position"; position: SourceReadingPosition | null }
+  | { type: "selection"; selection: { x: number; y: number } | null }
+  | { type: "capturedSnapshot"; sourceId: string | null; snapshot: RenderSnapshot | null };
+
+function pdfViewReducer(state: PdfViewState, action: PdfViewAction): PdfViewState {
+  switch (action.type) {
+    case "reset":
+      return {
+        ready: false,
+        title: null,
+        location: null,
+        position: null,
+        selection: null,
+        capturedSnapshot: { sourceId: action.sourceId, snapshot: null },
+      };
+    case "ready":
+      return { ...state, ready: action.ready };
+    case "title":
+      return { ...state, title: action.title };
+    case "location":
+      return { ...state, location: action.location };
+    case "position":
+      return { ...state, position: action.position };
+    case "selection":
+      return { ...state, selection: action.selection };
+    case "capturedSnapshot":
+      return {
+        ...state,
+        capturedSnapshot: { sourceId: action.sourceId, snapshot: action.snapshot },
+      };
+  }
+}
+
 export function usePdfSourceView(
   sourceId: string | null,
   file: File | null,
@@ -294,15 +359,22 @@ export function usePdfSourceView(
   const pageLayoutRef = useRef(pdfPageLayout);
   pageLayoutRef.current = pdfPageLayout;
 
-  const [ready, setReady] = useState(false);
-  const [title, setTitle] = useState<string | null>(null);
   const [fontSize, setFontSizeState] = useState(100);
-  const [location, setLocation] = useState<SourceLocation | null>(null);
-  const [position, setPosition] = useState<SourceReadingPosition | null>(null);
-  const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
-  const [snapshot, setSnapshot] = useState<RenderSnapshot | null>(() =>
-    getRenderSnapshot(sourceId),
-  );
+  const [viewState, dispatchView] = useReducer(pdfViewReducer, {
+    ready: false,
+    title: null,
+    location: null,
+    position: null,
+    selection: null,
+    capturedSnapshot: { sourceId, snapshot: null },
+  });
+  const { ready, title, location, position, selection, capturedSnapshot } = viewState;
+  const snapshot = useMemo<RenderSnapshot | null>(() => {
+    if (capturedSnapshot.sourceId === sourceId && capturedSnapshot.snapshot) {
+      return capturedSnapshot.snapshot;
+    }
+    return getRenderSnapshot(sourceId);
+  }, [capturedSnapshot, sourceId]);
 
   const docRef = useRef<PDFDocumentProxy | null>(null);
   const pageRef = useRef(1);
@@ -332,19 +404,12 @@ export function usePdfSourceView(
     openedSource.sourceId !== sourceId
   ) {
     setOpenedSource({ file, initialPdfPage, sourceId });
-    setReady(false);
-    setLocation(null);
-    setPosition(null);
-    setTitle(null);
+    dispatchView({ type: "reset", sourceId });
     geometryRef.current.clear();
     drawnRef.current.clear();
     underlineRef.current = null;
     pageRef.current = initialPdfPage === null ? 1 : Math.max(1, Math.round(initialPdfPage));
   }
-
-  useEffect(() => {
-    setSnapshot(getRenderSnapshot(sourceId));
-  }, [sourceId]);
 
   const geometryFor = useCallback(async (pageNum: number): Promise<PageGeometry | null> => {
     const doc = docRef.current;
@@ -431,12 +496,15 @@ export function usePdfSourceView(
     if (!doc || !scroller) return;
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const scrollRatio = maxScroll > 0 ? scroller.scrollTop / maxScroll : 0;
-    setPosition({
-      kind: "pdf",
-      page: pageRef.current,
-      scrollRatio: Math.min(1, Math.max(0, scrollRatio)),
-      zoom: fontSizeRef.current,
-      percentage: doc.numPages > 0 ? (pageRef.current - 1 + scrollRatio) / doc.numPages : 0,
+    dispatchView({
+      type: "position",
+      position: {
+        kind: "pdf",
+        page: pageRef.current,
+        scrollRatio: Math.min(1, Math.max(0, scrollRatio)),
+        zoom: fontSizeRef.current,
+        percentage: doc.numPages > 0 ? (pageRef.current - 1 + scrollRatio) / doc.numPages : 0,
+      },
     });
   }, []);
 
@@ -472,13 +540,12 @@ export function usePdfSourceView(
       const div = document.createElement("div");
       div.className = cls;
       div.dataset.hid = id;
-      div.style.position = "absolute";
-      div.style.left = `${rect.x * w}px`;
-      div.style.top = `${rect.y * h + PDF_RECT_Y_NUDGE_PX}px`;
-      div.style.width = `${rect.width * w}px`;
-      div.style.height = `${rect.height * h}px`;
+      div.style.cssText = `position:absolute;left:${rect.x * w}px;top:${
+        rect.y * h + PDF_RECT_Y_NUDGE_PX
+      }px;width:${rect.width * w}px;height:${rect.height * h}px;${
+        cls === "bc-highlight" ? "cursor:pointer;" : ""
+      }`;
       if (cls === "bc-highlight") {
-        div.style.cursor = "pointer";
         div.addEventListener("click", () => drawnRef.current.get(id)?.onClick());
       }
       layer.appendChild(div);
@@ -543,6 +610,7 @@ export function usePdfSourceView(
   const renderTextLayerInto = useCallback(
     async (pane: Pane, page: PDFPageProxy, viewport: unknown, seq: number) => {
       try {
+        if (seq !== renderSeqRef.current) return;
         const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
         if (seq !== renderSeqRef.current) return;
         const builder = new TextLayerBuilderCtor({ pdfPage: page });
@@ -598,6 +666,7 @@ export function usePdfSourceView(
       const dpr = window.devicePixelRatio || 1;
       const gutter = pages.length > 1 ? READER_NAV.spreadGutterPx : 0;
       const pad = READER_NAV.spreadCropPadPx;
+      if (seq !== renderSeqRef.current) return;
       const leftPage = await doc.getPage(pages[0]!);
       if (seq !== renderSeqRef.current) return;
       const leftBase = leftPage.getViewport({ scale: 1 });
@@ -619,9 +688,15 @@ export function usePdfSourceView(
       let unionMinY = Infinity;
       let unionMaxY = -Infinity;
       if (enabled) {
-        for (const pageNum of pages) {
-          const bounds = textBounds(await geometryFor(pageNum));
-          if (seq !== renderSeqRef.current) return;
+        if (seq !== renderSeqRef.current) return;
+        const spreadBounds = await Promise.all(
+          pages.map(async (pageNum) => ({
+            pageNum,
+            bounds: textBounds(await geometryFor(pageNum)),
+          })),
+        );
+        if (seq !== renderSeqRef.current) return;
+        for (const { pageNum, bounds } of spreadBounds) {
           boundsByPage.set(pageNum, bounds);
           if (bounds) {
             unionMinY = Math.min(unionMinY, bounds.minY);
@@ -631,86 +706,93 @@ export function usePdfSourceView(
       }
       const hasVerticalCrop = enabled && unionMinY !== Infinity;
 
-      let totalWidth = 0;
-      let maxHeight = 0;
-      // Double-buffered renders draw every page to an offscreen canvas, then
-      // swap them all in together below — so a two-page spread updates both
-      // panes in the same frame instead of left-then-right (which flashes a
-      // mismatched new-left / old-right spread for a beat).
-      const commits: Array<() => void> = [];
-      for (const [index, pageNum] of pages.entries()) {
-        const pane = panes[index]!;
-        const page = index === 0 ? leftPage : await doc.getPage(pageNum);
-        if (seq !== renderSeqRef.current) return;
-        const viewport = page.getViewport({ scale });
-        const pageW = viewport.width;
-        const pageH = viewport.height;
-        pane.page = pageNum;
+      if (seq !== renderSeqRef.current) return;
+      const pageEntries = await Promise.all(
+        pages.map(async (pageNum, index) => ({
+          index,
+          pageNum,
+          page: index === 0 ? leftPage : await doc.getPage(pageNum),
+        })),
+      );
+      if (seq !== renderSeqRef.current) return;
+      const renderedPanes = await Promise.all(
+        pageEntries.map(async ({ index, pageNum, page }) => {
+          const pane = panes[index]!;
+          const viewport = page.getViewport({ scale });
+          const pageW = viewport.width;
+          const pageH = viewport.height;
+          pane.page = pageNum;
 
-        // Crop rect (CSS px within the full page). Horizontal: this page's text;
-        // vertical: the shared union so both panes align.
-        const hb = boundsByPage.get(pageNum);
-        const crop = cropBox(
-          enabled ? (hb ?? null) : null,
-          hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
-          pageW,
-          pageH,
-          pad,
-        );
+          // Crop rect (CSS px within the full page). Horizontal: this page's text;
+          // vertical: the shared union so both panes align.
+          const hb = boundsByPage.get(pageNum);
+          const crop = cropBox(
+            enabled ? (hb ?? null) : null,
+            hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
+            pageW,
+            pageH,
+            pad,
+          );
 
-        // `inner` holds the full page in page coordinates; offset it so only the
-        // crop region shows through `el` (which has overflow: hidden).
-        const applyLayout = () => {
-          pane.inner.style.width = `${pageW}px`;
-          pane.inner.style.height = `${pageH}px`;
-          pane.inner.style.left = `${-crop.left}px`;
-          pane.inner.style.top = `${-crop.top}px`;
-          pane.el.style.width = `${crop.width}px`;
-          pane.el.style.height = `${crop.height}px`;
-          pane.pageHeightPx = pageH;
-          pane.cropTopPx = crop.top;
-        };
+          // `inner` holds the full page in page coordinates; offset it so only the
+          // crop region shows through `el` (which has overflow: hidden).
+          const applyLayout = () => {
+            pane.inner.style.width = `${pageW}px`;
+            pane.inner.style.height = `${pageH}px`;
+            pane.inner.style.left = `${-crop.left}px`;
+            pane.inner.style.top = `${-crop.top}px`;
+            pane.el.style.width = `${crop.width}px`;
+            pane.el.style.height = `${crop.height}px`;
+            pane.pageHeightPx = pageH;
+            pane.cropTopPx = crop.top;
+          };
 
-        if (opts?.doubleBuffer) {
-          const next = document.createElement("canvas");
-          next.width = Math.floor(pageW * dpr);
-          next.height = Math.floor(pageH * dpr);
-          next.style.width = `${pageW}px`;
-          next.style.height = `${pageH}px`;
-          const ctx = next.getContext("2d");
-          if (!ctx) return;
-          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
-          if (seq !== renderSeqRef.current) return;
-          // Defer the visible swap + layout so both panes commit at once.
-          commits.push(() => {
-            const prev = pane.canvas;
-            if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
-            else pane.inner.insertBefore(next, pane.inner.firstChild);
-            prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
-            pane.canvas = next;
-            applyLayout();
-          });
-        } else {
+          if (opts?.doubleBuffer) {
+            const next = document.createElement("canvas");
+            next.width = Math.floor(pageW * dpr);
+            next.height = Math.floor(pageH * dpr);
+            setCanvasCssSize(next, pageW, pageH);
+            const ctx = next.getContext("2d");
+            if (!ctx) return;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            if (seq !== renderSeqRef.current) return;
+            await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
+            if (seq !== renderSeqRef.current) return;
+            return {
+              width: crop.width,
+              height: crop.height,
+              commit: () => {
+                const prev = pane.canvas;
+                if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
+                else pane.inner.insertBefore(next, pane.inner.firstChild);
+                prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
+                pane.canvas = next;
+                applyLayout();
+              },
+            };
+          }
           const canvas = pane.canvas;
           canvas.width = Math.floor(pageW * dpr);
           canvas.height = Math.floor(pageH * dpr);
-          canvas.style.width = `${pageW}px`;
-          canvas.style.height = `${pageH}px`;
+          setCanvasCssSize(canvas, pageW, pageH);
           const ctx = canvas.getContext("2d");
           if (!ctx) return;
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          if (seq !== renderSeqRef.current) return;
           await page.render({ canvas, canvasContext: ctx, viewport }).promise;
           if (seq !== renderSeqRef.current) return;
-          applyLayout();
-        }
-
-        totalWidth += crop.width;
-        maxHeight = Math.max(maxHeight, crop.height);
+          return { width: crop.width, height: crop.height, commit: applyLayout };
+        }),
+      );
+      if (seq !== renderSeqRef.current) return;
+      let totalWidth = 0;
+      let maxHeight = 0;
+      for (const rendered of renderedPanes) {
+        if (!rendered) return;
+        totalWidth += rendered.width;
+        maxHeight = Math.max(maxHeight, rendered.height);
+        rendered.commit();
       }
-      // Commit all double-buffered swaps together so the whole spread flips in
-      // one frame (no-op for the in-place path, which already applied above).
-      for (const commit of commits) commit();
       // Explicit row size so `margin: 0 auto` centers the spread in the scroller.
       wrap.style.width = `${totalWidth + gutter}px`;
       wrap.style.height = `${maxHeight}px`;
@@ -726,16 +808,16 @@ export function usePdfSourceView(
         atStart: left <= 1,
         atEnd: lastPage >= doc.numPages,
       };
-      setLocation(nextLocation);
+      dispatchView({ type: "location", location: nextLocation });
       publishPosition();
       if (sourceId) {
         const scroller = scrollerRef.current;
-        const capturedSnapshot = scroller
+        const nextSnapshot = scroller
           ? capturePdfSnapshot(sourceId, scroller, panes, nextLocation)
           : null;
-        if (capturedSnapshot) {
-          putRenderSnapshot(capturedSnapshot);
-          setSnapshot(capturedSnapshot);
+        if (nextSnapshot) {
+          putRenderSnapshot(nextSnapshot);
+          dispatchView({ type: "capturedSnapshot", sourceId, snapshot: nextSnapshot });
         }
       }
 
@@ -780,7 +862,7 @@ export function usePdfSourceView(
         return;
       }
       pageRef.current = left;
-      setSelection(null);
+      dispatchView({ type: "selection", selection: null });
       pendingRef.current = null;
       repaintSelection();
       clearFlash();
@@ -851,7 +933,7 @@ export function usePdfSourceView(
         });
         const meta = yield* Effect.promise(() => doc.getMetadata().catch(() => null));
         const info = meta?.info as { Title?: string } | undefined;
-        setTitle(info?.Title?.trim() || null);
+        dispatchView({ type: "title", title: info?.Title?.trim() || null });
         if (initialPdfPage !== null) {
           pageRef.current = Math.min(Math.max(1, pageRef.current), doc.numPages);
         }
@@ -860,7 +942,7 @@ export function usePdfSourceView(
         // frame it to fit the viewport — opening or swapping books should reset
         // the zoom to fit-to-page rather than restore a stale zoom/scroll.
         yield* Effect.promise(() => fitToTextRef.current());
-        setReady(true);
+        dispatchView({ type: "ready", ready: true });
       }).pipe(Effect.catchCause(() => Effect.sync(() => console.error("failed to open pdf")))),
     );
 
@@ -877,7 +959,7 @@ export function usePdfSourceView(
       scroller.remove();
       scrollerRef.current = null;
       wrapRef.current = null;
-      setReady(false);
+      dispatchView({ type: "ready", ready: false });
     };
   }, [file, sourceId, renderCacheKey, renderSpread, clearFlash, initialPdfPage]);
 
@@ -944,7 +1026,7 @@ export function usePdfSourceView(
       if (!pendingRef.current) return;
       pendingRef.current = null;
       repaintSelection();
-      setSelection(null);
+      dispatchView({ type: "selection", selection: null });
     };
     const onSelectionChange = () => {
       const sel = window.getSelection();
@@ -976,7 +1058,7 @@ export function usePdfSourceView(
         clear: () => sel.removeAllRanges(),
       };
       repaintSelection();
-      setSelection(popupPoint(boundingRect(domRects)));
+      dispatchView({ type: "selection", selection: popupPoint(boundingRect(domRects)) });
     };
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
@@ -1021,7 +1103,17 @@ export function usePdfSourceView(
     const enabled = spreadActiveRef.current;
     const left = pageRef.current;
     const pages = spreadPages(left, enabled, doc.numPages);
-    const leftBase = (await doc.getPage(pages[0]!)).getViewport({ scale: 1 });
+    if (left !== pageRef.current) return;
+    const pageData = await Promise.all(
+      pages.map(async (pageNum) => {
+        const page = await doc.getPage(pageNum);
+        const base = page.getViewport({ scale: 1 });
+        const geom = await geometryFor(pageNum);
+        return { pageNum, base, bounds: textBounds(geom) };
+      }),
+    );
+    if (left !== pageRef.current || pageData.length === 0) return;
+    const leftBase = pageData[0]!.base;
 
     // When spread is active, pages are cropped to their text, so fit against the
     // combined *text* width; in single-page mode, fit against the full page
@@ -1035,12 +1127,9 @@ export function usePdfSourceView(
     let unionMaxY = -Infinity;
     let maxBaseHeight = 0;
     let anyText = false;
-    for (const pageNum of pages) {
-      const base =
-        pageNum === pages[0] ? leftBase : (await doc.getPage(pageNum)).getViewport({ scale: 1 });
+    for (const { base, bounds } of pageData) {
       maxBaseHeight = Math.max(maxBaseHeight, base.height);
-      const geom = await geometryFor(pageNum);
-      const bounds = textBounds(geom);
+      if (left !== pageRef.current) return;
       if (bounds) {
         anyText = true;
         combinedWidth += enabled ? (bounds.maxX - bounds.minX) * base.width : base.width;
@@ -1127,7 +1216,7 @@ export function usePdfSourceView(
     pendingRef.current?.clear();
     pendingRef.current = null;
     repaintSelection();
-    setSelection(null);
+    dispatchView({ type: "selection", selection: null });
   }, [repaintSelection]);
   const commitSelection = useCallback(() => {
     const pending = pendingRef.current;
@@ -1320,11 +1409,22 @@ export function usePdfSourceView(
               (n) => n !== anchor.page,
             ),
           ];
-          for (const pageNum of order) {
-            const geom = await geometryFor(pageNum);
-            if (!geom) continue;
-            const rects = locateOnPage(geom, h.quote);
-            if (rects && rects.length > 0) return pdfAnchor(pageNum, rects);
+          const [preferredPage, ...fallbackPages] = order;
+          const preferredGeom = await geometryFor(preferredPage!);
+          if (preferredGeom) {
+            const rects = locateOnPage(preferredGeom, h.quote);
+            if (rects && rects.length > 0) return pdfAnchor(preferredPage!, rects);
+          }
+          const fallbackMatches = await Promise.all(
+            fallbackPages.map(async (pageNum) => {
+              const geom = await geometryFor(pageNum);
+              if (!geom) return null;
+              const rects = locateOnPage(geom, h.quote);
+              return rects && rects.length > 0 ? pdfAnchor(pageNum, rects) : null;
+            }),
+          );
+          for (const match of fallbackMatches) {
+            if (match) return match;
           }
           return anchor.rects.length > 0 ? anchor : null;
         }).pipe(Effect.orElseSucceed(() => null)),
@@ -1332,16 +1432,18 @@ export function usePdfSourceView(
         Effect.tryPromise(async () => {
           const doc = docRef.current;
           if (!doc || query.trim() === "") return [] as SearchMatch[];
-          const matches: SearchMatch[] = [];
-          for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
-            const geom = await geometryFor(pageNum);
-            if (!geom) continue;
-            for (const { start, excerpt } of scanText(geom.text, query)) {
-              const rects = rectsForRange(geom, start, start + query.length);
-              matches.push({ anchor: pdfAnchor(pageNum, rects), excerpt });
-            }
-          }
-          return matches;
+          const matchesByPage = await Promise.all(
+            Array.from({ length: doc.numPages }, async (_, index) => {
+              const pageNum = index + 1;
+              const geom = await geometryFor(pageNum);
+              if (!geom) return [];
+              return scanText(geom.text, query).map(({ start, excerpt }) => ({
+                anchor: pdfAnchor(pageNum, rectsForRange(geom, start, start + query.length)),
+                excerpt,
+              }));
+            }),
+          );
+          return matchesByPage.flat();
         }).pipe(Effect.orElseSucceed(() => [] as SearchMatch[])),
     };
   }, [geometryFor]);

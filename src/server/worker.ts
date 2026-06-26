@@ -1,17 +1,19 @@
 import { getAgentByName, routeAgentRequest } from "agents";
 import { Hono, type Context } from "hono";
-import type { User as AuthUser } from "./agents/AuthAgent.ts";
+import type { User as AuthUser } from "./state/AuthAgent.ts";
 import type { Env } from "./env.ts";
 import { registerGroupRoutes } from "./routes/groupRoutes.ts";
 import { registerUserRoutes } from "./routes/userRoutes.ts";
 import { clearedCookie, currentIdentity, sessionCookie } from "./auth/cookies.ts";
-import { normalizeEmail, readJson } from "./util/http.ts";
+import { normalizeEmail } from "../shared/email.ts";
+import { readJson } from "./http.ts";
 import { signSession, SESSION_TTL_MS } from "./auth/session.ts";
+import { backupAll, listBackups, restoreFrom } from "./backup.ts";
 
-export { NoteAgent } from "./agents/NoteAgent.ts";
-export { AuthAgent } from "./agents/AuthAgent.ts";
-export { GroupAgent } from "./agents/GroupAgent.ts";
-export { GroupRegistry } from "./agents/GroupRegistry.ts";
+export { NoteAgent } from "./state/NoteAgent.ts";
+export { AuthAgent } from "./state/AuthAgent.ts";
+export { GroupAgent } from "./state/GroupAgent.ts";
+export { GroupRegistry } from "./state/GroupRegistry.ts";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -79,6 +81,37 @@ app.get("/auth/me", async (c) => {
 registerUserRoutes(app);
 registerGroupRoutes(app);
 
+// Admin endpoints for manual Durable Object state backup/restore. Gated to the
+// configured ADMIN_EMAIL (a signed-session identity); disabled when unset.
+async function isAdmin(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  const admin = c.env.ADMIN_EMAIL;
+  if (!admin) return false;
+  const me = await currentIdentity(c.req.raw, c.env);
+  return me?.email === admin;
+}
+
+app.post("/admin/backup", async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+  return c.json(await backupAll(c.env));
+});
+
+app.get("/admin/backups", async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+  return c.json({ backups: await listBackups(c.env) });
+});
+
+app.post("/admin/restore", async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+  const body = await readJson(c.req.raw);
+  const key = typeof body?.key === "string" ? body.key : null;
+  if (!key) return c.json({ error: "missing_key" }, 400);
+  try {
+    return c.json(await restoreFrom(c.env, key));
+  } catch (error) {
+    return c.json({ error: "restore_failed", reason: String(error) }, 404);
+  }
+});
+
 const noteGate = async (c: Context<{ Bindings: Env }>): Promise<Response> => {
   const me = await currentIdentity(c.req.raw, c.env);
   if (!me) return c.text("unauthenticated", 401);
@@ -103,4 +136,15 @@ app.all("*", async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });
 
-export default app;
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> =>
+    app.fetch(request, env, ctx),
+  // Scheduled (cron) Durable Object state backup to R2.
+  scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext): void => {
+    ctx.waitUntil(
+      backupAll(env)
+        .then((r) => console.log("scheduled backup ok", r))
+        .catch((error: unknown) => console.error("scheduled backup failed", error)),
+    );
+  },
+};

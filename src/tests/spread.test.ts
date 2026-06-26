@@ -7,7 +7,7 @@ import {
   spreadFits,
   spreadPages,
   spreadStart,
-} from "../client/ui/reader/pdfSpread.ts";
+} from "../client/ui/reader/engine/pdfSpread.ts";
 
 // The viewport width at which two panes each exactly hit the minimum width.
 const FITS_WIDTH = MIN_SPREAD_PANE_WIDTH * 2 + SPREAD_GUTTER_PX;

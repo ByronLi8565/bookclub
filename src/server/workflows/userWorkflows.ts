@@ -7,24 +7,25 @@ import {
 } from "../../shared/types/readingPositions.ts";
 import { SetUserPrefsRequest, type UserPrefs } from "../../shared/types/userPrefs.ts";
 import type { Env } from "../env.ts";
-import type { GroupAgent, Identity } from "../agents/GroupAgent.ts";
-import type { AuthAgent } from "../agents/AuthAgent.ts";
+import type { GroupAgent, Identity } from "../state/GroupAgent.ts";
+import type { AuthAgent } from "../state/AuthAgent.ts";
 import {
   fail,
   requireIdentity,
   runWorkflow,
   tryPromise,
   type Async,
+  type WorkflowEffect,
   type WorkflowFailure,
   type WorkflowResult,
-} from "./shared.ts";
+} from "./runtime.ts";
 
-export type { WorkflowFailure } from "./shared.ts";
+export type { WorkflowFailure } from "./runtime.ts";
 
 type Auth = Async<AuthAgent>;
 type Group = Async<GroupAgent>;
 
-const authFor = (env: Env, me: Identity): Effect.Effect<Auth> =>
+const authFor = (env: Env, me: Identity): WorkflowEffect<Auth> =>
   Effect.map(
     tryPromise(() => getAgentByName(env.AuthAgent, me.email)),
     (auth) => auth as unknown as Auth,

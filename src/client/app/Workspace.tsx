@@ -5,11 +5,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
 import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
-import { renameGroup, type RosterEntry } from "../groups/api.ts";
-import { useNoteAgent } from "../notes/agent.ts";
-import { buildConversation, referenceSpace, selectNotes } from "../notes/conversation.ts";
-import { captureHighlight, type Highlight, type HighlightAnchor } from "../notes/highlights.ts";
-import { effectiveHighlight, type NoteViewer } from "../notes/render.ts";
+import { renameGroup, type RosterEntry } from "../logic/groups/groupClient.ts";
+import { useNoteAgent } from "../logic/notes/useNoteAgent.ts";
+import { buildConversation, referenceSpace, selectNotes } from "../logic/notes/conversation.ts";
+import {
+  captureHighlight,
+  type Highlight,
+  type HighlightAnchor,
+} from "../logic/notes/highlights.ts";
+import { effectiveHighlight } from "../logic/notes/conversation.ts";
+import { type NoteViewer } from "../logic/notes/permissions.ts";
 import { InviteModal } from "../ui/group/InviteModal.tsx";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
 import { MobilePager, type Pane } from "../ui/shared/MobilePager.tsx";
@@ -18,7 +23,7 @@ import { spawnToast, showSyncStatusToast } from "../ui/shared/toast/toastStore.t
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { useDelayedFlag } from "../ui/shared/hooks/useDelayedFlag.ts";
 import { useIsMobile } from "../ui/shared/hooks/useIsMobile.ts";
-import { setReaderPref, useReaderPrefs } from "../settings/userPrefs.ts";
+import { setReaderPref, useReaderPrefs } from "../logic/settings/userPrefs.ts";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
 import type { NoteRefs } from "../ui/notes/NoteThread.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
@@ -26,7 +31,7 @@ import {
   updateHighlights,
   type DesiredHighlight,
   type HighlightPainter,
-} from "../ui/reader/highlightReconciler.ts";
+} from "../ui/reader/engine/highlightReconciler.ts";
 import { useSourceView } from "../ui/reader/useSourceView.ts";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
 
@@ -86,6 +91,7 @@ export function Workspace({
   const [showingPresence, setShowingPresence] = useState(false);
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
+  const [chromeHidden, setChromeHidden] = useState(false);
   const [renamedDisplayName, setRenamedDisplayName] = useState<{
     base: string;
     value: string;
@@ -132,6 +138,10 @@ export function Workspace({
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: readerKeys, preventDefault: true });
   useHotkey("Mod+S", () => void Effect.runPromise(onSyncReadingPosition(sourceId)), {
     enabled: readerKeys,
+    preventDefault: true,
+  });
+  useHotkey("Z", () => setChromeHidden((hidden) => !hidden), {
+    enabled: !modalOpen,
     preventDefault: true,
   });
   useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open && !modalOpen });
@@ -344,7 +354,7 @@ export function Workspace({
   }
 
   return (
-    <div className="app">
+    <div className={chromeHidden ? "app app--chrome-hidden" : "app"}>
       <WorkspaceHeader
         displayName={displayName}
         onRename={(t) => void onRenameGroup(t)}
@@ -368,6 +378,7 @@ export function Workspace({
             onSelectBook={onSelectBook}
             onRenameBook={onRenameBook}
             onAddBook={onAddBook}
+            chromeHidden={chromeHidden}
           />
         );
         const notePanel = (
@@ -404,6 +415,7 @@ export function Workspace({
             notes={notePanel}
             selecting={view.selection !== null}
             onAddNote={view.commitSelection}
+            onChromeHiddenChange={setChromeHidden}
           />
         ) : (
           <SplitPane left={reader} right={notePanel} />

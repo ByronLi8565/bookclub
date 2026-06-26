@@ -14,7 +14,7 @@ import {
   uploadSource,
   type WorkflowFailure,
 } from "../workflows/groupWorkflows.ts";
-import { readJson } from "../util/http.ts";
+import { readJson } from "../http.ts";
 
 function workflowError(result: WorkflowFailure): Response {
   const body = result.reason

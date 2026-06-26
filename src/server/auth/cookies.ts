@@ -1,5 +1,5 @@
 import type { Env } from "../env.ts";
-import type { Identity } from "../agents/GroupAgent.ts";
+import type { Identity } from "../state/GroupAgent.ts";
 import { SESSION_TTL_MS, verifySession } from "./session.ts";
 
 const SESSION_COOKIE = "bc_session";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scanText } from "../client/notes/highlights.ts";
+import { scanText } from "../client/logic/notes/highlights.ts";
 
 describe("scanText", () => {
   it("returns no matches for an empty query", () => {

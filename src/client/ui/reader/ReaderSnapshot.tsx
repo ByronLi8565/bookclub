@@ -1,4 +1,4 @@
-import type { RenderSnapshot } from "./renderSnapshot.ts";
+import type { RenderSnapshot } from "./engine/renderSnapshot.ts";
 import type React from "react";
 
 export function ReaderSnapshot({ snapshot }: { snapshot: RenderSnapshot }): React.ReactElement {

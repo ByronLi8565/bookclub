@@ -17,6 +17,13 @@
     { "tag": "v2", "new_sqlite_classes": ["AuthAgent"] },
     { "tag": "v3", "new_sqlite_classes": ["GroupAgent", "GroupRegistry"] },
   ],
-  "r2_buckets": [{ "binding": "BOOKS", "bucket_name": "bookclub-books" }],
-  "vars": { "SESSION_HMAC_SECRET": "dev-insecure-session-secret-change-me" },
+  "r2_buckets": [
+    { "binding": "BOOKS", "bucket_name": "bookclub-books" },
+    { "binding": "BACKUPS", "bucket_name": "bookclub-do-backups" },
+  ],
+  "triggers": { "crons": ["0 */6 * * *"] },
+  "vars": {
+    "SESSION_HMAC_SECRET": "dev-insecure-session-secret-change-me",
+    "ADMIN_EMAIL": "byron.li@yale.edu",
+  },
 }

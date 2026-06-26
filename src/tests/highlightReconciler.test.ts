@@ -5,11 +5,11 @@ import {
   type Highlight,
   type HighlightAnchor,
   type SourceReader,
-} from "../client/notes/highlights.ts";
+} from "../client/logic/notes/highlights.ts";
 import {
   updateHighlights,
   type HighlightPainter,
-} from "../client/ui/reader/highlightReconciler.ts";
+} from "../client/ui/reader/engine/highlightReconciler.ts";
 
 function fakePainter() {
   const draws: { id: string; anchor: HighlightAnchor }[] = [];

@@ -1,7 +1,7 @@
-import type { AuthAgent } from "./agents/AuthAgent.ts";
-import type { GroupAgent } from "./agents/GroupAgent.ts";
-import type { GroupRegistry } from "./agents/GroupRegistry.ts";
-import type { NoteAgent } from "./agents/NoteAgent.ts";
+import type { AuthAgent } from "./state/AuthAgent.ts";
+import type { GroupAgent } from "./state/GroupAgent.ts";
+import type { GroupRegistry } from "./state/GroupRegistry.ts";
+import type { NoteAgent } from "./state/NoteAgent.ts";
 
 export interface Env {
   NoteAgent: DurableObjectNamespace<NoteAgent>;
@@ -9,7 +9,11 @@ export interface Env {
   GroupAgent: DurableObjectNamespace<GroupAgent>;
   GroupRegistry: DurableObjectNamespace<GroupRegistry>;
   BOOKS: R2Bucket;
+  BACKUPS: R2Bucket;
   SESSION_HMAC_SECRET: string;
+  // Email allowed to trigger manual backup/restore admin endpoints. Empty
+  // disables them (scheduled backups still run regardless).
+  ADMIN_EMAIL?: string;
   EMAIL?: SendEmail;
   EMAIL_FROM?: string;
   ASSETS?: Fetcher;

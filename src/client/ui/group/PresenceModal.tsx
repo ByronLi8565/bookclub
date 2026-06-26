@@ -1,5 +1,5 @@
-import type { RosterEntry } from "../../groups/api.ts";
-import type { OnlinePeer } from "../../notes/agent.ts";
+import type { RosterEntry } from "../../logic/groups/groupClient.ts";
+import type { OnlinePeer } from "../../logic/notes/useNoteAgent.ts";
 import { Modal } from "../shared/Modal.tsx";
 
 interface Person {

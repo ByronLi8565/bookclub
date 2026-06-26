@@ -1,6 +1,6 @@
 .reader {
   --reader-jump-flash-duration: 700ms;
-  --reader-page-turn-hit-width: clamp(20px, 2.5vw, 32px);
+  --reader-page-turn-hit-width: clamp(28px, 4vw, 56px);
 
   display: flex;
   flex-direction: column;
@@ -250,6 +250,10 @@
 }
 
 @media (pointer: coarse), (max-width: 700px) {
+  .reader {
+    --reader-page-turn-hit-width: clamp(48px, 16vw, 76px);
+  }
+
   .reader-bar {
     gap: 6px;
   }

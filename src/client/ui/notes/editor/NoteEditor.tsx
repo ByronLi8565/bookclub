@@ -14,7 +14,7 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { $isQuoteNode, QuoteNode } from "@lexical/rich-text";
 import { $createParagraphNode, $getRoot, FORMAT_TEXT_COMMAND } from "lexical";
 import { useCallback, useMemo, useRef } from "react";
-import { NOTE_TRANSFORMERS } from "../../../notes/render.ts";
+import { NOTE_TRANSFORMERS } from "../../../logic/notes/renderHtml.ts";
 import { ReferenceNode } from "./ReferenceNode.ts";
 import { createReferenceTransformer } from "./referenceTransformer.ts";
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import type { BookUpload, InspectedBook } from "../../groups/useBookUpload.ts";
+import type { BookUpload, InspectedBook } from "../../logic/groups/useBookUpload.ts";
 import type { SourceCapabilities, SourceHealth } from "../../../shared/types/sourceHealth.ts";
-import { formatBytes } from "../../../shared/util.ts";
+import { formatBytes } from "../../../shared/format.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { Modal } from "../shared/Modal.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";

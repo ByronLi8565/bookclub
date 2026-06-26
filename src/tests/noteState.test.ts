@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { epubAnchor, type Highlight } from "../client/notes/highlights.ts";
+import { epubAnchor, type Highlight } from "../client/logic/notes/highlights.ts";
 import type { Note, NoteAuthor } from "../shared/types/notes.ts";
 import {
   addNote,
@@ -10,7 +10,7 @@ import {
   removeNote,
   type NoteStamp,
   type NoteState,
-} from "../server/util/noteState.ts";
+} from "../server/state/noteState.ts";
 
 function fakeStamp(now = "2026-01-01T00:00:00.000Z"): NoteStamp {
   let n = 0;

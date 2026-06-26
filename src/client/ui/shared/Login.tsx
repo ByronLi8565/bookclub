@@ -1,5 +1,5 @@
 import { useReducer } from "react";
-import type { Session } from "../../auth/useSession.ts";
+import type { Session } from "../../app/useSession.ts";
 import { Modal } from "./Modal.tsx";
 
 const MESSAGES: Record<string, string> = {

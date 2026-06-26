@@ -2,9 +2,10 @@ import type { SourceRef } from "../../../shared/types/sources.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { useEpubSourceView } from "./useEpubSourceView.ts";
 import { usePdfSourceView } from "./usePdfSourceView.ts";
-import type { OnSelect, SourceView } from "./sourceView.ts";
+import type { OnSelect } from "./types.ts";
+import type { SourceView } from "./types.ts";
 
-export type { SourceView, SourceLocation, OnSelect } from "./sourceView.ts";
+export type { SourceView, SourceLocation, OnSelect } from "./types.ts";
 
 export function useSourceView(
   source: SourceRef | null,

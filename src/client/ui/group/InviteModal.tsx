@@ -1,5 +1,10 @@
 import { useEffect, useReducer, useRef } from "react";
-import { fetchGroup, getInviteLink, inviteToGroup, type RosterEntry } from "../../groups/api.ts";
+import {
+  fetchGroup,
+  getInviteLink,
+  inviteToGroup,
+  type RosterEntry,
+} from "../../logic/groups/groupClient.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { Modal } from "../shared/Modal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";

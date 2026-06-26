@@ -1,4 +1,4 @@
-import { sha256Hex } from "../../shared/util.ts";
+import { sha256Hex } from "../../shared/crypto.ts";
 import {
   contentTypeFor,
   sniffSourceKind,

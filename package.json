@@ -9,6 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:visual": "playwright test src/tests/playwright/visual.pw.ts",
+    "test:visual:update": "playwright test src/tests/playwright/visual.pw.ts --update-snapshots",
     "info:template": "node scripts/new-info-card.mjs",
     "check": "oxfmt --check && oxlint && tsc --noEmit",
     "doctor": "npx react-doctor@latest"

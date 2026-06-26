@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildConversation, referenceSpace, selectNotes } from "../client/notes/conversation.ts";
+import {
+  buildConversation,
+  referenceSpace,
+  selectNotes,
+} from "../client/logic/notes/conversation.ts";
 import type { Note } from "../shared/types/notes.ts";
 
 function note(over: Partial<Note> & { id: string }): Note {

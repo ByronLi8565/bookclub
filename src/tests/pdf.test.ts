@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { JSDOM } from "jsdom";
-import { captureHighlight, epubAnchor, pdfAnchor } from "../client/notes/highlights.ts";
-import { pageGeometry, pageText, rectsForRange } from "../client/sources/pdf.ts";
+import { captureHighlight, epubAnchor, pdfAnchor } from "../client/logic/notes/highlights.ts";
+import { pageGeometry, pageText, rectsForRange } from "../client/logic/sources/pdf.ts";
 
 function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPageProxy {
   return {

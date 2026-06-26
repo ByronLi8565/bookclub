@@ -1,8 +1,8 @@
 import { useEffect, useReducer, useRef, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
-import type { Session } from "../../auth/useSession.ts";
-import { createGroup, listMyGroups, type GroupSummary } from "../../groups/api.ts";
+import type { Session } from "../../app/useSession.ts";
+import { createGroup, listMyGroups, type GroupSummary } from "../../logic/groups/groupClient.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
 import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { Loading } from "../shared/Loading.tsx";
@@ -17,6 +17,7 @@ const NAME_ERRORS: Record<string, string> = {
 interface GroupsStore {
   groups: GroupSummary[];
   loading: boolean;
+  failed: boolean;
 }
 
 interface HomeState {
@@ -73,7 +74,7 @@ function homeReducer(state: HomeState, action: HomeAction): HomeState {
   }
 }
 
-let groupsStore: GroupsStore = { groups: [], loading: false };
+let groupsStore: GroupsStore = { groups: [], loading: false, failed: false };
 let groupsRequest = 0;
 const groupsListeners = new Set<() => void>();
 
@@ -90,12 +91,21 @@ function subscribeGroups(listener: () => void): () => void {
 function loadGroups(authed: boolean): void {
   const request = ++groupsRequest;
   if (!authed) {
-    setGroupsStore({ groups: [], loading: false });
+    setGroupsStore({ groups: [], loading: false, failed: false });
     return;
   }
-  setGroupsStore({ groups: groupsStore.groups, loading: true });
-  void listMyGroups().then((groups) => {
-    if (request === groupsRequest) setGroupsStore({ groups, loading: false });
+  setGroupsStore({ groups: groupsStore.groups, loading: true, failed: false });
+  void listMyGroups().then((result) => {
+    if (request !== groupsRequest) return;
+    if (!result.ok) {
+      setGroupsStore({ groups: groupsStore.groups, loading: false, failed: true });
+      spawnToast("Couldn't load your clubs", "Something went wrong. Try refreshing.", {
+        type: "error",
+        durationMs: 6000,
+      });
+      return;
+    }
+    setGroupsStore({ groups: result.value, loading: false, failed: false });
   });
 }
 
@@ -103,7 +113,11 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   const authed = session.status === "authed";
   const [state, dispatch] = useReducer(homeReducer, initialHomeState);
   const { loginOpen, name, creating, createPending, error, inviting, infoOpen } = state;
-  const { groups, loading: groupsLoading } = useSyncExternalStore(
+  const {
+    groups,
+    loading: groupsLoading,
+    failed: groupsFailed,
+  } = useSyncExternalStore(
     subscribeGroups,
     () => groupsStore,
     () => groupsStore,
@@ -197,6 +211,10 @@ export function Home({ session }: { session: Session }): React.ReactElement {
             {authed ? (
               groupsLoading ? (
                 <Loading className="loading--home-clubs" />
+              ) : groupsFailed && groups.length === 0 ? (
+                <span className="home-existing-label">
+                  unable to load your clubs — refresh to try again
+                </span>
               ) : groups.length === 0 ? (
                 <span className="home-existing-label">no clubs yet — create one above</span>
               ) : (

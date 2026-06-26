@@ -1,4 +1,4 @@
-import type { Conversation } from "../../notes/conversation.ts";
+import type { Conversation } from "../../logic/notes/conversation.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteThread, type NoteActions, type NoteRefs, type NoteViewer } from "./NoteThread.tsx";

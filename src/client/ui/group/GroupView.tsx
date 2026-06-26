@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Session } from "../../auth/useSession.ts";
+import type { Session } from "../../app/useSession.ts";
 import {
   fetchGroup,
   redeemInvite,
@@ -8,15 +8,15 @@ import {
   resolveBookTitle,
   type GroupSummary,
   type RosterEntry,
-} from "../../groups/api.ts";
-import { books, loadSource } from "../../groups/sourceAccess.ts";
-import { useBookUpload } from "../../groups/useBookUpload.ts";
+} from "../../logic/groups/groupClient.ts";
+import { books, loadSource } from "../../logic/groups/sourceAccess.ts";
+import { useBookUpload } from "../../logic/groups/useBookUpload.ts";
 import {
   fetchServerReadingPosition,
   getReadingPosition,
   setLocalReadingPosition,
   syncReadingPosition,
-} from "../../settings/readingPositions.ts";
+} from "../../logic/settings/readingPositions.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";

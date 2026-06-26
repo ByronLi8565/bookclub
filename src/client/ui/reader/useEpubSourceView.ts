@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSwipeable } from "react-swipeable";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
 import {
@@ -11,13 +11,16 @@ import {
   popupPoint,
   type HighlightAnchor,
   type SourceReader,
-} from "../../notes/highlights.ts";
+} from "../../logic/notes/highlights.ts";
 import type Navigation from "epubjs/types/navigation";
-import { makeEpubReader } from "./epubReader.ts";
-import { useReaderPrefs } from "../../settings/userPrefs.ts";
+import { makeEpubReader } from "./engine/epubReader.ts";
+import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
-import { bumpSeq, type OnSelect, type SourceLocation, type SourceView } from "./sourceView.ts";
+import { bumpSeq } from "./engine/seq.ts";
+import { type OnSelect } from "./types.ts";
+import { type SourceView } from "./types.ts";
+import { type SourceLocation } from "./types.ts";
 
 function firstChapterHref(nav: Navigation): string | undefined {
   return nav.landmark?.("bodymatter")?.href ?? nav.toc?.[0]?.href;
@@ -103,6 +106,57 @@ interface ResizableView {
   contents?: Contents;
 }
 
+interface EpubOpenedSource {
+  file: File | null;
+  initialEpubCfi: string | null;
+}
+
+interface EpubViewState {
+  openedSource: EpubOpenedSource;
+  ready: boolean;
+  title: string | null;
+  raw: RawLocation | null;
+  pagination: Pagination | null;
+  viewportTick: number;
+  selection: { x: number; y: number } | null;
+}
+
+type EpubViewAction =
+  | { type: "reset"; openedSource: EpubOpenedSource }
+  | { type: "ready"; ready: boolean }
+  | { type: "title"; title: string | null }
+  | { type: "raw"; raw: RawLocation | null }
+  | { type: "pagination"; pagination: Pagination | null }
+  | { type: "viewport"; raw?: RawLocation }
+  | { type: "selection"; selection: { x: number; y: number } | null };
+
+function epubViewReducer(state: EpubViewState, action: EpubViewAction): EpubViewState {
+  switch (action.type) {
+    case "reset":
+      return {
+        openedSource: action.openedSource,
+        ready: false,
+        title: null,
+        raw: null,
+        pagination: null,
+        viewportTick: state.viewportTick + 1,
+        selection: null,
+      };
+    case "ready":
+      return { ...state, ready: action.ready };
+    case "title":
+      return { ...state, title: action.title };
+    case "raw":
+      return { ...state, raw: action.raw };
+    case "pagination":
+      return { ...state, pagination: action.pagination };
+    case "viewport":
+      return { ...state, raw: action.raw ?? state.raw, viewportTick: state.viewportTick + 1 };
+    case "selection":
+      return { ...state, selection: action.selection };
+  }
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
@@ -129,7 +183,7 @@ export function useEpubSourceView(
   const spreadModeRef = useRef(spreadMode);
   spreadModeRef.current = spreadMode;
   const openSearchRef = useRef<() => void>(() => {});
-  const [title, setTitle] = useState<string | null>(null);
+  const initialEpubCfi = initialPosition?.kind === "epub" ? initialPosition.cfi : null;
 
   const swipe = useSwipeable({
     onSwipedLeft: () => onSwipeRef.current?.("left"),
@@ -141,33 +195,31 @@ export function useEpubSourceView(
 
   const viewRef = useRef<Ref.Ref<Option.Option<LiveView>>>(null!);
   viewRef.current ??= Effect.runSync(Ref.make(Option.none<LiveView>()));
-  const [ready, setReady] = useState(false);
   const [fontSize, setFontSizeState] = useState(100);
-  const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
   const drawnCfiRef = useRef<Map<string, string>>(null!);
   drawnCfiRef.current ??= new Map<string, string>();
-  const [raw, setRaw] = useState<RawLocation | null>(null);
-  const [position, setPosition] = useState<SourceReadingPosition | null>(null);
-  const [pagination, setPagination] = useState<Pagination | null>(null);
-  const [viewportTick, setViewportTick] = useState(0);
   const measureSeqRef = useRef(0);
-  const initialEpubCfi = initialPosition?.kind === "epub" ? initialPosition.cfi : null;
-  const [openedSource, setOpenedSource] = useState({ file, initialEpubCfi });
+  const [viewState, dispatchView] = useReducer(epubViewReducer, {
+    openedSource: { file, initialEpubCfi },
+    ready: false,
+    title: null,
+    raw: null,
+    pagination: null,
+    viewportTick: 0,
+    selection: null,
+  });
+  const { ready, title, raw, pagination, viewportTick, selection } = viewState;
+  const { openedSource } = viewState;
 
   if (openedSource.file !== file || openedSource.initialEpubCfi !== initialEpubCfi) {
-    setOpenedSource({ file, initialEpubCfi });
-    setReady(false);
-    setRaw(null);
-    setPosition(null);
-    setPagination(null);
-    setTitle(null);
+    dispatchView({ type: "reset", openedSource: { file, initialEpubCfi } });
     drawnCfiRef.current.clear();
   }
 
   const publish = (view: Option.Option<LiveView>) => {
     Effect.runSync(Ref.set(viewRef.current, view));
-    setReady(Option.isSome(view));
+    dispatchView({ type: "ready", ready: Option.isSome(view) });
   };
 
   useEffect(() => {
@@ -197,13 +249,16 @@ export function useEpubSourceView(
         range,
         clear: () => sel.removeAllRanges(),
       };
-      setSelection(popupPoint(range.getBoundingClientRect(), frame));
+      dispatchView({
+        type: "selection",
+        selection: popupPoint(range.getBoundingClientRect(), frame),
+      });
     };
     const clearSelection = () => {
       if (lastText === "") return;
       lastText = "";
       pendingRef.current = null;
-      setSelection(null);
+      dispatchView({ type: "selection", selection: null });
     };
 
     const poll = window.setInterval(() => {
@@ -253,19 +308,22 @@ export function useEpubSourceView(
         | undefined;
       const start = loc?.start;
       if (!start?.displayed) return;
-      setRaw({
-        index: start.index,
-        cfi: start.cfi ?? null,
-        page: start.displayed.page,
-        atStart: loc?.atStart ?? false,
-        atEnd: loc?.atEnd ?? false,
+      dispatchView({
+        type: "raw",
+        raw: {
+          index: start.index,
+          cfi: start.cfi ?? null,
+          page: start.displayed.page,
+          atStart: loc?.atStart ?? false,
+          atEnd: loc?.atEnd ?? false,
+        },
       });
     };
 
     rendition.on("relocated", () => {
       showLocation();
       pendingRef.current = null;
-      setSelection(null);
+      dispatchView({ type: "selection", selection: null });
     });
 
     const load = Effect.gen(function* () {
@@ -274,7 +332,9 @@ export function useEpubSourceView(
       const metadata = yield* Effect.tryPromise(() => book.loaded.metadata).pipe(
         Effect.orElseSucceed(() => null),
       );
-      yield* Effect.sync(() => setTitle(metadata?.title?.trim() || null));
+      yield* Effect.sync(() =>
+        dispatchView({ type: "title", title: metadata?.title?.trim() || null }),
+      );
       const start = yield* Effect.tryPromise(() => book.loaded.navigation).pipe(
         Effect.map(firstChapterHref),
         // oxlint-disable-next-line no-useless-undefined
@@ -331,16 +391,18 @@ export function useEpubSourceView(
               }
             | undefined;
           const start = loc?.start;
-          if (start?.displayed) {
-            setRaw({
-              index: start.index,
-              cfi: start.cfi ?? null,
-              page: start.displayed.page,
-              atStart: loc?.atStart ?? false,
-              atEnd: loc?.atEnd ?? false,
-            });
-          }
-          setViewportTick((v) => v + 1);
+          dispatchView({
+            type: "viewport",
+            raw: start?.displayed
+              ? {
+                  index: start.index,
+                  cfi: start.cfi ?? null,
+                  page: start.displayed.page,
+                  atStart: loc?.atStart ?? false,
+                  atEnd: loc?.atEnd ?? false,
+                }
+              : undefined,
+          });
         } catch (error) {
           console.error("failed to resize rendition", error);
         }
@@ -377,7 +439,7 @@ export function useEpubSourceView(
           measurePagination(book, width, height, pct, spread, () => seq !== measureSeqRef.current),
         );
         if (result && seq === measureSeqRef.current) {
-          yield* Effect.sync(() => setPagination(result));
+          yield* Effect.sync(() => dispatchView({ type: "pagination", pagination: result }));
         }
       }).pipe(
         Effect.tapError((error) =>
@@ -507,7 +569,7 @@ export function useEpubSourceView(
   const dismissSelection = useCallback(() => {
     pendingRef.current?.clear();
     pendingRef.current = null;
-    setSelection(null);
+    dispatchView({ type: "selection", selection: null });
   }, []);
   const commitSelection = useCallback(() => {
     const pending = pendingRef.current;
@@ -553,12 +615,9 @@ export function useEpubSourceView(
     };
   }, [raw, pagination]);
 
-  useEffect(() => {
-    if (!raw?.cfi) {
-      setPosition(null);
-      return;
-    }
-    setPosition({ kind: "epub", cfi: raw.cfi, percentage: location?.percentage ?? 0 });
+  const position = useMemo<SourceReadingPosition | null>(() => {
+    if (!raw?.cfi) return null;
+    return { kind: "epub", cfi: raw.cfi, percentage: location?.percentage ?? 0 };
   }, [raw, location?.percentage]);
 
   return {

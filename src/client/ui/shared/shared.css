@@ -61,6 +61,7 @@
   border-top: var(--line);
   border-bottom: var(--line);
   padding-bottom: env(safe-area-inset-bottom);
+  background: var(--black);
 }
 
 .pager-tabs button {
@@ -78,8 +79,9 @@
   color: var(--white);
 }
 
-.pager-add-note {
+.pager-tabs .pager-add-note {
   background: var(--highlight);
+  color: var(--black);
   font-weight: 700;
 }
 
@@ -209,7 +211,11 @@
 }
 
 .modal {
-  width: min(var(--modal-width), 100%);
+  position: static;
+  width: min(var(--modal-width), calc(100vw - 40px));
+  max-width: none;
+  margin: 0;
+  padding: 0;
   background: var(--white);
   border: var(--line);
   box-shadow: var(--shadow-lg);

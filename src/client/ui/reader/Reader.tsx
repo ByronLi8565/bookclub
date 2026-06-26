@@ -25,6 +25,7 @@ export function Reader({
   onSelectBook = () => {},
   onRenameBook = () => {},
   onAddBook = null,
+  chromeHidden = false,
 }: {
   view: SourceView;
   hasFile: boolean;
@@ -36,6 +37,7 @@ export function Reader({
   onSelectBook?: (sourceId: string) => void;
   onRenameBook?: (sourceId: string, title: string) => void;
   onAddBook?: (() => void) | null;
+  chromeHidden?: boolean;
 }) {
   const { fontSize, setFontSize, ready, selection, search } = view;
   const modalOpen = useAnyModalOpen();
@@ -70,7 +72,7 @@ export function Reader({
     return () => document.removeEventListener("pointerdown", onDown);
   }, [floatingNote, selection, dismissSelection]);
   return (
-    <div className="reader">
+    <div className={chromeHidden ? "reader reader--chrome-hidden" : "reader"}>
       <div className="reader-bar">
         <BookMenu
           activeTitle={view.title}

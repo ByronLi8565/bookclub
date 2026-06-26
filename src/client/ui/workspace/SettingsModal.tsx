@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
-import { cachedSourceSize, refreshSource } from "../../groups/sourceAccess.ts";
+import { cachedSourceSize, refreshSource } from "../../logic/groups/sourceAccess.ts";
 import {
   setReaderPref,
   useReaderPrefs,
   type PdfPageLayout,
   type ReadingPositionOpenPolicy,
   type SmartArrows,
-} from "../../settings/userPrefs.ts";
+} from "../../logic/settings/userPrefs.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { DropdownMenu, type DropdownTriggerProps } from "../shared/DropdownMenu.tsx";
 import { Modal, ModalPagerTabs } from "../shared/Modal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
-import { formatBytes } from "../../../shared/util.ts";
+import { formatBytes } from "../../../shared/format.ts";
 
 function SettingDropdown<T extends string>({
   value,

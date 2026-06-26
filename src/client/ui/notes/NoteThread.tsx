@@ -1,17 +1,15 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import editIcon from "@assets/edit.svg";
-import {
-  canDeleteNote,
-  canEditNote,
-  effectiveHighlight,
-  noteTitle,
-  type Note,
-  type NoteViewer,
-} from "../../notes/render.ts";
+import type { Note } from "../../../shared/types/notes.ts";
+import { effectiveHighlight } from "../../logic/notes/conversation.ts";
+import { noteTitle } from "../../logic/notes/format.ts";
+import { canDeleteNote } from "../../logic/notes/permissions.ts";
+import { canEditNote } from "../../logic/notes/permissions.ts";
+import { type NoteViewer } from "../../logic/notes/permissions.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";
 
-export type { NoteViewer } from "../../notes/render.ts";
+export type { NoteViewer } from "../../logic/notes/permissions.ts";
 
 const MAX_INDENT = 4;
 
