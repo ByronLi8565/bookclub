@@ -8,7 +8,7 @@ export function Loading({ progress, className }: LoadingProps): React.ReactEleme
   const classes = className ? `loading ${className}` : "loading";
 
   return (
-    <div className={classes} role="status" aria-live="polite" aria-label="Loading">
+    <output className={classes} aria-live="polite" aria-label="Loading">
       <span className="loading-text">
         LOADING
         <span className="loading-dots" aria-hidden="true">
@@ -22,6 +22,6 @@ export function Loading({ progress, className }: LoadingProps): React.ReactEleme
           <span className="loading-progress-fill" style={{ width: `${pct}%` }} />
         </span>
       )}
-    </div>
+    </output>
   );
 }

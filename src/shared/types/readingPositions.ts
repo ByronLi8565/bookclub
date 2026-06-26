@@ -1,12 +1,12 @@
 import * as Schema from "effect/Schema";
 
-export const EpubReadingPosition = Schema.Struct({
+const EpubReadingPosition = Schema.Struct({
   kind: Schema.Literal("epub"),
   cfi: Schema.String,
   percentage: Schema.Number,
 });
 
-export const PdfReadingPosition = Schema.Struct({
+const PdfReadingPosition = Schema.Struct({
   kind: Schema.Literal("pdf"),
   page: Schema.Number,
   scrollRatio: Schema.Number,
@@ -49,7 +49,7 @@ export const ReadingPositionResponse = Schema.Struct({
   position: Schema.NullOr(StoredReadingPosition),
 });
 
-export const ReadingPositionSyncStatus = Schema.Union([
+const ReadingPositionSyncStatus = Schema.Union([
   Schema.Literal("dirty"),
   Schema.Literal("syncing"),
   Schema.Literal("clean"),

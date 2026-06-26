@@ -1,8 +1,56 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { fetchGroup, getInviteLink, inviteToGroup, type RosterEntry } from "../../groups/api.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { Modal } from "../shared/Modal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
+
+interface InviteState {
+  link: string | null;
+  linkLoading: boolean;
+  members: RosterEntry[];
+  membersLoading: boolean;
+  email: string;
+  busy: boolean;
+  copied: boolean;
+}
+
+type InviteAction =
+  | { type: "reset" }
+  | { type: "linkLoaded"; link: string | null }
+  | { type: "membersLoaded"; members: RosterEntry[] }
+  | { type: "email"; email: string }
+  | { type: "busy"; busy: boolean }
+  | { type: "sent" }
+  | { type: "copied"; copied: boolean };
+
+const initialInviteState: InviteState = {
+  link: null,
+  linkLoading: true,
+  members: [],
+  membersLoading: true,
+  email: "",
+  busy: false,
+  copied: false,
+};
+
+function inviteReducer(state: InviteState, action: InviteAction): InviteState {
+  switch (action.type) {
+    case "reset":
+      return initialInviteState;
+    case "linkLoaded":
+      return { ...state, link: action.link, linkLoading: false, busy: false };
+    case "membersLoaded":
+      return { ...state, members: action.members, membersLoading: false };
+    case "email":
+      return { ...state, email: action.email };
+    case "busy":
+      return { ...state, busy: action.busy };
+    case "sent":
+      return { ...state, email: "", busy: false };
+    case "copied":
+      return { ...state, copied: action.copied };
+  }
+}
 
 export function InviteModal({
   groupRef,
@@ -13,29 +61,24 @@ export function InviteModal({
   displayName: string;
   onClose: () => void;
 }): React.ReactElement {
-  const [link, setLink] = useState<string | null>(null);
-  const [linkLoading, setLinkLoading] = useState(true);
-  const [members, setMembers] = useState<RosterEntry[]>([]);
-  const [membersLoading, setMembersLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [state, dispatch] = useReducer(inviteReducer, initialInviteState);
+  const loadedGroupRef = useRef(groupRef);
+  const { link, linkLoading, members, membersLoading, email, busy, copied } = state;
+
+  if (loadedGroupRef.current !== groupRef) {
+    loadedGroupRef.current = groupRef;
+    dispatch({ type: "reset" });
+  }
 
   useEffect(() => {
     let cancelled = false;
-    setLink(null);
-    setLinkLoading(true);
-    setMembers([]);
-    setMembersLoading(true);
     void getInviteLink(groupRef).then((r) => {
       if (cancelled) return;
-      if (r.ok) setLink(r.value.link);
-      setLinkLoading(false);
+      dispatch({ type: "linkLoaded", link: r.ok ? r.value.link : null });
     });
     void fetchGroup(groupRef).then((g) => {
       if (cancelled) return;
-      if (g) setMembers(g.members);
-      setMembersLoading(false);
+      dispatch({ type: "membersLoaded", members: g?.members ?? [] });
     });
     return () => {
       cancelled = true;
@@ -44,13 +87,13 @@ export function InviteModal({
 
   async function onSendEmail(e: React.FormEvent): Promise<void> {
     e.preventDefault();
-    setBusy(true);
+    dispatch({ type: "busy", busy: true });
     const result = await inviteToGroup(groupRef, email);
-    setBusy(false);
     if (result.ok) {
       spawnToast("Invite sent", `Invited ${email}.`, { type: "info" });
-      setEmail("");
+      dispatch({ type: "sent" });
     } else {
+      dispatch({ type: "busy", busy: false });
       spawnToast("Invite failed", "Couldn't send that invite.", { type: "error" });
     }
   }
@@ -58,16 +101,19 @@ export function InviteModal({
   async function onCopy(): Promise<void> {
     if (!link) return;
     await navigator.clipboard.writeText(link).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    dispatch({ type: "copied", copied: true });
+    setTimeout(() => dispatch({ type: "copied", copied: false }), 1500);
   }
 
   async function onRotate(): Promise<void> {
-    setBusy(true);
+    dispatch({ type: "busy", busy: true });
     const result = await getInviteLink(groupRef, true);
-    setBusy(false);
-    if (result.ok) setLink(result.value.link);
-    else spawnToast("Failed", "Couldn't regenerate the link.", { type: "error" });
+    if (result.ok) {
+      dispatch({ type: "linkLoaded", link: result.value.link });
+    } else {
+      dispatch({ type: "busy", busy: false });
+      spawnToast("Failed", "Couldn't regenerate the link.", { type: "error" });
+    }
   }
 
   const shownLink = link ? link.replace(/^https?:\/\//u, "") : "";
@@ -78,9 +124,10 @@ export function InviteModal({
         <form onSubmit={(e) => void onSendEmail(e)}>
           <input
             type="email"
+            aria-label="Invitee email"
             placeholder="invite by email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => dispatch({ type: "email", email: e.target.value })}
           />
           <button
             type="submit"

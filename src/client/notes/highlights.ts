@@ -33,15 +33,6 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
-export function isTextSelectionIn(root: Node, range: Range): boolean {
-  return (
-    range.startContainer.nodeType === Node.TEXT_NODE &&
-    range.endContainer.nodeType === Node.TEXT_NODE &&
-    root.contains(range.startContainer) &&
-    root.contains(range.endContainer)
-  );
-}
-
 export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: number } {
   const vv = window.visualViewport;
   const ox = vv?.offsetLeft ?? 0;
@@ -86,7 +77,7 @@ function rangeText(range: Range): string {
   return text;
 }
 
-export function deriveQuote(range: Range): QuoteSelector {
+function deriveQuote(range: Range): QuoteSelector {
   const doc = range.startContainer.ownerDocument;
   const root = doc?.body;
   if (!root) {
@@ -172,7 +163,7 @@ export function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
   return rangeFromOffsets(root, start, start + quote.exact.length);
 }
 
-export function rangeFromOffsets(root: Node, start: number, end: number): Range | null {
+function rangeFromOffsets(root: Node, start: number, end: number): Range | null {
   const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const range = root.ownerDocument!.createRange();
   let offset = 0;

@@ -35,6 +35,19 @@
   text-align: center;
 }
 
+.reader-bar .reader-fit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.reader-bar .reader-fit svg {
+  width: 1.15em;
+  height: 1.15em;
+  display: block;
+}
+
 .reader-bar .reader-title {
   font-weight: 700;
   max-width: 40%;
@@ -115,13 +128,16 @@
   white-space: nowrap;
 }
 
+/* `:focus` (not `:focus-visible`) so programmatic focus from arrow-key
+   navigation visibly snaps the highlight to the menu item — `:focus-visible`
+   does not match `.focus()` calls in most browsers. */
 .book-menu-item:hover,
-.book-menu-item:focus-visible {
+.book-menu-item:focus {
   background: var(--black);
   color: var(--white);
 }
 
-.book-menu-item:focus-visible {
+.book-menu-item:focus {
   outline: none;
 }
 
@@ -171,6 +187,28 @@
   height: 100%;
   min-height: 0;
   position: relative;
+}
+
+.reader-snapshot {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: start center;
+  overflow: hidden;
+  background: var(--white);
+  pointer-events: none;
+}
+
+.reader-snapshot img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.reader-surface .loading--reader {
+  z-index: 2;
 }
 
 .reader-surface .reader-empty {
@@ -303,8 +341,29 @@
 
 .pdf-page {
   position: relative;
+  /* Row of one or two page panes (book-style spread). The gutter between two
+     pages is supplied via the --pdf-spread-gutter var set per render. */
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--pdf-spread-gutter, 0px);
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* Each pane is the positioning context for one page's canvas, text layer, and
+   highlight/selection overlays — all sized in fractions of *this* pane's box,
+   so the existing page-relative rect math holds for either page in a spread. */
+.pdf-pane {
+  position: relative;
+  flex: none;
+  /* In a spread the pane is cropped to the page's text box; `inner` (the full
+     page) is offset inside it, so clip the overflow. */
+  overflow: hidden;
+}
+
+.pdf-pane-inner {
+  position: absolute;
 }
 
 .pdf-page canvas {
@@ -378,29 +437,33 @@
   top: 0;
 }
 
+/* Native selection is rendered invisibly; we paint our own preview overlay
+   (.pdf-selection) from word-confined rects instead. pdf.js's text spans are
+   absolutely positioned and don't follow visual order, so the browser's own
+   ::selection paints stray rectangles in the margins. The DOM selection still
+   drives word-by-word extension — only its rendering is suppressed. */
 .pdf-page .textLayer ::selection {
-  background: color-mix(
-    in srgb,
-    var(--highlight) calc(var(--highlight-opacity) * 100%),
-    transparent
-  );
+  background: transparent;
 }
 
 .pdf-highlights,
 .pdf-jump-flash,
-.pdf-underlines {
+.pdf-underlines,
+.pdf-selection {
   z-index: 1;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }
 
-.pdf-highlights {
+.pdf-highlights,
+.pdf-selection {
   opacity: var(--highlight-opacity);
   mix-blend-mode: multiply;
 }
 
-.pdf-highlights .bc-highlight {
+.pdf-highlights .bc-highlight,
+.pdf-selection .bc-selection {
   background: var(--highlight);
 
   mix-blend-mode: normal;

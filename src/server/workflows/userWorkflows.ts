@@ -6,47 +6,23 @@ import {
   type StoredReadingPosition,
 } from "../../shared/types/readingPositions.ts";
 import { SetUserPrefsRequest, type UserPrefs } from "../../shared/types/userPrefs.ts";
-import { currentIdentity } from "../auth/cookies.ts";
 import type { Env } from "../env.ts";
 import type { GroupAgent, Identity } from "../agents/GroupAgent.ts";
 import type { AuthAgent } from "../agents/AuthAgent.ts";
+import {
+  fail,
+  requireIdentity,
+  runWorkflow,
+  tryPromise,
+  type Async,
+  type WorkflowFailure,
+  type WorkflowResult,
+} from "./shared.ts";
 
-export type WorkflowResult<T> = { ok: true; value: T } | WorkflowFailure;
+export type { WorkflowFailure } from "./shared.ts";
 
-export interface WorkflowFailure {
-  ok: false;
-  status: number;
-  error: string;
-}
-
-type Async<T> = {
-  [K in keyof T]: T[K] extends (...args: infer A) => infer R
-    ? (...args: A) => Promise<Awaited<R>>
-    : T[K];
-};
 type Auth = Async<AuthAgent>;
 type Group = Async<GroupAgent>;
-
-function fail(status: number, error: string): WorkflowFailure {
-  return { ok: false, status, error };
-}
-
-const succeed = <T>(value: T): WorkflowResult<T> => ({ ok: true, value });
-
-const tryPromise = <T>(evaluate: () => T | PromiseLike<T>): Effect.Effect<Awaited<T>> =>
-  Effect.promise(() => Promise.resolve(evaluate()));
-
-const runWorkflow = <T>(workflow: Effect.Effect<T, WorkflowFailure>): Promise<WorkflowResult<T>> =>
-  Effect.runPromise(
-    workflow.pipe(Effect.match({ onFailure: (failure) => failure, onSuccess: succeed })),
-  );
-
-const requireIdentity = (env: Env, request: Request): Effect.Effect<Identity, WorkflowFailure> =>
-  Effect.gen(function* () {
-    const me = yield* tryPromise(() => currentIdentity(request, env));
-    if (!me) return yield* Effect.fail(fail(401, "unauthenticated"));
-    return me;
-  });
 
 const authFor = (env: Env, me: Identity): Effect.Effect<Auth> =>
   Effect.map(

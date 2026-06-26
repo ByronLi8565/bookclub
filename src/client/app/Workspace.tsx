@@ -1,4 +1,5 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
+import { useAnyModalOpen } from "../ui/shared/modalLayer.ts";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
@@ -17,6 +18,7 @@ import { spawnToast, showSyncStatusToast } from "../ui/shared/toast/toastStore.t
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { useDelayedFlag } from "../ui/shared/hooks/useDelayedFlag.ts";
 import { useIsMobile } from "../ui/shared/hooks/useIsMobile.ts";
+import { setReaderPref, useReaderPrefs } from "../settings/userPrefs.ts";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
 import type { NoteRefs } from "../ui/notes/NoteThread.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
@@ -84,7 +86,11 @@ export function Workspace({
   const [showingPresence, setShowingPresence] = useState(false);
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
-  const [displayName, setDisplayName] = useState(groupName);
+  const [renamedDisplayName, setRenamedDisplayName] = useState<{
+    base: string;
+    value: string;
+  } | null>(null);
+  const displayName = renamedDisplayName?.base === groupName ? renamedDisplayName.value : groupName;
   const agent = useNoteAgent(groupId);
   const notes = useMemo(
     () => selectNotes(agent.notes, { sources: [sourceId] }),
@@ -111,16 +117,27 @@ export function Workspace({
   const readerPending = file === null || !view.ready;
   const showReaderLoading = useDelayedFlag(readerPending, 300);
 
-  useHotkey("ArrowLeft", () => view.prev(), { enabled: view.ready });
-  useHotkey("ArrowRight", () => view.next(), { enabled: view.ready });
-  useHotkey("Mod+F", () => view.search.openSearch(), { enabled: view.ready, preventDefault: true });
+  // While a modal is open it owns the keyboard; reader hotkeys are suppressed.
+  const modalOpen = useAnyModalOpen();
+  const readerKeys = view.ready && !modalOpen;
+  const { pdfPageLayout } = useReaderPrefs();
+  useHotkey("ArrowLeft", () => view.prev(), { enabled: readerKeys });
+  useHotkey("ArrowRight", () => view.next(), { enabled: readerKeys });
+  // Toggle single ⇄ two-page (book) layout for PDFs and EPUBs alike.
+  useHotkey(
+    "D",
+    () => setReaderPref("pdfPageLayout", pdfPageLayout === "auto" ? "single" : "auto"),
+    { enabled: readerKeys },
+  );
+  useHotkey("Mod+F", () => view.search.openSearch(), { enabled: readerKeys, preventDefault: true });
   useHotkey("Mod+S", () => void Effect.runPromise(onSyncReadingPosition(sourceId)), {
-    enabled: view.ready,
+    enabled: readerKeys,
     preventDefault: true,
   });
-  useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open });
+  useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open && !modalOpen });
 
-  const drawnRef = useRef<Map<string, HighlightAnchor>>(new Map());
+  const drawnRef = useRef<Map<string, HighlightAnchor>>(null!);
+  drawnRef.current ??= new Map<string, HighlightAnchor>();
   const drawnSourceIdRef = useRef<string | null>(null);
   restoreAfterSearchClearRef.current = () => {
     for (const note of notes) {
@@ -182,6 +199,7 @@ export function Workspace({
   }
 
   useEffect(() => {
+    let cancelled = false;
     if (!view.ready) {
       drawnRef.current.clear();
       drawnSourceIdRef.current = null;
@@ -191,7 +209,6 @@ export function Workspace({
       drawnRef.current.clear();
       drawnSourceIdRef.current = sourceId;
     }
-    let cancelled = false;
     const desired: DesiredHighlight[] = [];
     for (const note of notes) {
       for (const h of note.highlights) desired.push({ noteId: note.id, highlight: h });
@@ -208,12 +225,10 @@ export function Workspace({
       rebind: agent.rebindHighlight,
       isCancelled: () => cancelled,
     });
-
     return () => {
       cancelled = true;
     };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes, view.ready, sourceId]);
+  }, [notes, view.ready, sourceId, view, agent.rebindHighlight]);
   useEffect(() => {
     drawnRef.current.clear();
   }, [sourceId]);
@@ -247,19 +262,19 @@ export function Workspace({
   );
 
   const { flashHighlight, goTo, reader: sourceReader } = view;
-  const [pendingReferenceSeq, setPendingReferenceSeq] = useState<number | null>(null);
+  const pendingReferenceSeqRef = useRef<number | null>(null);
   const jumpToHighlight = useCallback(
     (highlight: Highlight) => {
       const expectedSourceId = highlight.sourceId;
       if (!file || !view.ready || sourceIdRef.current !== expectedSourceId) return;
-      setPane("reader");
       void Effect.runPromise(sourceReader.locateHighlight(highlight)).then(async (located) => {
         if (sourceIdRef.current !== expectedSourceId) return;
         const anchor = located ?? highlight.anchor;
         await goTo(anchor);
-        await afterReaderPaint();
-        if (sourceIdRef.current !== expectedSourceId) return;
-        flashHighlight(anchor);
+        if (sourceIdRef.current === expectedSourceId) {
+          await afterReaderPaint();
+          if (sourceIdRef.current === expectedSourceId) flashHighlight(anchor);
+        }
       });
     },
     [file, flashHighlight, goTo, sourceReader, view.ready],
@@ -267,51 +282,42 @@ export function Workspace({
   const onJump = useCallback(
     (note: Note) => {
       const hl = effectiveHighlight(note, byId);
-      if (hl) jumpToHighlight(hl);
+      if (hl) {
+        setPane("reader");
+        jumpToHighlight(hl);
+      }
     },
     [byId, jumpToHighlight],
   );
   useEffect(() => {
+    const pendingReferenceSeq = pendingReferenceSeqRef.current;
     if (pendingReferenceSeq === null) return;
     const target = allBySeq.get(pendingReferenceSeq);
     if (!target) {
-      setPendingReferenceSeq(null);
+      pendingReferenceSeqRef.current = null;
       return;
     }
     if (target.sourceId !== sourceId) return;
     if (isMobile) {
-      setPane("notes");
       scrollNoteIntoView(target.seq);
-      setPendingReferenceSeq(null);
+      pendingReferenceSeqRef.current = null;
       return;
     }
     if (!file || !view.ready) return;
     const hl = effectiveHighlight(target, allById);
-    if (hl) {
-      jumpToHighlight(hl);
-    } else {
-      setPane("notes");
-    }
-    setPendingReferenceSeq(null);
-  }, [
-    pendingReferenceSeq,
-    allBySeq,
-    allById,
-    sourceId,
-    file,
-    view.ready,
-    isMobile,
-    jumpToHighlight,
-  ]);
+    if (hl) jumpToHighlight(hl);
+    else scrollNoteIntoView(target.seq);
+    pendingReferenceSeqRef.current = null;
+  }, [allBySeq, allById, sourceId, file, view.ready, isMobile, jumpToHighlight]);
 
   const onReference = useCallback(
     (seq: number) => {
       const target = allBySeq.get(seq);
       if (!target) return;
       if (target.sourceId !== sourceId) {
-        setPendingReferenceSeq(seq);
+        pendingReferenceSeqRef.current = seq;
         onSelectBook(target.sourceId);
-        setPane(isMobile ? "notes" : "reader");
+        setPane(isMobile || !effectiveHighlight(target, allById) ? "notes" : "reader");
         return;
       }
       if (isMobile) {
@@ -320,7 +326,10 @@ export function Workspace({
         return;
       }
       const hl = effectiveHighlight(target, allById);
-      if (hl) jumpToHighlight(hl);
+      if (hl) {
+        setPane("reader");
+        jumpToHighlight(hl);
+      }
     },
     [allBySeq, allById, sourceId, onSelectBook, isMobile, jumpToHighlight],
   );
@@ -330,7 +339,7 @@ export function Workspace({
     : "";
   async function onRenameGroup(title: string): Promise<void> {
     const result = await renameGroup(groupRef, title);
-    if (result.ok) setDisplayName(title);
+    if (result.ok) setRenamedDisplayName({ base: groupName, value: title });
     else spawnToast("Rename failed", "Couldn't rename the club.", { type: "error" });
   }
 

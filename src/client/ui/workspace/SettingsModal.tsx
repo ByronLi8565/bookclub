@@ -3,13 +3,15 @@ import { cachedSourceSize, refreshSource } from "../../groups/sourceAccess.ts";
 import {
   setReaderPref,
   useReaderPrefs,
+  type PdfPageLayout,
   type ReadingPositionOpenPolicy,
   type SmartArrows,
 } from "../../settings/userPrefs.ts";
 import { Loading } from "../shared/Loading.tsx";
-import { DropdownMenu } from "../shared/DropdownMenu.tsx";
+import { DropdownMenu, type DropdownTriggerProps } from "../shared/DropdownMenu.tsx";
 import { Modal, ModalPagerTabs } from "../shared/Modal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
+import { formatBytes } from "../../../shared/util.ts";
 
 function SettingDropdown<T extends string>({
   value,
@@ -35,41 +37,39 @@ function SettingDropdown<T extends string>({
         className: option.value === value ? "book-menu-item is-active" : "book-menu-item",
         onSelect: () => onChange(option.value),
       }))}
-      renderTrigger={({ open, toggle }) => (
-        <button
-          type="button"
-          className="settings-action settings-dropdown-trigger"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label={ariaLabel}
-          title={ariaLabel}
-          onClick={toggle}
-        >
-          <span>{active?.label ?? value}</span>
-          <span className="book-menu-arrow" aria-hidden="true">
-            ▾
-          </span>
-        </button>
-      )}
+      Trigger={SettingDropdownTrigger}
+      triggerProps={{ label: active?.label ?? value, ariaLabel }}
     />
+  );
+}
+
+function SettingDropdownTrigger({
+  open,
+  toggle,
+  label,
+  ariaLabel,
+}: DropdownTriggerProps & { label: string; ariaLabel: string }): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className="settings-action settings-dropdown-trigger"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      onClick={toggle}
+    >
+      <span>{label}</span>
+      <span className="book-menu-arrow" aria-hidden="true">
+        ▾
+      </span>
+    </button>
   );
 }
 
 export interface SettingsBook {
   sourceId: string;
   groupRef: string;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(1)} ${units[unit]}`;
 }
 
 type Category = "info" | "pdf";
@@ -90,7 +90,7 @@ export function SettingsModal({
   const [cachedSize, setCachedSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const { readingPositionOpenPolicy, smartArrows } = useReaderPrefs();
+  const { readingPositionOpenPolicy, smartArrows, pdfPageLayout } = useReaderPrefs();
 
   useEffect(() => {
     let cancelled = false;
@@ -144,11 +144,7 @@ export function SettingsModal({
                   disabled={busy || loading}
                   title="Refresh the local book copy from storage"
                 >
-                  {busy
-                    ? "redownloading…"
-                    : cachedSize === null
-                      ? "Download a copy"
-                      : "delete local & redownload"}
+                  {busy ? "redownloading…" : cachedSize === null ? "Download a copy" : "Redownload"}
                 </button>
               </div>
             </section>
@@ -174,24 +170,45 @@ export function SettingsModal({
           </>
         )}
         {category === "pdf" && (
-          <section className="settings-item">
-            <div className="settings-item-text">
-              <h2 className="settings-item-head">Smart arrow keys</h2>
-              <p className="settings-item-desc">Arrow keys try to scroll before turning page.</p>
-            </div>
-            <div className="settings-item-control">
-              <SettingDropdown<SmartArrows>
-                value={smartArrows}
-                onChange={(v) => setReaderPref("smartArrows", v)}
-                ariaLabel="PDF smart arrow keys"
-                options={[
-                  { value: "off", label: "Off" },
-                  { value: "smooth", label: "Smooth" },
-                  { value: "instant", label: "Instant" },
-                ]}
-              />
-            </div>
-          </section>
+          <>
+            <section className="settings-item">
+              <div className="settings-item-text">
+                <h2 className="settings-item-head">Page layout</h2>
+                <p className="settings-item-desc">
+                  Show two pages side by side, book-style, when the screen is wide enough.
+                </p>
+              </div>
+              <div className="settings-item-control">
+                <SettingDropdown<PdfPageLayout>
+                  value={pdfPageLayout}
+                  onChange={(v) => setReaderPref("pdfPageLayout", v)}
+                  ariaLabel="PDF page layout"
+                  options={[
+                    { value: "single", label: "Single page" },
+                    { value: "auto", label: "Two pages" },
+                  ]}
+                />
+              </div>
+            </section>
+            <section className="settings-item">
+              <div className="settings-item-text">
+                <h2 className="settings-item-head">Smart arrow keys</h2>
+                <p className="settings-item-desc">Arrow keys try to scroll before turning page.</p>
+              </div>
+              <div className="settings-item-control">
+                <SettingDropdown<SmartArrows>
+                  value={smartArrows}
+                  onChange={(v) => setReaderPref("smartArrows", v)}
+                  ariaLabel="PDF smart arrow keys"
+                  options={[
+                    { value: "off", label: "Off" },
+                    { value: "smooth", label: "Smooth" },
+                    { value: "instant", label: "Instant" },
+                  ]}
+                />
+              </div>
+            </section>
+          </>
         )}
       </div>
       <ModalPagerTabs

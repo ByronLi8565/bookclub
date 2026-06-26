@@ -57,7 +57,7 @@ export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilde
   return (await viewerPromise).TextLayerBuilder;
 }
 
-export function isPasswordException(error: unknown): boolean {
+function isPasswordException(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -81,7 +81,7 @@ export async function destroyPdf(doc: PDFDocumentProxy): Promise<void> {
   await doc.loadingTask.destroy();
 }
 
-export async function pageTextItems(page: PDFPageProxy): Promise<PdfTextItem[]> {
+async function pageTextItems(page: PDFPageProxy): Promise<PdfTextItem[]> {
   const content = await page.getTextContent();
   return content.items.flatMap((item) =>
     "str" in item
@@ -153,14 +153,26 @@ export function rectsForRange(
   return geometry.runs.flatMap((run) => {
     const runEnd = run.start + run.str.length;
     if (runEnd <= start || run.start >= end) return [];
-    return [{ x: run.x, y: run.y, width: run.width, height: run.height }];
+    // The range may cover only part of this run (e.g. a short search match
+    // inside a long line), so slice the run's rect to the overlapping chars
+    // rather than highlighting the whole line. Character widths are assumed
+    // uniform within the run — an approximation, but it keeps the highlight on
+    // the matched word instead of spanning the entire text item.
+    const len = run.str.length || 1;
+    const from = Math.max(0, start - run.start);
+    const to = Math.min(len, end - run.start);
+    return [
+      {
+        x: run.x + (from / len) * run.width,
+        y: run.y,
+        width: ((to - from) / len) * run.width,
+        height: run.height,
+      },
+    ];
   });
 }
 
-export async function renderPageThumbnail(
-  page: PDFPageProxy,
-  maxWidth = 240,
-): Promise<string | null> {
+async function renderPageThumbnail(page: PDFPageProxy, maxWidth = 240): Promise<string | null> {
   const base = page.getViewport({ scale: 1 });
   const scale = Math.min(1, maxWidth / base.width);
   const viewport = page.getViewport({ scale });
@@ -208,24 +220,33 @@ export async function inspectPdf(
     };
     const numPages = doc.numPages;
 
-    let pagesWithText = 0;
-    let pagesWithGeometry = 0;
-    let totalChars = 0;
-    let replacementChars = 0;
+    let inspectedPages = 0;
+    const pageStats = await Promise.all(
+      Array.from({ length: numPages }, async (_, index) => {
+        const page = await doc.getPage(index + 1);
+        try {
+          const items = await pageTextItems(page);
+          const text = items.map((i) => i.str).join("");
+          return {
+            hasText: text.trim() !== "",
+            hasGeometry: items.some(
+              (i) => i.transform.length >= 6 && (i.width > 0 || i.height > 0),
+            ),
+            chars: text.length,
+            replacementChars: (text.match(/\uFFFD/gu) ?? []).length,
+          };
+        } finally {
+          page.cleanup();
+          inspectedPages++;
+          onProgress?.(inspectedPages / numPages);
+        }
+      }),
+    );
 
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-      const page = await doc.getPage(pageNum);
-      const items = await pageTextItems(page);
-      const text = items.map((i) => i.str).join("");
-      if (text.trim() !== "") pagesWithText++;
-      if (items.some((i) => i.transform.length >= 6 && (i.width > 0 || i.height > 0))) {
-        pagesWithGeometry++;
-      }
-      totalChars += text.length;
-      replacementChars += (text.match(/\uFFFD/gu) ?? []).length;
-      page.cleanup();
-      onProgress?.(pageNum / numPages);
-    }
+    const pagesWithText = pageStats.filter((page) => page.hasText).length;
+    const pagesWithGeometry = pageStats.filter((page) => page.hasGeometry).length;
+    const totalChars = pageStats.reduce((total, page) => total + page.chars, 0);
+    const replacementChars = pageStats.reduce((total, page) => total + page.replacementChars, 0);
 
     if (pagesWithText === 0) {
       return {

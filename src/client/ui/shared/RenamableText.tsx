@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export function RenamableText({
   value,
@@ -22,11 +22,7 @@ export function RenamableText({
   allowEmpty?: boolean;
 }): React.ReactElement {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => {
-    if (!editing) setDraft(value);
-  }, [editing, value]);
+  const [draft, setDraft] = useState("");
 
   function save(): void {
     const next = draft.trim();
@@ -39,7 +35,6 @@ export function RenamableText({
       <input
         className={inputClassName}
         value={draft}
-        autoFocus
         aria-label={ariaLabel}
         placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
@@ -47,7 +42,6 @@ export function RenamableText({
         onKeyDown={(e) => {
           if (e.key === "Enter") save();
           if (e.key === "Escape") {
-            setDraft(value);
             setEditing(false);
           }
         }}

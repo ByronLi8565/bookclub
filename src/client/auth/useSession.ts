@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
+import { parseHttpError } from "../http.ts";
 
 export interface SessionUser {
   id: string;
@@ -22,33 +23,41 @@ export interface Session {
   signOut: () => Promise<void>;
 }
 
-async function readError(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: string };
-    return body.error ?? `http_${response.status}`;
-  } catch {
-    return `http_${response.status}`;
-  }
+interface SessionSnapshot {
+  status: SessionStatus;
+  user: SessionUser | null;
+}
+
+let sessionSnapshot: SessionSnapshot = { status: "loading", user: null };
+let sessionStarted = false;
+const sessionListeners = new Set<() => void>();
+
+function setSessionSnapshot(next: SessionSnapshot): void {
+  sessionSnapshot = next;
+  for (const listener of sessionListeners) listener();
+}
+
+function ensureSessionLoaded(): void {
+  if (sessionStarted) return;
+  sessionStarted = true;
+  void fetch("/auth/me")
+    .then(async (r) => (r.ok ? ((await r.json()) as { user: SessionUser }).user : null))
+    .catch(() => null)
+    .then((user) => setSessionSnapshot({ user, status: user ? "authed" : "anon" }));
+}
+
+function subscribeSession(listener: () => void): () => void {
+  sessionListeners.add(listener);
+  ensureSessionLoaded();
+  return () => sessionListeners.delete(listener);
 }
 
 export function useSession(): Session {
-  const [status, setStatus] = useState<SessionStatus>("loading");
-  const [user, setUser] = useState<SessionUser | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/auth/me")
-      .then(async (r) => (r.ok ? ((await r.json()) as { user: SessionUser }).user : null))
-      .catch(() => null)
-      .then((u) => {
-        if (cancelled) return;
-        setUser(u);
-        setStatus(u ? "authed" : "anon");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { status, user } = useSyncExternalStore(
+    subscribeSession,
+    () => sessionSnapshot,
+    () => sessionSnapshot,
+  );
 
   const startLogin = useCallback(async (email: string): Promise<StartResult> => {
     const r = await fetch("/auth/start", {
@@ -56,7 +65,7 @@ export function useSession(): Session {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     });
-    if (!r.ok) return { ok: false, error: await readError(r) };
+    if (!r.ok) return { ok: false, error: await parseHttpError(r) };
 
     if (r.status !== 204) {
       const body = (await r.json().catch(() => null)) as {
@@ -64,8 +73,7 @@ export function useSession(): Session {
         user?: SessionUser;
       } | null;
       if (body?.devSignedIn && body.user) {
-        setUser(body.user);
-        setStatus("authed");
+        setSessionSnapshot({ user: body.user, status: "authed" });
         return { ok: true, devSignedIn: true };
       }
     }
@@ -79,10 +87,9 @@ export function useSession(): Session {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, code, displayName }),
       });
-      if (!r.ok) return { ok: false, error: await readError(r) };
+      if (!r.ok) return { ok: false, error: await parseHttpError(r) };
       const body = (await r.json()) as { user: SessionUser };
-      setUser(body.user);
-      setStatus("authed");
+      setSessionSnapshot({ user: body.user, status: "authed" });
       return { ok: true };
     },
     [],
@@ -90,8 +97,7 @@ export function useSession(): Session {
 
   const signOut = useCallback(async (): Promise<void> => {
     await fetch("/auth/signout", { method: "POST" }).catch(() => {});
-    setUser(null);
-    setStatus("anon");
+    setSessionSnapshot({ user: null, status: "anon" });
   }, []);
 
   return { status, user, startLogin, verify, signOut };

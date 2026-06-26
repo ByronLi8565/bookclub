@@ -6,6 +6,7 @@ import type {
   SourceMeta,
 } from "../../shared/types/groups.ts";
 import { slugForGroup } from "../../shared/groupUrls.ts";
+import { canonicalEmail, randomHexToken } from "../../shared/util.ts";
 import type { Env } from "../env.ts";
 
 export interface Member {
@@ -66,8 +67,7 @@ export type RenameGroupResult =
 const MAX_TITLE_LENGTH = 100;
 
 function token(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return randomHexToken(16);
 }
 
 export class GroupAgent extends Agent<Env, GroupState> {
@@ -127,7 +127,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
 
-    const normalized = email.trim().toLowerCase();
+    const normalized = canonicalEmail(email);
     const existing = Object.entries(this.state.invites).find(([, inv]) => inv.email === normalized);
     if (existing) return { ok: true, token: existing[0] };
 
@@ -150,8 +150,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
 
     const invite = this.state.invites[t];
     if (!invite) return { ok: false, reason: "bad_invite" };
-    if (invite.email !== user.email.trim().toLowerCase())
-      return { ok: false, reason: "wrong_email" };
+    if (invite.email !== canonicalEmail(user.email)) return { ok: false, reason: "wrong_email" };
 
     const { [t]: _used, ...rest } = this.state.invites;
     await this.join(user, rest);
@@ -284,7 +283,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   private async indexFor(email: string): Promise<void> {
-    const auth = await getAgentByName(this.env.AuthAgent, email.trim().toLowerCase());
+    const auth = await getAgentByName(this.env.AuthAgent, canonicalEmail(email));
     await auth.addGroup(this.name);
   }
 }

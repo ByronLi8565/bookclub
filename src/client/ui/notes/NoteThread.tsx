@@ -62,6 +62,7 @@ export function NoteCardView({
         <span className="note-seq">{seq}</span>
         {jump ? (
           <button
+            type="button"
             className="quote truncate"
             onClick={jump.onClick}
             disabled={jump.disabled}
@@ -116,7 +117,7 @@ function NoteRow({
       <div className="note editing" id={`note-${note.seq}`}>
         <div className="note-head">
           <span className="note-seq">{note.seq}</span>
-          <button className="quote truncate" disabled>
+          <button type="button" className="quote truncate" disabled>
             {noteTitle(note)} (editing)
           </button>
         </div>
@@ -151,6 +152,7 @@ function NoteRow({
           <>
             {!deleted && (
               <button
+                type="button"
                 className="reply"
                 onClick={() => actions.onReply(note)}
                 aria-label="reply"
@@ -161,6 +163,7 @@ function NoteRow({
             )}
             {!deleted && canEdit && (
               <button
+                type="button"
                 className="edit"
                 onClick={() => actions.onEdit(note)}
                 aria-label="edit"
@@ -172,6 +175,7 @@ function NoteRow({
             {!deleted && canDelete && (
               <div className="delete-wrap" ref={confirmRef}>
                 <button
+                  type="button"
                   className="delete"
                   onClick={() => setConfirmingDelete(true)}
                   aria-label="delete"
@@ -182,7 +186,7 @@ function NoteRow({
                   ✕
                 </button>
                 {confirmingDelete && (
-                  <div className="delete-confirm" role="dialog" aria-label="Confirm delete">
+                  <dialog className="delete-confirm" open aria-label="Confirm delete">
                     <p>really delete?</p>
                     <div className="delete-confirm-actions">
                       <button
@@ -207,7 +211,7 @@ function NoteRow({
                         ✓
                       </button>
                     </div>
-                  </div>
+                  </dialog>
                 )}
               </div>
             )}

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { JSDOM } from "jsdom";
 import { captureHighlight, epubAnchor, pdfAnchor } from "../client/notes/highlights.ts";
-import { pageGeometry, pageText } from "../client/sources/pdf.ts";
+import { pageGeometry, pageText, rectsForRange } from "../client/sources/pdf.ts";
 
 function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPageProxy {
   return {
@@ -65,6 +65,28 @@ describe("PDF text extraction", () => {
     const highlight = await Effect.runPromise(captureHighlight("book", pdfAnchor(1, []), range));
 
     expect(highlight.quote.exact).toBe("is the chief");
+  });
+
+  it("slices a search/highlight rect to the matched chars within a run", async () => {
+    // One run "philosophy" spanning x:0..0.1 (width = str length / page width).
+    const geometry = await pageGeometry(textPage([{ str: "philosophy" }]));
+
+    // Full-run match → the whole run's rect.
+    expect(rectsForRange(geometry, 0, 10)).toEqual([{ x: 0, y: 0.99, width: 0.1, height: 0.01 }]);
+
+    // "soph" (chars 4..8) → a proportional sub-rect, not the whole line.
+    const [sub] = rectsForRange(geometry, 4, 8);
+    expect(sub?.x).toBeCloseTo(0.04);
+    expect(sub?.width).toBeCloseTo(0.04);
+  });
+
+  it("clips a range that overflows a run to the run's own chars", async () => {
+    const geometry = await pageGeometry(textPage([{ str: "civilised" }, { str: "form" }]));
+    // "form" is the second run at start=10, length 4, x = 0 (own transform).
+    // Range 12..99 overlaps only chars 2..4 of that run.
+    const rects = rectsForRange(geometry, 12, 99);
+    const formRect = rects.at(-1);
+    expect(formRect?.width).toBeCloseTo((2 / 4) * 0.04);
   });
 
   it("keeps EPUB quote extraction unchanged", async () => {

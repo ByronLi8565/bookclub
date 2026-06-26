@@ -9,6 +9,7 @@ import {
 } from "../../shared/types/userPrefs.ts";
 
 export type {
+  PdfPageLayout,
   ReadingPositionOpenPolicy,
   SmartArrows,
   UserPrefs,
@@ -51,7 +52,7 @@ function publish(next: UserPrefs): void {
   for (const listener of listeners) listener();
 }
 
-export function getUserPrefs(): UserPrefs {
+function getUserPrefs(): UserPrefs {
   return prefs;
 }
 
@@ -75,7 +76,7 @@ export function hydrateUserPrefs(): Effect.Effect<UserPrefs> {
   }).pipe(Effect.orElseSucceed(() => prefs));
 }
 
-export function syncUserPrefs(): Effect.Effect<UserPrefs> {
+function syncUserPrefs(): Effect.Effect<UserPrefs> {
   return Effect.tryPromise(async () => {
     const response = await fetch("/me/prefs", {
       method: "PUT",
@@ -96,7 +97,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function useUserPrefs(): UserPrefs {
+function useUserPrefs(): UserPrefs {
   return useSyncExternalStore(subscribe, getUserPrefs, getUserPrefs);
 }
 

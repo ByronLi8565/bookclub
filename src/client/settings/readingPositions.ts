@@ -98,7 +98,7 @@ export function setLocalReadingPosition(
   });
 }
 
-export function needsReadingPositionSync(record: ReadingPositionRecord | null): boolean {
+function needsReadingPositionSync(record: ReadingPositionRecord | null): boolean {
   return !!record && !samePosition(record.position, record.lastSyncedPosition);
 }
 
@@ -140,7 +140,7 @@ function markSyncing(
   });
 }
 
-export function mergeServerReadingPosition(
+function mergeServerReadingPosition(
   userId: string,
   position: StoredReadingPosition,
 ): ReadingPositionRecord {

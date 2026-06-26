@@ -7,6 +7,7 @@ import type {
 } from "../../shared/types/groups.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../shared/types/sources.ts";
+import { parseHttpError } from "../http.ts";
 
 export type {
   GroupRole,
@@ -85,11 +86,6 @@ async function parseJson<S extends Schema.Top>(
   }
 }
 
-async function readError(response: Response): Promise<string> {
-  const body = await parseJson(response, ErrorBody);
-  return body?.error ?? `http_${response.status}`;
-}
-
 export async function listMyGroups(): Promise<GroupSummary[]> {
   const r = await fetch("/groups");
   if (!r.ok) return [];
@@ -137,7 +133,7 @@ export async function redeemInvite(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
   });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, GroupResponse);
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
@@ -148,7 +144,7 @@ export async function inviteToGroup(groupRef: string, email: string): Promise<Ap
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
   });
-  return r.ok ? { ok: true, value: null } : { ok: false, error: await readError(r) };
+  return r.ok ? { ok: true, value: null } : { ok: false, error: await parseHttpError(r) };
 }
 
 export async function getInviteLink(
@@ -158,7 +154,7 @@ export async function getInviteLink(
   const r = await fetch(`/groups/${groupRef}/invite-link${rotate ? "?rotate=1" : ""}`, {
     method: "POST",
   });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, InviteLinkResponse);
   return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
 }
@@ -172,7 +168,7 @@ export async function renameGroup(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, GroupResponse);
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
@@ -187,7 +183,7 @@ export async function renameBook(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sourceId, title }),
   });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, GroupResponse);
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
@@ -202,7 +198,7 @@ export async function resolveBookTitle(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sourceId, title }),
   });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, GroupResponse);
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
@@ -221,7 +217,7 @@ export async function uploadSource(
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
   if (author) headers["X-Source-Author"] = encodeURIComponent(author);
   const r = await fetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
-  if (!r.ok) return { ok: false, error: await readError(r) };
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
 }

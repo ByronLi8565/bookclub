@@ -1,16 +1,26 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { Loading } from "../shared/Loading.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
-import { DropdownMenu, type DropdownItem } from "../shared/DropdownMenu.tsx";
+import {
+  DropdownMenu,
+  type DropdownItem,
+  type DropdownTriggerProps,
+} from "../shared/DropdownMenu.tsx";
+import { useDelayedFlag } from "../shared/hooks/useDelayedFlag.ts";
+import { useAnyModalOpen } from "../shared/modalLayer.ts";
 import type { SourceSummary } from "../../../shared/types/sources.ts";
 import type { SourceView } from "./useSourceView.ts";
+import { ReaderSnapshot } from "./ReaderSnapshot.tsx";
+
+const EMPTY_BOOKS: SourceSummary[] = [];
 
 export function Reader({
   view,
   hasFile,
   loading = false,
   floatingNote = true,
-  books = [],
+  books = EMPTY_BOOKS,
   selectedSourceId = "",
   onSelectBook = () => {},
   onRenameBook = () => {},
@@ -28,11 +38,26 @@ export function Reader({
   onAddBook?: (() => void) | null;
 }) {
   const { fontSize, setFontSize, ready, selection, search } = view;
+  const modalOpen = useAnyModalOpen();
+
+  // Hold the "Add Note" button back by a beat so it doesn't flash in mid-drag.
+  const showAddNote = useDelayedFlag(selection !== null, 250);
+
+  useHotkey("F", () => view.fitToText?.(), {
+    enabled: ready && !modalOpen && Boolean(view.fitToText),
+  });
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Focus + select-all whenever search opens (focusTick changes on each
+  // openSearch), so a repeat Ctrl+F while already open highlights the current
+  // term and lets you type a fresh query immediately.
   useEffect(() => {
-    if (search.open) searchInputRef.current?.focus();
-  }, [search.open]);
+    if (!search.open) return;
+    const input = searchInputRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, [search.open, search.focusTick]);
 
   const { dismissSelection } = view;
   useEffect(() => {
@@ -62,7 +87,29 @@ export function Reader({
           </span>
         )}
         <span className="spacer" />
+        {view.fitToText && (
+          <button
+            type="button"
+            className="reader-fit"
+            onClick={view.fitToText}
+            disabled={!ready}
+            aria-label="Fit text to screen"
+            title="Fit text to screen"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="square"
+                strokeLinejoin="miter"
+              />
+            </svg>
+          </button>
+        )}
         <button
+          type="button"
           onClick={() => setFontSize(Math.max(50, fontSize - 10))}
           disabled={!ready}
           title="Decrease text size"
@@ -71,6 +118,7 @@ export function Reader({
         </button>
         <span className="font-size">{fontSize}%</span>
         <button
+          type="button"
           onClick={() => setFontSize(fontSize + 10)}
           disabled={!ready}
           title="Increase text size"
@@ -84,6 +132,7 @@ export function Reader({
             ref={searchInputRef}
             className="reader-search-input"
             type="text"
+            aria-label="Find in book"
             placeholder="Find in book"
             value={search.query}
             onChange={(e) => search.setQuery(e.target.value)}
@@ -95,6 +144,13 @@ export function Reader({
               } else if (e.key === "Escape") {
                 e.preventDefault();
                 search.closeSearch();
+              } else if (e.key === "ArrowRight" && search.matches.length > 0) {
+                // Page through matches with the arrow keys while focused here.
+                e.preventDefault();
+                search.next();
+              } else if (e.key === "ArrowLeft" && search.matches.length > 0) {
+                e.preventDefault();
+                search.prev();
               }
             }}
           />
@@ -108,6 +164,7 @@ export function Reader({
                 : `${search.active + 1} / ${search.matches.length}`}
           </span>
           <button
+            type="button"
             onClick={search.prev}
             disabled={search.matches.length === 0}
             aria-label="Previous match"
@@ -116,6 +173,7 @@ export function Reader({
             ↑
           </button>
           <button
+            type="button"
             onClick={search.next}
             disabled={search.matches.length === 0}
             aria-label="Next match"
@@ -123,13 +181,19 @@ export function Reader({
           >
             ↓
           </button>
-          <button onClick={search.closeSearch} aria-label="Close search" title="Close search">
+          <button
+            type="button"
+            onClick={search.closeSearch}
+            aria-label="Close search"
+            title="Close search"
+          >
             ✕
           </button>
         </div>
       )}
       <div className="reader-stage">
         <div className="reader-surface" ref={view.containerRef}>
+          {loading && view.snapshot && <ReaderSnapshot snapshot={view.snapshot} />}
           {loading ? (
             <Loading className="loading--reader" />
           ) : (
@@ -138,6 +202,7 @@ export function Reader({
         </div>
         {ready && !view.location?.atStart && (
           <button
+            type="button"
             className="reader-page-turn reader-page-turn--prev"
             onClick={view.prev}
             aria-label="Previous page"
@@ -146,6 +211,7 @@ export function Reader({
         )}
         {ready && !view.location?.atEnd && (
           <button
+            type="button"
             className="reader-page-turn reader-page-turn--next"
             onClick={view.next}
             aria-label="Next page"
@@ -153,8 +219,9 @@ export function Reader({
           />
         )}
       </div>
-      {floatingNote && selection && (
+      {floatingNote && selection && showAddNote && (
         <button
+          type="button"
           className="add-note"
           style={{ left: selection.x, top: selection.y }}
           onClick={view.commitSelection}
@@ -192,6 +259,10 @@ function BookMenu({
   const label = active ? bookLabel(active, activeTitle, true) : (activeTitle ?? "");
 
   const interactive = books.length > 1 || onAddBook !== null;
+  const modalOpen = useAnyModalOpen();
+
+  const [openSignal, setOpenSignal] = useState(0);
+  useHotkey("S", () => setOpenSignal((n) => n + 1), { enabled: interactive && !modalOpen });
 
   const title = label ? (
     <RenamableText
@@ -229,23 +300,24 @@ function BookMenu({
   }
 
   return (
-    <DropdownMenu
-      items={items}
-      renderTrigger={({ open, toggle }) => (
-        <button
-          type="button"
-          className="book-menu-arrow"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label="switch book"
-          title="Switch book"
-          onClick={toggle}
-        >
-          ▾
-        </button>
-      )}
-    >
+    <DropdownMenu items={items} openSignal={openSignal} Trigger={BookMenuTrigger}>
       {title}
     </DropdownMenu>
+  );
+}
+
+function BookMenuTrigger({ open, toggle }: DropdownTriggerProps): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className="book-menu-arrow"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-label="switch book"
+      title="Switch book"
+      onClick={toggle}
+    >
+      ▾
+    </button>
   );
 }

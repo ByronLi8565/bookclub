@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useHotkey } from "@tanstack/react-hotkeys";
 
 export interface DropdownItem {
   key: string;
@@ -11,24 +12,44 @@ export interface DropdownItem {
   onSelect: () => void;
 }
 
-export function DropdownMenu({
-  className = "book-menu",
-  listClassName = "book-menu-list",
-  itemClassName = "book-menu-item",
-  items,
-  children,
-  renderTrigger,
-}: {
+export interface DropdownTriggerProps {
+  open: boolean;
+  toggle: () => void;
+}
+
+interface DropdownMenuProps<P extends object> {
   className?: string;
   listClassName?: string;
   itemClassName?: string;
   items: DropdownItem[];
   children?: React.ReactNode;
-  renderTrigger: (args: { open: boolean; toggle: () => void }) => React.ReactNode;
-}): React.ReactElement {
+  Trigger: React.ComponentType<DropdownTriggerProps & P>;
+  triggerProps?: P;
+  /** Increment to imperatively open the menu (e.g. from a hotkey). */
+  openSignal?: number;
+}
+
+export function DropdownMenu<P extends object = object>({
+  className = "book-menu",
+  listClassName = "book-menu-list",
+  itemClassName = "book-menu-item",
+  items,
+  children,
+  Trigger,
+  triggerProps = {} as P,
+  openSignal,
+}: DropdownMenuProps<P>): React.ReactElement {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
+  const openedSignalRef = useRef(openSignal);
+
+  if (openedSignalRef.current !== openSignal) {
+    openedSignalRef.current = openSignal;
+    if (openSignal) setOpen(true);
+  }
+
+  useHotkey("Escape", () => setOpen(false), { enabled: open, preventDefault: true });
 
   useEffect(() => {
     if (!open) return;
@@ -83,7 +104,7 @@ export function DropdownMenu({
   return (
     <div className={className} ref={ref}>
       {children}
-      {renderTrigger({ open, toggle: () => setOpen((v) => !v) })}
+      <Trigger {...triggerProps} open={open} toggle={() => setOpen((v) => !v)} />
       {open && (
         <ul className={listClassName} role="menu" ref={listRef}>
           {items.map((item) => (

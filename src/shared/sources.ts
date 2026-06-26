@@ -33,8 +33,3 @@ export function currentSource(group: GroupSummary): SourceSummary | null {
   const id = currentSourceId(group);
   return id ? summaryFor(group, id) : null;
 }
-
-export function currentSourceRef(group: GroupSummary): SourceRef | null {
-  const source = currentSource(group);
-  return source ? { id: source.id, kind: source.kind, contentType: source.contentType } : null;
-}

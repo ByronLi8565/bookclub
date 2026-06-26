@@ -25,6 +25,7 @@ export function useSourceView(
   // PDF pane-switching is handled solely by MobilePager's swiper; the PDF view
   // intentionally takes no onSwipe so sideways drags pan the page instead.
   const pdf = usePdfSourceView(
+    isPdf ? (source?.id ?? null) : null,
     isPdf ? file : null,
     onSelect,
     onSearchHighlightCleared,

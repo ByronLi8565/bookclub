@@ -21,9 +21,21 @@ import {
   rectsForRange,
   type PageGeometry,
   type PDFDocumentProxy,
+  type PDFPageProxy,
 } from "../../sources/pdf.ts";
+import { getCachedPdfDocument, hasCachedPdfDocument, putCachedPdfDocument } from "./renderCache.ts";
+import { getRenderSnapshot, putRenderSnapshot, type RenderSnapshot } from "./renderSnapshot.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
-import type { OnSelect, SourceLocation, SourceView } from "./sourceView.ts";
+import {
+  SPREAD_GUTTER_PX,
+  cropBox,
+  spreadEnd,
+  spreadFits,
+  spreadPages,
+  spreadStart,
+} from "./pdfSpread.ts";
+import { bumpSeq, type OnSelect, type SourceLocation, type SourceView } from "./sourceView.ts";
+import { clamp } from "../../../shared/util.ts";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 
 interface Drawn {
@@ -38,9 +50,121 @@ const READER_NAV = {
   minZoom: 50,
   maxZoom: 400,
   pinchWheelSensitivity: 0.01,
+  spreadGutterPx: SPREAD_GUTTER_PX,
+  // Padding kept around the text when cropping a spread page to its text box.
+  spreadCropPadPx: 16,
 } as const;
 
 const PDF_RECT_Y_NUDGE_PX = 4;
+
+// Fraction (0..1) of a client-space point within `wrap`'s box, per axis. Used to
+// remember which content point sits under the cursor/viewport-center so it can
+// be restored after a re-render at a new zoom. Falls back to the center (0.5)
+// when the box has no extent.
+function focalFraction(
+  wrap: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { fracX: number; fracY: number } {
+  const r = wrap.getBoundingClientRect();
+  return {
+    fracX: r.width > 0 ? clamp((clientX - r.left) / r.width, 0, 1) : 0.5,
+    fracY: r.height > 0 ? clamp((clientY - r.top) / r.height, 0, 1) : 0.5,
+  };
+}
+
+// Scroll `scroller` so the given fraction of `wrap` lands at offset
+// (offsetX, offsetY) from the scroller's top-left corner, clamped to range.
+function scrollToFocalFraction(
+  scroller: HTMLElement,
+  wrap: HTMLElement,
+  fracX: number,
+  fracY: number,
+  offsetX: number,
+  offsetY: number,
+): void {
+  const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  scroller.scrollLeft = clamp(wrap.offsetLeft + fracX * wrap.offsetWidth - offsetX, 0, maxLeft);
+  scroller.scrollTop = clamp(wrap.offsetTop + fracY * wrap.offsetHeight - offsetY, 0, maxTop);
+}
+
+// One rendered page within a spread. `el` is a clip viewport; `inner` is the
+// full-page coordinate box that holds the canvas, text layer, and overlay
+// layers — all positioned in fractions of *this page*. In a two-page spread
+// `inner` is offset within `el` so only the text region shows (no wide inner
+// margins / vertical whitespace); in single-page mode `inner` fills `el`. Either
+// way every page-relative rect calculation (highlights, selection, search)
+// stays valid because the layers live in full-page coordinates inside `inner`.
+interface Pane {
+  el: HTMLDivElement;
+  inner: HTMLDivElement;
+  canvas: HTMLCanvasElement;
+  highlight: HTMLDivElement;
+  flash: HTMLDivElement;
+  underline: HTMLDivElement;
+  selection: HTMLDivElement;
+  textLayer: HTMLDivElement | null;
+  builder: TextLayerBuilder | null;
+  page: number | null;
+  // Render metrics (CSS px) used by the scroll math, which works in full-page
+  // coordinates and must account for the crop offset.
+  pageHeightPx: number;
+  cropTopPx: number;
+}
+
+type PaneLayerKey = "highlight" | "flash" | "underline" | "selection";
+
+function createPane(): Pane {
+  const el = document.createElement("div");
+  el.className = "pdf-pane";
+  const inner = document.createElement("div");
+  inner.className = "pdf-pane-inner";
+  inner.style.position = "absolute";
+  el.appendChild(inner);
+  const canvas = document.createElement("canvas");
+  const mkLayer = (cls: string) => {
+    const layer = document.createElement("div");
+    layer.className = cls;
+    layer.style.position = "absolute";
+    layer.style.inset = "0";
+    layer.style.pointerEvents = "none";
+    return layer;
+  };
+  const highlight = mkLayer("pdf-highlights");
+  const flash = mkLayer("pdf-jump-flash");
+  const underline = mkLayer("pdf-underlines");
+  const selection = mkLayer("pdf-selection");
+  // The text layer is appended per-render by the TextLayerBuilder.
+  for (const child of [canvas, highlight, flash, underline, selection]) inner.appendChild(child);
+  return {
+    el,
+    inner,
+    canvas,
+    highlight,
+    flash,
+    underline,
+    selection,
+    textLayer: null,
+    builder: null,
+    page: null,
+    pageHeightPx: 0,
+    cropTopPx: 0,
+  };
+}
+
+// The text bounding box of a page in page fractions (0..1), or null if unknown.
+function textBounds(
+  geom: PageGeometry | null | undefined,
+): { minX: number; maxX: number; minY: number; maxY: number } | null {
+  if (!geom || geom.runs.length === 0) return null;
+  return {
+    minX: Math.min(...geom.runs.map((r) => r.x)),
+    maxX: Math.max(...geom.runs.map((r) => r.x + r.width)),
+    minY: Math.min(...geom.runs.map((r) => r.y)),
+    maxY: Math.max(...geom.runs.map((r) => r.y + r.height)),
+  };
+}
 
 // Client rects for only the *text* inside a range that lives within `within`.
 // Walking text nodes (rather than calling range.getClientRects() directly)
@@ -77,11 +201,85 @@ function boundingRect(rects: DOMRect[]): DOMRect {
   return new DOMRect(left, top, right - left, bottom - top);
 }
 
-function bumpSeq(ref: { current: number }): void {
-  ref.current += 1;
+function px(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function pdfSnapshotDataUrl(canvas: HTMLCanvasElement): string {
+  const webp = canvas.toDataURL("image/webp", 0.82);
+  return webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
+}
+
+function capturePdfSnapshot(
+  sourceId: string,
+  scroller: HTMLDivElement,
+  panes: Pane[],
+  location: SourceLocation,
+): RenderSnapshot | null {
+  const wrap = wrapRefFromScroller(scroller);
+  if (!wrap) return null;
+  const width = Math.ceil(scroller.clientWidth);
+  const height = Math.ceil(scroller.clientHeight);
+  if (width <= 0 || height <= 0 || panes.length === 0) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+
+  for (const pane of panes) {
+    if (pane.page === null || pane.canvas.width <= 0 || pane.canvas.height <= 0) continue;
+    const paneWidth = pane.el.offsetWidth;
+    const paneHeight = pane.el.offsetHeight;
+    if (paneWidth <= 0 || paneHeight <= 0) continue;
+
+    const pageWidth = px(pane.canvas.style.width) || paneWidth;
+    const pageHeight = px(pane.canvas.style.height) || paneHeight;
+    const scaleX = pane.canvas.width / pageWidth;
+    const scaleY = pane.canvas.height / pageHeight;
+    const sx = -px(pane.inner.style.left) * scaleX;
+    const sy = -px(pane.inner.style.top) * scaleY;
+    const sw = paneWidth * scaleX;
+    const sh = paneHeight * scaleY;
+    ctx.drawImage(
+      pane.canvas,
+      sx,
+      sy,
+      sw,
+      sh,
+      wrap.offsetLeft + pane.el.offsetLeft - scroller.scrollLeft,
+      wrap.offsetTop + pane.el.offsetTop - scroller.scrollTop,
+      paneWidth,
+      paneHeight,
+    );
+  }
+
+  return {
+    sourceId,
+    kind: "pdf",
+    locationKey: `pdf:${location.page}:${location.total}:${width}x${height}`,
+    width,
+    height,
+    dataUrl: pdfSnapshotDataUrl(canvas),
+    capturedAt: Date.now(),
+  };
+}
+
+function wrapRefFromScroller(scroller: HTMLDivElement): HTMLDivElement | null {
+  const first = scroller.firstElementChild;
+  return first instanceof HTMLDivElement ? first : null;
+}
+
+function pdfRenderCacheKey(sourceId: string | null, file: File | null): string | null {
+  return sourceId && file ? `${sourceId}:${file.name}:${file.size}:${file.lastModified}` : null;
 }
 
 export function usePdfSourceView(
+  sourceId: string | null,
   file: File | null,
   onSelect: OnSelect,
   onSearchHighlightCleared?: () => void,
@@ -90,9 +288,11 @@ export function usePdfSourceView(
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
-  const { smartArrows } = useReaderPrefs();
+  const { smartArrows, pdfPageLayout } = useReaderPrefs();
   const smartArrowsRef = useRef(smartArrows);
   smartArrowsRef.current = smartArrows;
+  const pageLayoutRef = useRef(pdfPageLayout);
+  pageLayoutRef.current = pdfPageLayout;
 
   const [ready, setReady] = useState(false);
   const [title, setTitle] = useState<string | null>(null);
@@ -100,6 +300,9 @@ export function usePdfSourceView(
   const [location, setLocation] = useState<SourceLocation | null>(null);
   const [position, setPosition] = useState<SourceReadingPosition | null>(null);
   const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
+  const [snapshot, setSnapshot] = useState<RenderSnapshot | null>(() =>
+    getRenderSnapshot(sourceId),
+  );
 
   const docRef = useRef<PDFDocumentProxy | null>(null);
   const pageRef = useRef(1);
@@ -107,24 +310,41 @@ export function usePdfSourceView(
   fontSizeRef.current = fontSize;
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const textLayerRef = useRef<HTMLDivElement | null>(null);
-  const textLayerBuilderRef = useRef<TextLayerBuilder | null>(null);
-  const highlightLayerRef = useRef<HTMLDivElement | null>(null);
-  const flashLayerRef = useRef<HTMLDivElement | null>(null);
-  const underlineLayerRef = useRef<HTMLDivElement | null>(null);
-  const geometryRef = useRef<Map<number, PageGeometry>>(new Map());
-  const drawnRef = useRef<Map<string, Drawn>>(new Map());
+  // Up to two page panes (the current spread). pageRef holds the *left* page.
+  const panesRef = useRef<Pane[]>([]);
+  const spreadActiveRef = useRef(false);
+  const geometryRef = useRef<Map<number, PageGeometry>>(null!);
+  geometryRef.current ??= new Map<number, PageGeometry>();
+  const drawnRef = useRef<Map<string, Drawn>>(null!);
+  drawnRef.current ??= new Map<string, Drawn>();
   const underlineRef = useRef<HighlightAnchor | null>(null);
   const pendingRef = useRef<{ anchor: HighlightAnchor; range: Range; clear: () => void } | null>(
     null,
   );
   const renderSeqRef = useRef(0);
   const initialPdfPage = initialPosition?.kind === "pdf" ? initialPosition.page : null;
-  const initialPdfScrollRatio =
-    initialPosition?.kind === "pdf" ? initialPosition.scrollRatio : null;
-  const initialPdfZoom = initialPosition?.kind === "pdf" ? initialPosition.zoom : null;
-  const initialPdfPercentage = initialPosition?.kind === "pdf" ? initialPosition.percentage : 0;
+  const renderCacheKey = pdfRenderCacheKey(sourceId, file);
+  const [openedSource, setOpenedSource] = useState({ file, initialPdfPage, sourceId });
+
+  if (
+    openedSource.file !== file ||
+    openedSource.initialPdfPage !== initialPdfPage ||
+    openedSource.sourceId !== sourceId
+  ) {
+    setOpenedSource({ file, initialPdfPage, sourceId });
+    setReady(false);
+    setLocation(null);
+    setPosition(null);
+    setTitle(null);
+    geometryRef.current.clear();
+    drawnRef.current.clear();
+    underlineRef.current = null;
+    pageRef.current = initialPdfPage === null ? 1 : Math.max(1, Math.round(initialPdfPage));
+  }
+
+  useEffect(() => {
+    setSnapshot(getRenderSnapshot(sourceId));
+  }, [sourceId]);
 
   const geometryFor = useCallback(async (pageNum: number): Promise<PageGeometry | null> => {
     const doc = docRef.current;
@@ -136,29 +356,72 @@ export function usePdfSourceView(
     return geom;
   }, []);
 
+  // A two-page spread is only worth showing when the user opted in ("auto"),
+  // the document has at least two pages, and the viewport is wide enough that
+  // each page still clears a comfortable minimum width. Otherwise: single page.
+  const computeSpreadEnabled = useCallback((): boolean => {
+    const doc = docRef.current;
+    const scroller = scrollerRef.current;
+    if (!doc || !scroller) return false;
+    return spreadFits(pageLayoutRef.current, doc.numPages, scroller.clientWidth);
+  }, []);
+
+  const ensurePanes = useCallback((count: number): Pane[] => {
+    const wrap = wrapRef.current;
+    const panes = panesRef.current;
+    if (!wrap) return panes;
+    while (panes.length < count) {
+      const pane = createPane();
+      panes.push(pane);
+      wrap.appendChild(pane.el);
+    }
+    while (panes.length > count) {
+      const pane = panes.pop();
+      pane?.builder?.cancel();
+      pane?.el.remove();
+    }
+    return panes;
+  }, []);
+
+  // Vertical text bounds across the visible spread (union of all panes' text),
+  // so smart-arrow scrolling and fit reuse the same top/bottom detection.
   const scrollBounds = useCallback((): { floor: number; ceil: number } => {
     const scroller = scrollerRef.current;
-    const wrap = wrapRef.current;
-    if (!scroller || !wrap) return { floor: 0, ceil: 0 };
+    if (!scroller) return { floor: 0, ceil: 0 };
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    const geom = geometryRef.current.get(pageRef.current);
-    if (!geom || geom.runs.length === 0) return { floor: 0, ceil: maxScroll };
-    const h = wrap.clientHeight;
-    const minY = Math.min(...geom.runs.map((run) => run.y));
-    const maxY = Math.max(...geom.runs.map((run) => run.y + run.height));
-    const floor = Math.min(maxScroll, Math.max(0, minY * h - READER_NAV.textTopMargin));
+    let minTop = Infinity;
+    let maxBottom = -Infinity;
+    for (const pane of panesRef.current) {
+      if (pane.page === null) continue;
+      const geom = geometryRef.current.get(pane.page);
+      if (!geom || geom.runs.length === 0) continue;
+      // Text lives in full-page coordinates inside `inner`; map to scroller
+      // content space via the pane's position and crop offset.
+      const offset = pane.el.offsetTop - pane.cropTopPx;
+      const ph = pane.pageHeightPx;
+      minTop = Math.min(minTop, offset + Math.min(...geom.runs.map((run) => run.y)) * ph);
+      maxBottom = Math.max(
+        maxBottom,
+        offset + Math.max(...geom.runs.map((run) => run.y + run.height)) * ph,
+      );
+    }
+    if (minTop === Infinity) return { floor: 0, ceil: maxScroll };
+    const floor = Math.min(maxScroll, Math.max(0, minTop - READER_NAV.textTopMargin));
     const ceil = Math.max(
       floor,
-      Math.min(maxScroll, maxY * h + READER_NAV.textTopMargin - scroller.clientHeight),
+      Math.min(maxScroll, maxBottom + READER_NAV.textTopMargin - scroller.clientHeight),
     );
     return { floor, ceil };
   }, []);
 
   const scrollToTextTop = useCallback(async (): Promise<void> => {
-    const pageNum = pageRef.current;
-    await geometryFor(pageNum);
+    const doc = docRef.current;
+    const left = pageRef.current;
+    await Promise.all(
+      spreadPages(left, spreadActiveRef.current, doc?.numPages ?? left).map((p) => geometryFor(p)),
+    );
     const scroller = scrollerRef.current;
-    if (!scroller || pageNum !== pageRef.current) return;
+    if (!scroller || left !== pageRef.current) return;
     scroller.scrollTop = scrollBounds().floor;
   }, [geometryFor, scrollBounds]);
 
@@ -177,28 +440,15 @@ export function usePdfSourceView(
     });
   }, []);
 
-  const scrollToPdfPosition = useCallback(
-    (target: SourceReadingPosition): void => {
-      if (target.kind !== "pdf") return;
-      const scroller = scrollerRef.current;
-      if (!scroller) return;
-      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      scroller.scrollTop = Math.min(maxScroll, Math.max(0, target.scrollRatio * maxScroll));
-      publishPosition();
-    },
-    [publishPosition],
-  );
-
   const scrollToAnchor = useCallback(
     async (anchor: HighlightAnchor): Promise<void> => {
       if (anchor.kind !== "pdf-text" || anchor.rects.length === 0) return;
-      const pageNum = pageRef.current;
-      await geometryFor(pageNum);
+      await geometryFor(anchor.page);
       const scroller = scrollerRef.current;
-      const wrap = wrapRef.current;
-      if (!scroller || !wrap || pageNum !== pageRef.current) return;
-      const h = wrap.clientHeight;
-      const top = Math.min(...anchor.rects.map((r) => r.y)) * h;
+      const pane = panesRef.current.find((p) => p.page === anchor.page);
+      if (!scroller || !pane) return;
+      const offset = pane.el.offsetTop - pane.cropTopPx;
+      const top = offset + Math.min(...anchor.rects.map((r) => r.y)) * pane.pageHeightPx;
       const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
       const target = Math.min(maxScroll, Math.max(0, top - READER_NAV.textTopMargin));
       scroller.scrollTop = target;
@@ -206,9 +456,17 @@ export function usePdfSourceView(
     [geometryFor],
   );
 
-  const paintRects = (layer: HTMLDivElement, id: string, anchor: HighlightAnchor, cls: string) => {
+  const paneForPage = (page: number): Pane | null =>
+    panesRef.current.find((p) => p.page === page) ?? null;
+
+  const paintRectsInto = (
+    layer: HTMLDivElement,
+    id: string,
+    anchor: HighlightAnchor,
+    cls: string,
+  ): HTMLDivElement[] => {
     const painted: HTMLDivElement[] = [];
-    if (anchor.kind !== "pdf-text" || anchor.page !== pageRef.current) return painted;
+    if (anchor.kind !== "pdf-text") return painted;
     const { clientWidth: w, clientHeight: h } = layer;
     for (const rect of anchor.rects) {
       const div = document.createElement("div");
@@ -229,59 +487,76 @@ export function usePdfSourceView(
     return painted;
   };
 
+  // Paint an anchor into the pane that currently shows its page (if visible).
+  const paintAnchor = (
+    layerKey: PaneLayerKey,
+    id: string,
+    anchor: HighlightAnchor,
+    cls: string,
+  ): HTMLDivElement[] => {
+    if (anchor.kind !== "pdf-text") return [];
+    const pane = paneForPage(anchor.page);
+    if (!pane) return [];
+    return paintRectsInto(pane[layerKey], id, anchor, cls);
+  };
+
   const repaintHighlights = useCallback(() => {
-    const layer = highlightLayerRef.current;
-    if (!layer) return;
-    layer.replaceChildren();
-    for (const [id, { anchor }] of drawnRef.current) paintRects(layer, id, anchor, "bc-highlight");
+    for (const pane of panesRef.current) pane.highlight.replaceChildren();
+    for (const [id, { anchor }] of drawnRef.current)
+      paintAnchor("highlight", id, anchor, "bc-highlight");
   }, []);
 
   const repaintUnderline = useCallback(() => {
-    const layer = underlineLayerRef.current;
-    if (!layer) return;
-    layer.replaceChildren();
-    if (underlineRef.current) paintRects(layer, "search", underlineRef.current, "bc-search");
+    for (const pane of panesRef.current) pane.underline.replaceChildren();
+    if (underlineRef.current) paintAnchor("underline", "search", underlineRef.current, "bc-search");
+  }, []);
+
+  // Live preview of the in-progress selection. Native ::selection is rendered
+  // transparent (see reader.css), because pdf.js's absolutely-positioned text
+  // spans don't follow visual order — so the browser paints stray selection
+  // rectangles in the margins. We instead paint the same word-confined rects we
+  // capture for the eventual highlight, so the preview matches the saved result.
+  const repaintSelection = useCallback(() => {
+    for (const pane of panesRef.current) pane.selection.replaceChildren();
+    const pending = pendingRef.current;
+    if (pending) paintAnchor("selection", "selection", pending.anchor, "bc-selection");
   }, []);
 
   const clearFlash = useCallback(() => {
-    flashLayerRef.current?.replaceChildren();
+    for (const pane of panesRef.current) pane.flash.replaceChildren();
   }, []);
 
   const flashHighlight = useCallback(
     (anchor: HighlightAnchor) => {
-      const layer = flashLayerRef.current;
-      if (!layer) return;
       clearFlash();
-      const [first] = paintRects(layer, "jump", anchor, "bc-jump-flash");
+      const [first] = paintAnchor("flash", "jump", anchor, "bc-jump-flash");
       first?.addEventListener("animationend", clearFlash, { once: true });
     },
     [clearFlash],
   );
 
   // Build (but do not display) the text layer for a page, then swap it into the
-  // page box once ready. Lives in a separate dynamically-imported chunk
+  // pane once ready. Lives in a separate dynamically-imported chunk
   // (pdf_viewer.mjs); if it 404/403s on a deploy the page must still be fully
   // usable for viewing/zoom/paging — selection and in-page search are the only
   // casualties — so failures here are swallowed and never propagate.
-  const renderTextLayer = useCallback(
-    async (page: Awaited<ReturnType<PDFDocumentProxy["getPage"]>>, viewport: unknown, seq: number) => {
-      const wrap = wrapRef.current;
-      if (!wrap) return;
+  const renderTextLayerInto = useCallback(
+    async (pane: Pane, page: PDFPageProxy, viewport: unknown, seq: number) => {
       try {
         const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
         if (seq !== renderSeqRef.current) return;
         const builder = new TextLayerBuilderCtor({ pdfPage: page });
         await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
-        if (seq !== renderSeqRef.current) {
+        if (seq !== renderSeqRef.current || !panesRef.current.includes(pane)) {
           builder.cancel();
           builder.div.remove();
           return;
         }
-        textLayerBuilderRef.current?.cancel();
-        textLayerBuilderRef.current?.div.remove();
-        textLayerBuilderRef.current = builder;
-        textLayerRef.current = builder.div;
-        wrap.appendChild(builder.div);
+        pane.builder?.cancel();
+        pane.builder?.div.remove();
+        pane.builder = builder;
+        pane.textLayer = builder.div;
+        pane.inner.appendChild(builder.div);
       } catch (error) {
         console.error("pdf text layer unavailable; selection and search disabled", error);
       }
@@ -298,111 +573,226 @@ export function usePdfSourceView(
   // next scale off-screen and swaps when ready. For +/- and page turns the
   // in-place path is kept: it resizes the page box immediately, so layout
   // (scrollHeight, page-turn scroll math) stays correct with no deferral.
-  const renderPage = useCallback(
+  // Render the current spread (1–2 pages). pageRef holds the left page; it is
+  // normalised here to the spread's left page so a turn that lands mid-pair
+  // snaps to the correct book opening. `doubleBuffer` renders each page's new
+  // scale into a *detached* canvas and swaps it in only once fully painted,
+  // instead of resizing/blanking the on-screen canvas in place — used for the
+  // pinch commit so the live (CSS-scaled) page stays untouched until the crisp
+  // bitmap is ready (no flash). The in-place path keeps +/- and page turns
+  // resizing the box immediately, so scroll/scrollHeight math stays correct.
+  const renderSpread = useCallback(
     async (opts?: { doubleBuffer?: boolean }) => {
       const doc = docRef.current;
       const wrap = wrapRef.current;
       if (!doc || !wrap) return;
 
       const seq = ++renderSeqRef.current;
-      const pageNum = pageRef.current;
-      const page = await doc.getPage(pageNum);
-      if (seq !== renderSeqRef.current) return;
+      const enabled = computeSpreadEnabled();
+      spreadActiveRef.current = enabled;
+      const left = spreadStart(pageRef.current, enabled);
+      pageRef.current = left;
+      const pages = spreadPages(left, enabled, doc.numPages);
+      const panes = ensurePanes(pages.length);
 
-      const base = page.getViewport({ scale: 1 });
-      const fit = (wrap.parentElement?.clientWidth ?? base.width) / base.width;
-      const scale = fit * (fontSizeRef.current / 100);
-      const viewport = page.getViewport({ scale });
       const dpr = window.devicePixelRatio || 1;
-      const applyWrapSize = () => {
-        wrap.style.width = `${viewport.width}px`;
-        wrap.style.height = `${viewport.height}px`;
-        // The text-layer spans size their glyphs off this CSS var.
-        wrap.style.setProperty("--total-scale-factor", String(scale));
-        wrap.style.setProperty("--scale-factor", String(scale));
-      };
+      const gutter = pages.length > 1 ? READER_NAV.spreadGutterPx : 0;
+      const pad = READER_NAV.spreadCropPadPx;
+      const leftPage = await doc.getPage(pages[0]!);
+      if (seq !== renderSeqRef.current) return;
+      const leftBase = leftPage.getViewport({ scale: 1 });
+      const parentW = wrap.parentElement?.clientWidth ?? leftBase.width;
+      // At 100% the whole spread (both pages + gutter) fits the viewport width.
+      const fit =
+        pages.length > 1 ? (parentW - gutter) / (2 * leftBase.width) : parentW / leftBase.width;
+      const scale = fit * (fontSizeRef.current / 100);
+      // The text-layer spans size their glyphs off these CSS vars (inherited).
+      wrap.style.setProperty("--pdf-spread-gutter", `${gutter}px`);
+      wrap.style.setProperty("--total-scale-factor", String(scale));
+      wrap.style.setProperty("--scale-factor", String(scale));
 
-      if (opts?.doubleBuffer) {
-        const next = document.createElement("canvas");
-        next.width = Math.floor(viewport.width * dpr);
-        next.height = Math.floor(viewport.height * dpr);
-        next.style.width = `${viewport.width}px`;
-        next.style.height = `${viewport.height}px`;
-        const ctx = next.getContext("2d");
-        if (!ctx) return;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
-        if (seq !== renderSeqRef.current) return;
-        // Atomic swap: replace the visible canvas and resize the box together,
-        // so the browser only ever composites the old or the final frame. The
-        // caller clears its transform / fixes scroll in the same microtask right
-        // after this resolves — hence the text layer below must NOT be awaited
-        // here (awaiting it would delay that reconciliation and flash).
-        const prev = canvasRef.current;
-        if (prev?.parentNode === wrap) wrap.replaceChild(next, prev);
-        else wrap.insertBefore(next, wrap.firstChild);
-        if (prev) {
-          prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
+      // In a spread, crop each page to its text box so the inner page margins
+      // (which would otherwise leave a wide gap between the pages and tall empty
+      // bands above/below) disappear. Vertical crop is the union across both
+      // pages so they stay aligned; horizontal crop is per page.
+      const boundsByPage = new Map<number, ReturnType<typeof textBounds>>();
+      let unionMinY = Infinity;
+      let unionMaxY = -Infinity;
+      if (enabled) {
+        for (const pageNum of pages) {
+          const bounds = textBounds(await geometryFor(pageNum));
+          if (seq !== renderSeqRef.current) return;
+          boundsByPage.set(pageNum, bounds);
+          if (bounds) {
+            unionMinY = Math.min(unionMinY, bounds.minY);
+            unionMaxY = Math.max(unionMaxY, bounds.maxY);
+          }
         }
-        canvasRef.current = next;
-        applyWrapSize();
-      } else {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        applyWrapSize();
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-        if (seq !== renderSeqRef.current) return;
       }
+      const hasVerticalCrop = enabled && unionMinY !== Infinity;
+
+      let totalWidth = 0;
+      let maxHeight = 0;
+      // Double-buffered renders draw every page to an offscreen canvas, then
+      // swap them all in together below — so a two-page spread updates both
+      // panes in the same frame instead of left-then-right (which flashes a
+      // mismatched new-left / old-right spread for a beat).
+      const commits: Array<() => void> = [];
+      for (const [index, pageNum] of pages.entries()) {
+        const pane = panes[index]!;
+        const page = index === 0 ? leftPage : await doc.getPage(pageNum);
+        if (seq !== renderSeqRef.current) return;
+        const viewport = page.getViewport({ scale });
+        const pageW = viewport.width;
+        const pageH = viewport.height;
+        pane.page = pageNum;
+
+        // Crop rect (CSS px within the full page). Horizontal: this page's text;
+        // vertical: the shared union so both panes align.
+        const hb = boundsByPage.get(pageNum);
+        const crop = cropBox(
+          enabled ? (hb ?? null) : null,
+          hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
+          pageW,
+          pageH,
+          pad,
+        );
+
+        // `inner` holds the full page in page coordinates; offset it so only the
+        // crop region shows through `el` (which has overflow: hidden).
+        const applyLayout = () => {
+          pane.inner.style.width = `${pageW}px`;
+          pane.inner.style.height = `${pageH}px`;
+          pane.inner.style.left = `${-crop.left}px`;
+          pane.inner.style.top = `${-crop.top}px`;
+          pane.el.style.width = `${crop.width}px`;
+          pane.el.style.height = `${crop.height}px`;
+          pane.pageHeightPx = pageH;
+          pane.cropTopPx = crop.top;
+        };
+
+        if (opts?.doubleBuffer) {
+          const next = document.createElement("canvas");
+          next.width = Math.floor(pageW * dpr);
+          next.height = Math.floor(pageH * dpr);
+          next.style.width = `${pageW}px`;
+          next.style.height = `${pageH}px`;
+          const ctx = next.getContext("2d");
+          if (!ctx) return;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
+          if (seq !== renderSeqRef.current) return;
+          // Defer the visible swap + layout so both panes commit at once.
+          commits.push(() => {
+            const prev = pane.canvas;
+            if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
+            else pane.inner.insertBefore(next, pane.inner.firstChild);
+            prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
+            pane.canvas = next;
+            applyLayout();
+          });
+        } else {
+          const canvas = pane.canvas;
+          canvas.width = Math.floor(pageW * dpr);
+          canvas.height = Math.floor(pageH * dpr);
+          canvas.style.width = `${pageW}px`;
+          canvas.style.height = `${pageH}px`;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+          if (seq !== renderSeqRef.current) return;
+          applyLayout();
+        }
+
+        totalWidth += crop.width;
+        maxHeight = Math.max(maxHeight, crop.height);
+      }
+      // Commit all double-buffered swaps together so the whole spread flips in
+      // one frame (no-op for the in-place path, which already applied above).
+      for (const commit of commits) commit();
+      // Explicit row size so `margin: 0 auto` centers the spread in the scroller.
+      wrap.style.width = `${totalWidth + gutter}px`;
+      wrap.style.height = `${maxHeight}px`;
 
       repaintHighlights();
       repaintUnderline();
-      setLocation({
-        page: pageNum,
+      repaintSelection();
+      const lastPage = pages.at(-1)!;
+      const nextLocation: SourceLocation = {
+        page: left,
         total: doc.numPages,
-        percentage: doc.numPages > 0 ? pageNum / doc.numPages : 0,
-        atStart: pageNum <= 1,
-        atEnd: pageNum >= doc.numPages,
-      });
+        percentage: doc.numPages > 0 ? left / doc.numPages : 0,
+        atStart: left <= 1,
+        atEnd: lastPage >= doc.numPages,
+      };
+      setLocation(nextLocation);
       publishPosition();
+      if (sourceId) {
+        const scroller = scrollerRef.current;
+        const capturedSnapshot = scroller
+          ? capturePdfSnapshot(sourceId, scroller, panes, nextLocation)
+          : null;
+        if (capturedSnapshot) {
+          putRenderSnapshot(capturedSnapshot);
+          setSnapshot(capturedSnapshot);
+        }
+      }
 
-      // Fire-and-forget so renderPage resolves at the swap (see above).
-      void renderTextLayer(page, viewport, seq);
+      // Fire-and-forget so renderSpread resolves at the swap (see above).
+      for (const [index, pageNum] of pages.entries()) {
+        const pane = panes[index]!;
+        void doc
+          .getPage(pageNum)
+          .then((page) => renderTextLayerInto(pane, page, page.getViewport({ scale }), seq));
+      }
     },
-    [repaintHighlights, repaintUnderline, publishPosition, renderTextLayer],
+    [
+      computeSpreadEnabled,
+      ensurePanes,
+      geometryFor,
+      repaintHighlights,
+      repaintUnderline,
+      repaintSelection,
+      publishPosition,
+      renderTextLayerInto,
+      sourceId,
+    ],
   );
 
-  // Latest renderPage for use inside imperative touch handlers without making
-  // the pinch effect re-subscribe on every renderPage identity change.
-  const renderPageRef = useRef(renderPage);
-  renderPageRef.current = renderPage;
+  // Latest renderSpread for use inside imperative touch handlers without making
+  // the pinch effect re-subscribe on every renderSpread identity change.
+  const renderPageRef = useRef(renderSpread);
+  renderPageRef.current = renderSpread;
 
   const goToPage = useCallback(
-    async (pageNum: number, afterRender: () => Promise<void> = scrollToTextTop): Promise<void> => {
+    async (
+      pageNum: number,
+      afterRender: () => Promise<void> = () => Promise.resolve(),
+    ): Promise<void> => {
       const doc = docRef.current;
       if (!doc) return;
+      const enabled = computeSpreadEnabled();
       const clamped = Math.min(Math.max(1, pageNum), doc.numPages);
-      if (clamped === pageRef.current && location) {
+      const left = spreadStart(clamped, enabled);
+      if (left === pageRef.current && location) {
         await afterRender();
         return;
       }
-      pageRef.current = clamped;
+      pageRef.current = left;
       setSelection(null);
       pendingRef.current = null;
+      repaintSelection();
       clearFlash();
-      // Land at the top of the freshly-entered page.
+      // Land at the top of the freshly-entered spread.
       if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
-      await renderPage();
+      // Double-buffer so the outgoing spread stays painted until the new one is
+      // ready, and both pages flip together (no per-pane flicker on the right).
+      await renderSpread({ doubleBuffer: true });
       await afterRender();
       publishPosition();
     },
-    [renderPage, location, clearFlash, scrollToTextTop, publishPosition],
+    [renderSpread, computeSpreadEnabled, location, clearFlash, repaintSelection, publishPosition],
   );
 
   const scrollWithinPage = useCallback(
@@ -431,57 +821,31 @@ export function usePdfSourceView(
     const host = containerRef.current;
     if (!file || !host) return;
 
-    setReady(false);
-    setLocation(null);
-    setPosition(null);
-    setTitle(null);
-    geometryRef.current.clear();
-    drawnRef.current.clear();
-    underlineRef.current = null;
-    pageRef.current = initialPdfPage === null ? 1 : Math.max(1, Math.round(initialPdfPage));
-    if (initialPdfZoom !== null) {
-      const zoom = Math.min(
-        READER_NAV.maxZoom,
-        Math.max(READER_NAV.minZoom, Math.round(initialPdfZoom)),
-      );
-      setFontSizeState(zoom);
-      fontSizeRef.current = zoom;
-    }
-
     const scroller = document.createElement("div");
     scroller.className = "pdf-scroller";
+    // `wrap` is the spread row; the page panes (canvas + overlays + text layer)
+    // are created and managed per-render by ensurePanes / renderSpread.
     const wrap = document.createElement("div");
     wrap.className = "pdf-page";
     wrap.style.position = "relative";
     wrap.style.margin = "0 auto";
-    const canvas = document.createElement("canvas");
-    const highlightLayer = document.createElement("div");
-    highlightLayer.className = "pdf-highlights";
-    const flashLayer = document.createElement("div");
-    flashLayer.className = "pdf-jump-flash";
-    const underlineLayer = document.createElement("div");
-    underlineLayer.className = "pdf-underlines";
-    for (const layer of [highlightLayer, flashLayer, underlineLayer]) {
-      layer.style.position = "absolute";
-      layer.style.inset = "0";
-      layer.style.pointerEvents = "none";
-    }
-    // The text layer is created and appended per-render by the TextLayerBuilder.
-    for (const child of [canvas, highlightLayer, flashLayer, underlineLayer])
-      wrap.appendChild(child);
     scroller.appendChild(wrap);
     host.appendChild(scroller);
     scrollerRef.current = scroller;
     wrapRef.current = wrap;
-    canvasRef.current = canvas;
-    highlightLayerRef.current = highlightLayer;
-    flashLayerRef.current = flashLayer;
-    underlineLayerRef.current = underlineLayer;
+    panesRef.current = [];
 
     const fiber = Effect.runFork(
       Effect.gen(function* () {
         const doc = yield* Effect.promise(async () => {
-          const loaded = await loadPdf(await file.arrayBuffer());
+          const cached = renderCacheKey ? getCachedPdfDocument(renderCacheKey) : null;
+          if (cached) {
+            docRef.current = cached;
+            return cached;
+          }
+          const buffer = await file.arrayBuffer();
+          const loaded = await loadPdf(buffer);
+          if (renderCacheKey) putCachedPdfDocument(renderCacheKey, loaded, buffer.byteLength);
           docRef.current = loaded;
           return loaded;
         });
@@ -491,24 +855,11 @@ export function usePdfSourceView(
         if (initialPdfPage !== null) {
           pageRef.current = Math.min(Math.max(1, pageRef.current), doc.numPages);
         }
-        yield* Effect.promise(() => renderPage());
-        yield* Effect.promise(async () => {
-          if (
-            initialPdfPage !== null &&
-            initialPdfScrollRatio !== null &&
-            initialPdfZoom !== null
-          ) {
-            scrollToPdfPosition({
-              kind: "pdf",
-              page: initialPdfPage,
-              scrollRatio: initialPdfScrollRatio,
-              zoom: initialPdfZoom,
-              percentage: initialPdfPercentage,
-            });
-          } else {
-            await scrollToTextTop();
-          }
-        });
+        yield* Effect.promise(() => renderSpread());
+        // Land on the saved page (already applied to pageRef above), but always
+        // frame it to fit the viewport — opening or swapping books should reset
+        // the zoom to fit-to-page rather than restore a stale zoom/scroll.
+        yield* Effect.promise(() => fitToTextRef.current());
         setReady(true);
       }).pipe(Effect.catchCause(() => Effect.sync(() => console.error("failed to open pdf")))),
     );
@@ -517,49 +868,102 @@ export function usePdfSourceView(
       Effect.runFork(Fiber.interrupt(fiber));
       bumpSeq(renderSeqRef);
       clearFlash();
-      textLayerBuilderRef.current?.cancel();
-      textLayerBuilderRef.current = null;
-      textLayerRef.current = null;
+      for (const pane of panesRef.current) pane.builder?.cancel();
+      panesRef.current = [];
       const doc = docRef.current;
       docRef.current = null;
-      if (doc) void destroyPdf(doc);
+      if (doc && (!renderCacheKey || !hasCachedPdfDocument(renderCacheKey, doc)))
+        void destroyPdf(doc);
       scroller.remove();
       scrollerRef.current = null;
       wrapRef.current = null;
-      flashLayerRef.current = null;
       setReady(false);
     };
-  }, [
-    file,
-    renderPage,
-    scrollToTextTop,
-    scrollToPdfPosition,
-    clearFlash,
-    initialPdfPage,
-    initialPdfScrollRatio,
-    initialPdfZoom,
-    initialPdfPercentage,
-  ]);
+  }, [file, sourceId, renderCacheKey, renderSpread, clearFlash, initialPdfPage]);
+
+  // Re-render when the page-layout preference changes (single ⇄ two-page),
+  // preserving the current spread's left page, then fit the new layout to the
+  // page. Skipped on mount / ready flips. `fitToTextRef` is read lazily (the
+  // callback is defined below) so the dependency list stays minimal.
+  const fitToTextRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const prevLayoutRef = useRef(pdfPageLayout);
+  useEffect(() => {
+    if (!ready) {
+      prevLayoutRef.current = pdfPageLayout;
+      return;
+    }
+    if (prevLayoutRef.current === pdfPageLayout) return;
+    prevLayoutRef.current = pdfPageLayout;
+    void (async () => {
+      await renderSpread();
+      await fitToTextRef.current();
+    })();
+  }, [pdfPageLayout, ready, renderSpread]);
+
+  // A width change can cross the spread-fits threshold, so re-render on resize
+  // (preserving scroll ratio) instead of leaving stale page sizing in place.
+  useEffect(() => {
+    if (!ready) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    let raf = 0;
+    let lastWidth = scroller.clientWidth;
+    const observer = new ResizeObserver(() => {
+      const width = scroller.clientWidth;
+      if (width === lastWidth) return;
+      lastWidth = width;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        const ratio = maxScroll > 0 ? scroller.scrollTop / maxScroll : 0;
+        // Did this width change cross the single ⇄ two-page threshold? If so the
+        // layout fundamentally changed, so re-fit the page rather than trying to
+        // preserve the old scroll position.
+        const flipped = computeSpreadEnabled() !== spreadActiveRef.current;
+        // Double-buffer so the live page stays painted until the resized one is
+        // ready — avoids the blank-canvas flash on each step of a slow drag.
+        void renderPageRef.current({ doubleBuffer: true }).then(() => {
+          if (flipped) {
+            void fitToTextRef.current();
+            return;
+          }
+          const newMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+          scroller.scrollTop = ratio * newMax;
+        });
+      });
+    });
+    observer.observe(scroller);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [ready, computeSpreadEnabled]);
 
   useEffect(() => {
     const clear = () => {
       if (!pendingRef.current) return;
       pendingRef.current = null;
+      repaintSelection();
       setSelection(null);
     };
     const onSelectionChange = () => {
-      const textLayer = textLayerRef.current;
-      const wrap = wrapRef.current;
-      if (!textLayer || !wrap) return;
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return clear();
       const raw = sel.getRangeAt(0);
-      if (!raw.intersectsNode(textLayer)) return;
+      // Find which page pane the selection lives in (a selection never spans the
+      // gutter — the pane whose text layer the range intersects owns it), so the
+      // captured rects stay relative to that one page's box.
+      const pane = panesRef.current.find(
+        (p) => p.textLayer !== null && raw.intersectsNode(p.textLayer),
+      );
+      if (!pane || !pane.textLayer || pane.page === null) return;
       const range = expandToWordBoundaries(raw);
 
-      const domRects = textClientRects(range, textLayer);
+      const domRects = textClientRects(range, pane.textLayer);
       if (domRects.length === 0) return;
-      const box = wrap.getBoundingClientRect();
+      // Fractions are relative to the full-page box (`inner`), not the crop
+      // viewport (`el`), so anchors stay page-relative regardless of cropping.
+      const box = pane.inner.getBoundingClientRect();
       const rects: PdfRect[] = domRects.map((r) => ({
         x: (r.left - box.left) / box.width,
         y: (r.top - box.top) / box.height,
@@ -567,33 +971,124 @@ export function usePdfSourceView(
         height: r.height / box.height,
       }));
       pendingRef.current = {
-        anchor: pdfAnchor(pageRef.current, rects),
+        anchor: pdfAnchor(pane.page, rects),
         range,
         clear: () => sel.removeAllRanges(),
       };
+      repaintSelection();
       setSelection(popupPoint(boundingRect(domRects)));
     };
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
-  }, []);
+  }, [repaintSelection]);
 
+  // Zoom anchored to the viewport center, so the +/- buttons keep the framing
+  // (a two-page spread stays centered instead of sliding off to the left).
   const setFontSize = useCallback(
     (pct: number) => {
       const clamped = Math.min(READER_NAV.maxZoom, Math.max(READER_NAV.minZoom, Math.round(pct)));
       if (clamped === fontSizeRef.current) return;
+      const scroller = scrollerRef.current;
+      const wrap = wrapRef.current;
+      let frac = { fracX: 0.5, fracY: 0.5 };
+      let cx = 0;
+      let cy = 0;
+      if (scroller && wrap) {
+        cx = scroller.clientWidth / 2;
+        cy = scroller.clientHeight / 2;
+        const sRect = scroller.getBoundingClientRect();
+        frac = focalFraction(wrap, sRect.left + cx, sRect.top + cy);
+      }
       setFontSizeState(clamped);
       fontSizeRef.current = clamped;
-      void renderPage();
+      void renderSpread().then(() => {
+        if (!scroller || !wrap) return;
+        scrollToFocalFraction(scroller, wrap, frac.fracX, frac.fracY, cx, cy);
+      });
     },
-    [renderPage],
+    [renderSpread],
   );
+
+  // Zoom so the current spread's text fills the viewport: as large as possible
+  // while the whole spread (both pages + gutter) still fits the viewport width
+  // (no horizontal scroll) and the tallest page's text fits the viewport height,
+  // leaving a slight margin. Reuses the same text top/bottom detection (geometry
+  // runs) that drives smart-arrow scrolling, so it tracks the real text.
+  const fitToText = useCallback(async (): Promise<void> => {
+    const doc = docRef.current;
+    const scroller = scrollerRef.current;
+    if (!doc || !scroller) return;
+    const enabled = spreadActiveRef.current;
+    const left = pageRef.current;
+    const pages = spreadPages(left, enabled, doc.numPages);
+    const leftBase = (await doc.getPage(pages[0]!)).getViewport({ scale: 1 });
+
+    // When spread is active, pages are cropped to their text, so fit against the
+    // combined *text* width; in single-page mode, fit against the full page
+    // width (it is not cropped).
+    let combinedWidth = 0;
+    // Height fits the *union* of both pages' vertical text extents — the same
+    // span renderSpread crops to and scrollBounds measures. Fitting only the
+    // taller single page would zoom in too far when the pages' text sits in
+    // different bands, so the union overflows and smart-scroll keeps scrolling.
+    let unionMinY = Infinity;
+    let unionMaxY = -Infinity;
+    let maxBaseHeight = 0;
+    let anyText = false;
+    for (const pageNum of pages) {
+      const base =
+        pageNum === pages[0] ? leftBase : (await doc.getPage(pageNum)).getViewport({ scale: 1 });
+      maxBaseHeight = Math.max(maxBaseHeight, base.height);
+      const geom = await geometryFor(pageNum);
+      const bounds = textBounds(geom);
+      if (bounds) {
+        anyText = true;
+        combinedWidth += enabled ? (bounds.maxX - bounds.minX) * base.width : base.width;
+        unionMinY = Math.min(unionMinY, bounds.minY);
+        unionMaxY = Math.max(unionMaxY, bounds.maxY);
+      } else {
+        combinedWidth += base.width; // scanned page: fall back to its full width.
+      }
+    }
+    if (!anyText || left !== pageRef.current) return;
+    const textHeight = (unionMaxY - unionMinY) * maxBaseHeight;
+
+    const margin = READER_NAV.textTopMargin;
+    const gutter = pages.length > 1 ? READER_NAV.spreadGutterPx : 0;
+    const pad = enabled ? READER_NAV.spreadCropPadPx : 0;
+    const fit =
+      pages.length > 1
+        ? (scroller.clientWidth - gutter) / (2 * leftBase.width)
+        : scroller.clientWidth / leftBase.width;
+    const widthBudget = scroller.clientWidth - gutter - 2 * margin - pages.length * 2 * pad;
+    const widthScale = Math.max(1, widthBudget) / combinedWidth;
+    const heightScale = Math.max(1, scroller.clientHeight - 2 * margin - 2 * pad) / textHeight;
+    const scale = Math.min(widthScale, heightScale);
+    // Floor (not round) the zoom so fit never lands *above* the computed scale —
+    // rounding up would make the text a hair taller than the viewport budget,
+    // leaving scrollBounds with a sliver of scroll range and triggering smart
+    // scroll right after a fit (most visible in single-page mode, which has no
+    // crop pad to absorb the overshoot).
+    const clamped = Math.min(
+      READER_NAV.maxZoom,
+      Math.max(READER_NAV.minZoom, Math.floor((scale / fit) * 100)),
+    );
+    if (clamped !== fontSizeRef.current) {
+      setFontSizeState(clamped);
+      fontSizeRef.current = clamped;
+      await renderSpread();
+    }
+    await scrollToTextTop();
+  }, [geometryFor, renderSpread, scrollToTextTop]);
+  fitToTextRef.current = fitToText;
   const next = useCallback(() => {
     if (scrollWithinPage("down")) return;
-    void goToPage(pageRef.current + 1);
+    const numPages = docRef.current?.numPages ?? pageRef.current;
+    void goToPage(spreadEnd(pageRef.current, spreadActiveRef.current, numPages) + 1);
   }, [scrollWithinPage, goToPage]);
   const prev = useCallback(() => {
     if (scrollWithinPage("up")) return;
-    void goToPage(pageRef.current - 1);
+    void goToPage(spreadStart(pageRef.current, spreadActiveRef.current) - 1);
   }, [scrollWithinPage, goToPage]);
   const goTo = useCallback(
     async (anchor: HighlightAnchor): Promise<void> => {
@@ -631,8 +1126,9 @@ export function usePdfSourceView(
   const dismissSelection = useCallback(() => {
     pendingRef.current?.clear();
     pendingRef.current = null;
+    repaintSelection();
     setSelection(null);
-  }, []);
+  }, [repaintSelection]);
   const commitSelection = useCallback(() => {
     const pending = pendingRef.current;
     if (pending) onSelectRef.current(pending.anchor, pending.range);
@@ -645,18 +1141,37 @@ export function usePdfSourceView(
     if (!scroller) return;
 
     const onScroll = () => publishPosition();
+    // Trackpad pinch / ctrl+wheel zoom, anchored to the cursor: capture the
+    // content point under the pointer, re-render at the new zoom, then fix the
+    // scroll so that same point stays under the cursor.
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return; // a real scroll, leave it to the container
       e.preventDefault();
-      setFontSize(fontSizeRef.current * (1 - e.deltaY * READER_NAV.pinchWheelSensitivity));
+      const wrap = wrapRef.current;
+      const target = Math.min(
+        READER_NAV.maxZoom,
+        Math.max(
+          READER_NAV.minZoom,
+          Math.round(fontSizeRef.current * (1 - e.deltaY * READER_NAV.pinchWheelSensitivity)),
+        ),
+      );
+      if (target === fontSizeRef.current || !wrap) return;
+      const sRect = scroller.getBoundingClientRect();
+      const cx = e.clientX - sRect.left;
+      const cy = e.clientY - sRect.top;
+      const { fracX, fracY } = focalFraction(wrap, e.clientX, e.clientY);
+      setFontSizeState(target);
+      fontSizeRef.current = target;
+      void renderPageRef.current().then(() => {
+        scrollToFocalFraction(scroller, wrap, fracX, fracY, cx, cy);
+      });
     };
     const dist = (t: TouchList) =>
       Math.hypot(
         (t[0]?.clientX ?? 0) - (t[1]?.clientX ?? 0),
         (t[0]?.clientY ?? 0) - (t[1]?.clientY ?? 0),
       );
-    const clampZoom = (z: number) =>
-      Math.min(READER_NAV.maxZoom, Math.max(READER_NAV.minZoom, z));
+    const clampZoom = (z: number) => Math.min(READER_NAV.maxZoom, Math.max(READER_NAV.minZoom, z));
     const midpoint = (t: TouchList) => ({
       x: ((t[0]?.clientX ?? 0) + (t[1]?.clientX ?? 0)) / 2,
       y: ((t[0]?.clientY ?? 0) + (t[1]?.clientY ?? 0)) / 2,
@@ -721,26 +1236,20 @@ export function usePdfSourceView(
       // crisp bitmap is ready, so there is no flash at the end of the pinch.
       await renderPageRef.current({ doubleBuffer: true });
       clearTransform();
-      const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
-      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      scroller.scrollLeft = Math.min(
-        maxLeft,
-        Math.max(0, wrap.offsetLeft + focalFracX * wrap.offsetWidth - fx),
-      );
-      scroller.scrollTop = Math.min(
-        maxTop,
-        Math.max(0, wrap.offsetTop + focalFracY * wrap.offsetHeight - fy),
-      );
+      scrollToFocalFraction(scroller, wrap, focalFracX, focalFracY, fx, fy);
     };
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
+      // Pinch-zoom is disabled in a two-page spread (it never reads well across
+      // two cropped pages); let the touches pan/scroll normally instead.
+      if (spreadActiveRef.current) return;
       e.preventDefault();
       e.stopPropagation();
       beginPinch(e.touches);
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 2) return;
+      if (e.touches.length !== 2 || spreadActiveRef.current) return;
       e.preventDefault();
       e.stopPropagation();
       const wrap = wrapRef.current;
@@ -764,12 +1273,12 @@ export function usePdfSourceView(
       e.stopPropagation();
     };
 
-    scroller.addEventListener("scroll", onScroll);
+    scroller.addEventListener("scroll", onScroll, { passive: true });
     scroller.addEventListener("wheel", onWheel, { passive: false });
     scroller.addEventListener("touchstart", onTouchStart, { passive: false, capture: true });
     scroller.addEventListener("touchmove", onTouchMove, { passive: false, capture: true });
-    scroller.addEventListener("touchend", onTouchEnd, { capture: true });
-    scroller.addEventListener("touchcancel", onTouchCancel, { capture: true });
+    scroller.addEventListener("touchend", onTouchEnd, { passive: true, capture: true });
+    scroller.addEventListener("touchcancel", onTouchCancel, { passive: true, capture: true });
     scroller.addEventListener("gesturestart", swallowGesture, { passive: false, capture: true });
     scroller.addEventListener("gesturechange", swallowGesture, { passive: false, capture: true });
     scroller.addEventListener("gestureend", swallowGesture, { passive: false, capture: true });
@@ -784,7 +1293,7 @@ export function usePdfSourceView(
       scroller.removeEventListener("gesturechange", swallowGesture, { capture: true });
       scroller.removeEventListener("gestureend", swallowGesture, { capture: true });
     };
-  }, [ready, setFontSize, publishPosition]);
+  }, [ready, publishPosition]);
 
   const reader = useMemo<SourceReader>(() => {
     const locateOnPage = (
@@ -852,6 +1361,7 @@ export function usePdfSourceView(
     title,
     fontSize,
     setFontSize,
+    fitToText,
     next,
     prev,
     goTo,
@@ -863,6 +1373,7 @@ export function usePdfSourceView(
     dismissSelection,
     location,
     position,
+    snapshot,
     reader,
     search,
   };

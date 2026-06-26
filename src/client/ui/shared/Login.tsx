@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import type { Session } from "../../auth/useSession.ts";
 import { Modal } from "./Modal.tsx";
 
@@ -15,6 +15,47 @@ const MESSAGES: Record<string, string> = {
 const message = (error: string): string => MESSAGES[error] ?? "Something went wrong. Try again.";
 
 type Step = "email" | "code" | "done";
+
+interface LoginModalState {
+  step: Step;
+  email: string;
+  code: string;
+  error: string | null;
+  busy: boolean;
+}
+
+type LoginModalAction =
+  | { type: "email"; email: string }
+  | { type: "code"; code: string }
+  | { type: "submit" }
+  | { type: "error"; error: string }
+  | { type: "codeSent" }
+  | { type: "done" };
+
+const initialLoginModalState: LoginModalState = {
+  step: "email",
+  email: "",
+  code: "",
+  error: null,
+  busy: false,
+};
+
+function loginModalReducer(state: LoginModalState, action: LoginModalAction): LoginModalState {
+  switch (action.type) {
+    case "email":
+      return { ...state, email: action.email };
+    case "code":
+      return { ...state, code: action.code };
+    case "submit":
+      return { ...state, busy: true, error: null };
+    case "error":
+      return { ...state, busy: false, error: action.error };
+    case "codeSent":
+      return { ...state, step: "code", busy: false };
+    case "done":
+      return { ...state, step: "done", busy: false };
+  }
+}
 
 export function Login({
   session,
@@ -53,43 +94,36 @@ export function LoginModal({
   session: Session;
   onClose: () => void;
 }): React.ReactElement {
-  const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [state, dispatch] = useReducer(loginModalReducer, initialLoginModalState);
+  const { step, email, code, error, busy } = state;
 
   async function onSendCode(e: React.FormEvent): Promise<void> {
     e.preventDefault();
-    setBusy(true);
-    setError(null);
+    dispatch({ type: "submit" });
     const result = await session.startLogin(email);
-    setBusy(false);
     if (!result.ok) {
-      setError(message(result.error));
+      dispatch({ type: "error", error: message(result.error) });
       return;
     }
 
     if (result.devSignedIn) {
-      setStep("done");
+      dispatch({ type: "done" });
       setTimeout(onClose, 1200);
       return;
     }
-    setStep("code");
+    dispatch({ type: "codeSent" });
   }
 
   async function onVerify(e: React.FormEvent): Promise<void> {
     e.preventDefault();
-    setBusy(true);
-    setError(null);
+    dispatch({ type: "submit" });
     const result = await session.verify(email, code);
-    setBusy(false);
     if (!result.ok) {
-      setError(message(result.error));
+      dispatch({ type: "error", error: message(result.error) });
       return;
     }
 
-    setStep("done");
+    dispatch({ type: "done" });
     setTimeout(onClose, 1200);
   }
 
@@ -102,10 +136,10 @@ export function LoginModal({
           <form onSubmit={(e) => void onSendCode(e)}>
             <input
               type="email"
+              aria-label="Email address"
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoFocus
+              onChange={(e) => dispatch({ type: "email", email: e.target.value })}
             />
             <button
               type="submit"
@@ -122,10 +156,10 @@ export function LoginModal({
             <input
               type="text"
               inputMode="numeric"
+              aria-label="Verification code"
               placeholder="6-digit code"
               value={code}
-              onChange={(e) => setCode(e.target.value)}
-              autoFocus
+              onChange={(e) => dispatch({ type: "code", code: e.target.value })}
             />
             <button
               type="submit"

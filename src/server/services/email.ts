@@ -1,9 +1,23 @@
 import type { Env } from "../env.ts";
 
-export async function sendLoginCode(env: Env, email: string, code: string): Promise<void> {
+// Send an email when a provider is configured; otherwise log it (dev fallback).
+// `logLine` is what gets printed when no provider is bound.
+async function sendEmail(
+  env: Env,
+  message: { to: string; subject: string; text: string; html: string },
+  logLine: string,
+): Promise<void> {
   if (env.EMAIL && env.EMAIL_FROM) {
-    await env.EMAIL.send({
-      from: env.EMAIL_FROM,
+    await env.EMAIL.send({ from: env.EMAIL_FROM, ...message });
+    return;
+  }
+  console.log(logLine);
+}
+
+export async function sendLoginCode(env: Env, email: string, code: string): Promise<void> {
+  await sendEmail(
+    env,
+    {
       to: email,
       subject: "Your bookclub login code",
       text:
@@ -15,10 +29,9 @@ export async function sendLoginCode(env: Env, email: string, code: string): Prom
         `<p style="margin:8px 0;font-size:24px;font-weight:700;letter-spacing:3px;">${code}</p>` +
         `<p style="margin:0;">It expires in 10 minutes. If you didn't request it, ignore this email.</p>` +
         `</div>`,
-    });
-    return;
-  }
-  console.log(`[auth] login code for ${email}: ${code}`);
+    },
+    `[auth] login code for ${email}: ${code}`,
+  );
 }
 
 export async function sendInvite(
@@ -27,9 +40,9 @@ export async function sendInvite(
   groupDisplayName: string,
   link: string,
 ): Promise<void> {
-  if (env.EMAIL && env.EMAIL_FROM) {
-    await env.EMAIL.send({
-      from: env.EMAIL_FROM,
+  await sendEmail(
+    env,
+    {
       to: email,
       subject: `You're invited to "${groupDisplayName}" on bookclub`,
       text:
@@ -42,8 +55,7 @@ export async function sendInvite(
         `<p style="margin:12px 0;"><a href="${link}">${link}</a></p>` +
         `<p style="margin:0;">If you didn't expect this invite, ignore this email.</p>` +
         `</div>`,
-    });
-    return;
-  }
-  console.log(`[invite] ${groupDisplayName} invite for ${email}: ${link}`);
+    },
+    `[invite] ${groupDisplayName} invite for ${email}: ${link}`,
+  );
 }

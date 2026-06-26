@@ -2,7 +2,7 @@ import type { Env } from "../env.ts";
 import type { Identity } from "../agents/GroupAgent.ts";
 import { SESSION_TTL_MS, verifySession } from "./session.ts";
 
-export const SESSION_COOKIE = "bc_session";
+const SESSION_COOKIE = "bc_session";
 
 export function sessionCookie(token: string): string {
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);
@@ -13,7 +13,7 @@ export function clearedCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-export function readSessionCookie(request: Request): string | null {
+function readSessionCookie(request: Request): string | null {
   const header = request.headers.get("Cookie");
   if (!header) return null;
   for (const part of header.split(";")) {

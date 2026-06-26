@@ -11,6 +11,9 @@ export interface ReaderSearch {
   active: number;
 
   searching: boolean;
+  // Bumped on every openSearch so the input can re-focus + select-all even when
+  // the panel is already open (lets a second Ctrl+F restart the query).
+  focusTick: number;
   openSearch: () => void;
   closeSearch: () => void;
   setQuery: (q: string) => void;
@@ -42,10 +45,23 @@ export function useReaderSearch({
   const [matches, setMatches] = useState<SearchMatch[]>([]);
   const [active, setActive] = useState(-1);
   const [searching, setSearching] = useState(false);
+  const [focusTick, setFocusTick] = useState(0);
+  const [readySnapshot, setReadySnapshot] = useState(ready);
 
   const paintedRef = useRef<HighlightAnchor | null>(null);
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null);
   const debounceRef = useRef<number | null>(null);
+
+  if (readySnapshot !== ready) {
+    setReadySnapshot(ready);
+    if (!ready) {
+      setOpen(false);
+      setQueryState("");
+      setMatches([]);
+      setActive(-1);
+      setSearching(false);
+    }
+  }
 
   const clearPaint = useCallback(() => {
     if (paintedRef.current) {
@@ -112,7 +128,10 @@ export function useReaderSearch({
     showMatch(matches, (active - 1 + matches.length) % matches.length);
   }, [matches, active, showMatch]);
 
-  const openSearch = useCallback(() => setOpen(true), []);
+  const openSearch = useCallback(() => {
+    setOpen(true);
+    setFocusTick((t) => t + 1);
+  }, []);
   const closeSearch = useCallback(() => {
     cancelPending();
     clearPaint();
@@ -124,19 +143,21 @@ export function useReaderSearch({
   }, [cancelPending, clearPaint]);
 
   useEffect(() => {
+    if (!ready) return;
     return () => cancelPending();
-  }, [cancelPending, reader]);
+  }, [ready, cancelPending, reader]);
 
-  useEffect(() => {
-    if (!ready) {
-      cancelPending();
-      setOpen(false);
-      setQueryState("");
-      setMatches([]);
-      setActive(-1);
-      setSearching(false);
-    }
-  }, [ready, cancelPending]);
-
-  return { open, query, matches, active, searching, openSearch, closeSearch, setQuery, next, prev };
+  return {
+    open,
+    query,
+    matches,
+    active,
+    searching,
+    focusTick,
+    openSearch,
+    closeSearch,
+    setQuery,
+    next,
+    prev,
+  };
 }

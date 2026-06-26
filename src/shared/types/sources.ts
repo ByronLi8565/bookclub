@@ -1,7 +1,7 @@
 export type SourceKind = "epub" | "pdf";
 
 export const EPUB_CONTENT_TYPE = "application/epub+zip";
-export const PDF_CONTENT_TYPE = "application/pdf";
+const PDF_CONTENT_TYPE = "application/pdf";
 
 export interface SourceRef {
   id: string;

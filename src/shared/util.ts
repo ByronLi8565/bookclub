@@ -1,18 +1,7 @@
-import * as Data from "effect/Data";
-import * as Effect from "effect/Effect";
-
-export class HashError extends Data.TaggedError("HashError")<{ cause: unknown }> {}
-
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-
-export const hashFile = (file: Blob): Effect.Effect<string, HashError> =>
-  Effect.tryPromise({
-    try: async () => sha256Hex(await file.arrayBuffer()),
-    catch: (cause) => new HashError({ cause }),
-  });
 
 export function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -42,9 +31,14 @@ export function base64urlDecode(text: string): Uint8Array {
   return bytes;
 }
 
+// Canonical form for comparison/storage/lookup: trimmed and lowercased.
+export function canonicalEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export function normalizeEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const email = raw.trim().toLowerCase();
+  const email = canonicalEmail(raw);
   return /^[^@\s]+@[^@\s]+$/u.test(email) ? email : null;
 }
 
@@ -62,4 +56,20 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   return `${value.toFixed(1)} ${units[unit]}`;
+}
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+// A random lowercase-hex string of `byteLength` random bytes (so 2*byteLength chars).
+export function randomHexToken(byteLength: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// A random string of `length` characters drawn from `alphabet`.
+export function randomId(length: number, alphabet: string): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
 }

@@ -14,9 +14,10 @@ import {
 } from "../../notes/highlights.ts";
 import type Navigation from "epubjs/types/navigation";
 import { makeEpubReader } from "./epubReader.ts";
+import { useReaderPrefs } from "../../settings/userPrefs.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
-import type { OnSelect, SourceLocation, SourceView } from "./sourceView.ts";
+import { bumpSeq, type OnSelect, type SourceLocation, type SourceView } from "./sourceView.ts";
 
 function firstChapterHref(nav: Navigation): string | undefined {
   return nav.landmark?.("bodymatter")?.href ?? nav.toc?.[0]?.href;
@@ -48,6 +49,7 @@ async function measurePagination(
   width: number,
   height: number,
   fontSizePct: number,
+  spread: string,
   isCancelled: () => boolean,
 ): Promise<Pagination | null> {
   if (width <= 0 || height <= 0) return null;
@@ -57,7 +59,7 @@ async function measurePagination(
   host.style.cssText = `position:absolute;left:-99999px;top:0;width:${width}px;height:${height}px;visibility:hidden;pointer-events:none;`;
   document.body.appendChild(host);
 
-  const probe = book.renderTo(host, { width, height, spread: "auto", flow: "paginated" });
+  const probe = book.renderTo(host, { width, height, spread, flow: "paginated" });
   probe.themes.fontSize(`${fontSizePct}%`);
   try {
     const items = (
@@ -101,10 +103,6 @@ interface ResizableView {
   contents?: Contents;
 }
 
-function bumpSeq(ref: { current: number }): void {
-  ref.current += 1;
-}
-
 function isEditableTarget(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
@@ -124,6 +122,12 @@ export function useEpubSourceView(
   onSelectRef.current = onSelect;
   const onSwipeRef = useRef(onSwipe);
   onSwipeRef.current = onSwipe;
+  // "auto" lets epub.js use a two-page spread when wide enough; "none" forces a
+  // single page. Driven by the shared page-layout preference (toggled with `d`).
+  const { pdfPageLayout } = useReaderPrefs();
+  const spreadMode = pdfPageLayout === "auto" ? "auto" : "none";
+  const spreadModeRef = useRef(spreadMode);
+  spreadModeRef.current = spreadMode;
   const openSearchRef = useRef<() => void>(() => {});
   const [title, setTitle] = useState<string | null>(null);
 
@@ -135,18 +139,31 @@ export function useEpubSourceView(
   const swipeRef = useRef(swipe.ref);
   swipeRef.current = swipe.ref;
 
-  const viewRef = useRef(Effect.runSync(Ref.make(Option.none<LiveView>())));
+  const viewRef = useRef<Ref.Ref<Option.Option<LiveView>>>(null!);
+  viewRef.current ??= Effect.runSync(Ref.make(Option.none<LiveView>()));
   const [ready, setReady] = useState(false);
   const [fontSize, setFontSizeState] = useState(100);
   const [selection, setSelection] = useState<{ x: number; y: number } | null>(null);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
-  const drawnCfiRef = useRef<Map<string, string>>(new Map());
+  const drawnCfiRef = useRef<Map<string, string>>(null!);
+  drawnCfiRef.current ??= new Map<string, string>();
   const [raw, setRaw] = useState<RawLocation | null>(null);
   const [position, setPosition] = useState<SourceReadingPosition | null>(null);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [viewportTick, setViewportTick] = useState(0);
   const measureSeqRef = useRef(0);
   const initialEpubCfi = initialPosition?.kind === "epub" ? initialPosition.cfi : null;
+  const [openedSource, setOpenedSource] = useState({ file, initialEpubCfi });
+
+  if (openedSource.file !== file || openedSource.initialEpubCfi !== initialEpubCfi) {
+    setOpenedSource({ file, initialEpubCfi });
+    setReady(false);
+    setRaw(null);
+    setPosition(null);
+    setPagination(null);
+    setTitle(null);
+    drawnCfiRef.current.clear();
+  }
 
   const publish = (view: Option.Option<LiveView>) => {
     Effect.runSync(Ref.set(viewRef.current, view));
@@ -157,15 +174,12 @@ export function useEpubSourceView(
     const el = containerRef.current;
     if (!file || !el) return;
 
-    publish(Option.none());
-    setRaw(null);
-    setPosition(null);
-    setPagination(null);
-    setTitle(null);
-    drawnCfiRef.current.clear();
-
     const book = ePub();
-    const rendition = book.renderTo(el, { width: "100%", height: "100%", spread: "auto" });
+    const rendition = book.renderTo(el, {
+      width: "100%",
+      height: "100%",
+      spread: spreadModeRef.current,
+    });
 
     rendition.themes.default({ body: { "-webkit-user-select": "text", "user-select": "text" } });
 
@@ -254,23 +268,6 @@ export function useEpubSourceView(
       setSelection(null);
     });
 
-    let resizeFrame: number | undefined;
-    const resizeObserver = new ResizeObserver(() => {
-      if (resizeFrame !== undefined) return;
-      resizeFrame = requestAnimationFrame(() => {
-        resizeFrame = undefined;
-        if (Option.isNone(Effect.runSync(Ref.get(viewRef.current)))) return;
-        try {
-          rendition.resize(el.clientWidth, el.clientHeight);
-          showLocation();
-          setViewportTick((v) => v + 1);
-        } catch (error) {
-          console.error("failed to resize rendition", error);
-        }
-      });
-    });
-    resizeObserver.observe(el);
-
     const load = Effect.gen(function* () {
       const buf = yield* Effect.tryPromise(() => file.arrayBuffer());
       yield* Effect.tryPromise(() => book.open(buf, "binary"));
@@ -304,16 +301,57 @@ export function useEpubSourceView(
     const fiber = Effect.runFork(load);
 
     return () => {
-      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
       clearInterval(poll);
       for (const removeContentKeydown of removeContentKeydowns) removeContentKeydown();
-      resizeObserver.disconnect();
       Effect.runFork(Fiber.interrupt(fiber));
       publish(Option.none());
       rendition.destroy();
       book.destroy();
     };
   }, [file, initialEpubCfi]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const el = containerRef.current;
+    const liveView = Effect.runSync(Ref.get(viewRef.current));
+    if (!el || Option.isNone(liveView)) return;
+    const { rendition } = liveView.value;
+    let resizeFrame: number | undefined;
+    const resizeObserver = new ResizeObserver(() => {
+      if (resizeFrame !== undefined) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        try {
+          rendition.resize(el.clientWidth, el.clientHeight);
+          const loc = rendition.currentLocation() as unknown as
+            | {
+                start?: { index: number; cfi?: string; displayed?: { page: number } };
+                atStart?: boolean;
+                atEnd?: boolean;
+              }
+            | undefined;
+          const start = loc?.start;
+          if (start?.displayed) {
+            setRaw({
+              index: start.index,
+              cfi: start.cfi ?? null,
+              page: start.displayed.page,
+              atStart: loc?.atStart ?? false,
+              atEnd: loc?.atEnd ?? false,
+            });
+          }
+          setViewportTick((v) => v + 1);
+        } catch (error) {
+          console.error("failed to resize rendition", error);
+        }
+      });
+    });
+    resizeObserver.observe(el);
+    return () => {
+      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+      resizeObserver.disconnect();
+    };
+  }, [ready]);
 
   // Recompute the page-turn total whenever the book opens, the zoom changes, or
   // the viewport resizes. Each run is a forked fiber; a newer trigger interrupts
@@ -328,6 +366,7 @@ export function useEpubSourceView(
     const width = el.clientWidth;
     const height = el.clientHeight;
     const pct = fontSize;
+    const spread = spreadModeRef.current;
 
     const seq = ++measureSeqRef.current;
     const fiber = Effect.runFork(
@@ -335,7 +374,7 @@ export function useEpubSourceView(
         yield* Effect.sleep("250 millis");
         if (seq !== measureSeqRef.current) return;
         const result = yield* Effect.tryPromise(() =>
-          measurePagination(book, width, height, pct, () => seq !== measureSeqRef.current),
+          measurePagination(book, width, height, pct, spread, () => seq !== measureSeqRef.current),
         );
         if (result && seq === measureSeqRef.current) {
           yield* Effect.sync(() => setPagination(result));
@@ -352,7 +391,7 @@ export function useEpubSourceView(
       bumpSeq(measureSeqRef);
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [ready, fontSize, viewportTick]);
+  }, [ready, fontSize, viewportTick, pdfPageLayout]);
 
   const onView = useCallback((f: (view: LiveView) => void) => {
     const view = Effect.runSync(Ref.get(viewRef.current));
@@ -362,6 +401,31 @@ export function useEpubSourceView(
     () => Option.getOrNull(Effect.runSync(Ref.get(viewRef.current))),
     [],
   );
+
+  // Apply a live spread change (single ⇄ two-page) without reopening the book:
+  // update the rendition's spread, then re-display the current location so the
+  // new layout takes effect. Skipped on first ready (already set at renderTo).
+  const prevLayoutRef = useRef(pdfPageLayout);
+  useEffect(() => {
+    if (!ready) {
+      prevLayoutRef.current = pdfPageLayout;
+      return;
+    }
+    if (prevLayoutRef.current === pdfPageLayout) return;
+    prevLayoutRef.current = pdfPageLayout;
+    const view = Option.getOrNull(Effect.runSync(Ref.get(viewRef.current)));
+    if (!view) return;
+    try {
+      view.rendition.spread(pdfPageLayout === "auto" ? "auto" : "none");
+      const loc = view.rendition.currentLocation() as unknown as
+        | { start?: { cfi?: string } }
+        | undefined;
+      const cfi = loc?.start?.cfi;
+      if (cfi) void view.rendition.display(cfi);
+    } catch (error) {
+      console.error("failed to change epub spread", error);
+    }
+  }, [pdfPageLayout, ready]);
 
   const setFontSize = useCallback(
     (pct: number) => {
@@ -514,6 +578,7 @@ export function useEpubSourceView(
     dismissSelection,
     location,
     position,
+    snapshot: null,
     reader,
     search,
   };

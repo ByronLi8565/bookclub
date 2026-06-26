@@ -33,7 +33,7 @@ export function noteHeading(
   return `${authorName} ${verb} ${formatNoteTimestamp(createdAt)}`;
 }
 
-export function formatNoteTimestamp(createdAt: string): string {
+function formatNoteTimestamp(createdAt: string): string {
   return new Date(createdAt).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
@@ -67,10 +67,10 @@ export function noteSnippet(note: Note, max = 80): string {
 }
 
 export function renderNoteBody(body: string, refs: Map<number, string> = new Map()): string {
-  const blocks = body
-    .split(/\n{2,}/u)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const blocks = body.split(/\n{2,}/u).flatMap((raw) => {
+    const block = raw.trim();
+    return block ? [block] : [];
+  });
 
   return blocks
     .map((block) => {

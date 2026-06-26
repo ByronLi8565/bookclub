@@ -31,15 +31,21 @@ async function countWords(
   sections: SpineSection[],
   onProgress?: InspectionProgress,
 ): Promise<number> {
-  let words = 0;
-  for (const [index, section] of sections.entries()) {
-    const contents = await section.load(book.load.bind(book));
-    const text = (contents?.textContent ?? "").trim();
-    if (text !== "") words += text.split(/\s+/u).length;
-    section.unload();
-    onProgress?.((index + 1) / sections.length);
-  }
-  return words;
+  let inspected = 0;
+  const counts = await Promise.all(
+    sections.map(async (section) => {
+      try {
+        const contents = await section.load(book.load.bind(book));
+        const text = (contents?.textContent ?? "").trim();
+        return text === "" ? 0 : text.split(/\s+/u).length;
+      } finally {
+        section.unload();
+        inspected++;
+        onProgress?.(inspected / sections.length);
+      }
+    }),
+  );
+  return counts.reduce((total, count) => total + count, 0);
 }
 
 async function coverDataUrl(book: ReturnType<typeof ePub>): Promise<string | null> {
@@ -68,9 +74,11 @@ export async function inspectEpub(
         metadata: EMPTY_METADATA,
       };
     }
-    const meta = await book.loaded.metadata.catch(() => null);
-    const wordCount = await countWords(book, items, onProgress).catch(() => null);
-    const cover = await coverDataUrl(book);
+    const [meta, wordCount, cover] = await Promise.all([
+      book.loaded.metadata.catch(() => null),
+      countWords(book, items, onProgress).catch(() => null),
+      coverDataUrl(book),
+    ]);
     const metadata: SourceMetadata = {
       title: meta?.title?.trim() || null,
       author: meta?.creator?.trim() || null,

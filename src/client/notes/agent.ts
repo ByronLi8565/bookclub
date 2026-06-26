@@ -1,5 +1,5 @@
 import { useAgent } from "agents/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Note } from "../../shared/types/notes.ts";
 import type { NoteAgent, NoteState, OnlinePeer } from "../../server/agents/NoteAgent.ts";
 import type { Highlight, HighlightAnchor } from "./highlights.ts";
@@ -20,19 +20,22 @@ export interface NoteSync {
 }
 
 export function useNoteAgent(groupId: string | null): NoteSync {
-  const [online, setOnline] = useState<OnlinePeer[]>([]);
+  const [presence, setPresence] = useState<{ groupId: string | null; online: OnlinePeer[] }>({
+    groupId,
+    online: [],
+  });
+  if (presence.groupId !== groupId) setPresence({ groupId, online: [] });
   const agent = useAgent<NoteAgent, NoteState>({
     agent: "note-agent",
     name: groupId ?? "idle",
     onMessage: (event) => {
       try {
         const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
-        if (msg.type === "presence" && msg.users) setOnline(msg.users);
+        if (msg.type === "presence" && msg.users) setPresence({ groupId, online: msg.users });
       } catch {}
     },
   });
 
-  useEffect(() => setOnline([]), [groupId]);
   const { stub } = agent;
   const fire = (call: () => Promise<unknown>) => {
     if (agent.readyState !== agent.OPEN) {
@@ -56,7 +59,7 @@ export function useNoteAgent(groupId: string | null): NoteSync {
   return {
     notes: groupId ? (agent.state?.notes ?? []) : [],
     notesReady: groupId ? agent.state !== undefined : true,
-    online: groupId ? online : [],
+    online: groupId && presence.groupId === groupId ? presence.online : [],
     syncStatus: syncStatus(
       groupId,
       agent.readyState,

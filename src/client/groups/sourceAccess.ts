@@ -1,11 +1,11 @@
 import { fetchSource, uploadSource, type ApiResult, type GroupSummary } from "./api.ts";
 import { groupUrlName } from "../../shared/groupUrls.ts";
 import { deleteCachedSource, getCachedSource, putCachedSource } from "./sourceCache.ts";
-import { currentSourceId, sourceById, sourceRefById } from "../../shared/sources.ts";
+import { sourceById, sourceRefById } from "../../shared/sources.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import { sourceKindFor, type SourceSummary } from "../../shared/types/sources.ts";
 
-export { books, currentSource, currentSourceRef } from "../../shared/sources.ts";
+export { books, currentSource } from "../../shared/sources.ts";
 
 export interface LoadedSource {
   source: SourceSummary;
@@ -40,11 +40,6 @@ export async function loadSource(
   const id = fetched.sourceId ?? ref.id;
   void putCachedSource(id, fetched.file);
   return { source: summaryFor(group, id, fetched.file), file: fetched.file, fromCache: false };
-}
-
-export function loadCurrentSource(group: GroupSummary): Promise<LoadedSource | null> {
-  const id = currentSourceId(group);
-  return id ? loadSource(group, id) : Promise.resolve(null);
 }
 
 export async function uploadCurrentSource(

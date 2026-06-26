@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { BookUpload, InspectedBook } from "../../groups/useBookUpload.ts";
 import type { SourceCapabilities, SourceHealth } from "../../../shared/types/sourceHealth.ts";
+import { formatBytes } from "../../../shared/util.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { Modal } from "../shared/Modal.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
@@ -22,18 +23,6 @@ const CAPABILITY_ROWS: { key: keyof SourceCapabilities; label: string }[] = [
   { key: "quoteRebind", label: "Quote rebind" },
   { key: "pageNavigation", label: "Page navigation" },
 ];
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(1)} ${units[unit]}`;
-}
 
 function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
   return CAPABILITY_ROWS.map(({ key, label }) => ({

@@ -1,6 +1,5 @@
 import * as Effect from "effect/Effect";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import type { Session } from "../../auth/useSession.ts";
 import {
   fetchGroup,
@@ -18,7 +17,6 @@ import {
   setLocalReadingPosition,
   syncReadingPosition,
 } from "../../settings/readingPositions.ts";
-import { hydrateUserPrefs } from "../../settings/userPrefs.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
@@ -34,15 +32,7 @@ type Resolved =
   | { k: "refused" }
   | { k: "member"; group: GroupSummary; isOwner: boolean; members: RosterEntry[] };
 
-interface LoadedFile {
-  sourceId: string;
-  file: File | null;
-}
-
-interface InitialReadingPosition {
-  key: string;
-  position: SourceReadingPosition | null;
-}
+type LoadedFiles = Record<string, File | null>;
 
 const SELECTED_SOURCE_PREFIX = "bookclub.selectedSource";
 const HOME_TITLE_MAX_SIZE = 72;
@@ -62,13 +52,6 @@ function takeInviteToken(): string | null {
   const token = params.get("invite");
   if (token) window.history.replaceState(null, "", window.location.pathname);
   return token;
-}
-
-function shouldPreferLocalOpen(): boolean {
-  const nav = performance.getEntriesByType("navigation")[0] as
-    | PerformanceNavigationTiming
-    | undefined;
-  return nav?.type === "reload" || nav?.type === "back_forward";
 }
 
 function FittedHomeTitle({ children }: { children: string }): React.ReactElement {
@@ -126,16 +109,29 @@ export function GroupView({
 }): React.ReactElement {
   const [resolved, setResolved] = useState<Resolved>({ k: "loading" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState<LoadedFile | null>(null);
-  const [initialReadingPosition, setInitialReadingPosition] =
-    useState<InitialReadingPosition | null>(null);
+  const [loadedFiles, setLoadedFiles] = useState<LoadedFiles>({});
+  const loadedFilesRef = useRef<LoadedFiles>({});
   const [uploadOpen, setUploadOpen] = useState(false);
   const userId = session.user?.id ?? null;
   const isMobile = useIsMobile();
+  const loadKey = `${groupRef}:${session.status}:${userId ?? ""}`;
+  const loadKeyRef = useRef(loadKey);
+
+  if (loadKeyRef.current !== loadKey) {
+    loadKeyRef.current = loadKey;
+    if (session.status === "anon") {
+      setResolved({ k: "anon" });
+    } else if (session.status === "authed") {
+      setResolved({ k: "loading" });
+      setSelectedId(null);
+      setLoadedFiles({});
+    }
+  }
 
   const group = resolved.k === "member" ? resolved.group : null;
   const groupStateRef = useRef<GroupSummary | null>(null);
   groupStateRef.current = group;
+  loadedFilesRef.current = loadedFiles;
   const effectiveId = group ? (selectedId ?? currentSourceId(group)) : null;
 
   function selectBook(sourceId: string): void {
@@ -194,16 +190,9 @@ export function GroupView({
   }
 
   useEffect(() => {
-    if (session.status === "loading") return;
-    if (session.status === "anon") {
-      setResolved({ k: "anon" });
-      return;
-    }
-
     let cancelled = false;
-    setResolved({ k: "loading" });
-    setSelectedId(null);
-    setLoaded(null);
+    if (session.status === "loading") return;
+    if (session.status === "anon") return;
 
     void (async () => {
       let view = await fetchGroup(groupRef);
@@ -232,20 +221,19 @@ export function GroupView({
         members: view.members,
       });
     })();
-
     return () => {
       cancelled = true;
     };
   }, [groupRef, session.status, userId]);
 
   useEffect(() => {
+    let cancelled = false;
     const loadGroup = groupStateRef.current;
     if (!loadGroup || !effectiveId) return;
-    let cancelled = false;
-    setLoaded(null);
+    if (Object.hasOwn(loadedFilesRef.current, effectiveId)) return;
     void loadSource(loadGroup, effectiveId).then((result) => {
       if (cancelled) return;
-      setLoaded({ sourceId: effectiveId, file: result?.file ?? null });
+      setLoadedFiles((current) => ({ ...current, [effectiveId]: result?.file ?? null }));
     });
     return () => {
       cancelled = true;
@@ -257,59 +245,23 @@ export function GroupView({
   const groupId = group?.groupId ?? null;
   const restoreSourceId = source?.id ?? null;
   const sourceKind = source?.kind ?? null;
-  const positionKey =
-    userId && groupId && restoreSourceId && sourceKind
-      ? `${userId}:${groupId}:${restoreSourceId}:${sourceKind}`
-      : null;
+
+  const initialPosition = useMemo(
+    () =>
+      userId && groupId && restoreSourceId && sourceKind
+        ? (getReadingPosition(userId, groupId, restoreSourceId, sourceKind)?.position ?? null)
+        : null,
+    [userId, groupId, restoreSourceId, sourceKind],
+  );
 
   useEffect(() => {
-    if (!userId || !groupId || !restoreSourceId || !sourceKind || !positionKey) {
-      setInitialReadingPosition(null);
-      return;
-    }
-    let cancelled = false;
-    const local =
-      getReadingPosition(userId, groupId, restoreSourceId, sourceKind)?.position ?? null;
-    if (shouldPreferLocalOpen()) {
-      setInitialReadingPosition({ key: positionKey, position: local });
-      void Effect.runPromise(
-        fetchServerReadingPosition(userId, groupId, restoreSourceId).pipe(
-          Effect.orElseSucceed(() => null),
-        ),
-      );
-      return;
-    }
-    setInitialReadingPosition(null);
-    void Effect.runPromise(hydrateUserPrefs()).then((prefs) => {
-      if (cancelled) return;
-      if (prefs.reader.readingPositionOpenPolicy === "prefer-local") {
-        setInitialReadingPosition({ key: positionKey, position: local });
-        void Effect.runPromise(
-          fetchServerReadingPosition(userId, groupId, restoreSourceId).pipe(
-            Effect.orElseSucceed(() => null),
-          ),
-        );
-        return;
-      }
-      void Effect.runPromise(
-        fetchServerReadingPosition(userId, groupId, restoreSourceId).pipe(
-          Effect.orElseSucceed(() => null),
-        ),
-      ).then(() => {
-        if (cancelled) return;
-        const syncedPosition = getReadingPosition(
-          userId,
-          groupId,
-          restoreSourceId,
-          sourceKind,
-        )?.position;
-        setInitialReadingPosition({ key: positionKey, position: syncedPosition ?? local });
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, groupId, restoreSourceId, sourceKind, positionKey]);
+    if (!userId || !groupId || !restoreSourceId) return;
+    void Effect.runPromise(
+      fetchServerReadingPosition(userId, groupId, restoreSourceId).pipe(
+        Effect.orElseSucceed(() => null),
+      ),
+    );
+  }, [userId, groupId, restoreSourceId]);
 
   useEffect(() => {
     if (!userId || !groupId || !restoreSourceId) return;
@@ -320,9 +272,7 @@ export function GroupView({
     return () => window.clearInterval(interval);
   }, [userId, groupId, restoreSourceId]);
 
-  const canRenderReader =
-    !userId || !groupId || !restoreSourceId || initialReadingPosition?.key === positionKey;
-  const initialPosition = initialReadingPosition?.position ?? null;
+  const loaded = source ? loadedFiles[source.id] : null;
 
   const forceSyncReadingPosition = useMemo(
     () =>
@@ -346,13 +296,13 @@ export function GroupView({
   const content =
     !group || !source ? (
       <NoBook group={resolved.group} onUpload={() => setUploadOpen(true)} />
-    ) : canRenderReader ? (
+    ) : (
       <Workspace
         groupName={group.displayName}
         groupRef={groupRef}
         groupId={group.groupId}
         source={source}
-        file={loaded?.sourceId === source.id ? loaded.file : null}
+        file={loaded ?? null}
         storedBookTitle={source.title}
         onTitleParsed={onTitleParsed}
         initialReadingPosition={initialPosition}
@@ -368,8 +318,6 @@ export function GroupView({
         members={resolved.members}
         viewer={{ userId: userId ?? "", isOwner: resolved.isOwner }}
       />
-    ) : (
-      <WorkspaceLoadingShell isMobile={isMobile} />
     );
 
   return (

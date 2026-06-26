@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useHotkey } from "@tanstack/react-hotkeys";
+import { pushModal } from "./modalLayer.ts";
 
 export function Modal({
   title,
@@ -16,25 +18,28 @@ export function Modal({
   children: React.ReactNode;
 }): React.ReactElement {
   useHotkey("Escape", onClose, { preventDefault: true });
+  // While any modal is open, global reader hotkeys are suppressed (see
+  // useAnyModalOpen) so the modal owns the keyboard.
+  useEffect(() => pushModal(), []);
   const labelledBy = ariaLabelledBy ?? (typeof title === "string" ? "modal-title" : undefined);
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <dialog
+        open
         className={className ? `modal ${className}` : "modal"}
-        role="dialog"
-        aria-modal="true"
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : labelledBy}
-        onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="modal-head">
-          <strong id={labelledBy}>{title}</strong>
-          <button type="button" onClick={onClose} aria-label="close" title="Close">
-            ✕
-          </button>
+        <div role="presentation" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="modal-head">
+            <strong id={labelledBy}>{title}</strong>
+            <button type="button" onClick={onClose} aria-label="close" title="Close">
+              ✕
+            </button>
+          </div>
+          {children}
         </div>
-        {children}
-      </div>
+      </dialog>
     </div>
   );
 }
@@ -50,6 +55,16 @@ export function ModalPagerTabs<T extends string>({
   onChange: (id: T) => void;
   className?: string;
 }): React.ReactElement {
+  // Left/Right arrows move between modal pages (and override the reader's
+  // page-turn arrows, which are suppressed while a modal is open).
+  const step = (delta: number) => {
+    if (tabs.length === 0) return;
+    const index = tabs.findIndex((tab) => tab.id === active);
+    const nextTab = tabs[(index + delta + tabs.length) % tabs.length];
+    if (nextTab) onChange(nextTab.id);
+  };
+  useHotkey("ArrowRight", () => step(1), { preventDefault: true, conflictBehavior: "allow" });
+  useHotkey("ArrowLeft", () => step(-1), { preventDefault: true, conflictBehavior: "allow" });
   return (
     <div className={className ? `pager-tabs ${className}` : "pager-tabs"}>
       {tabs.map((tab) => (

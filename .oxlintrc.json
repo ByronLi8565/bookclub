@@ -9,7 +9,7 @@
     "no-console": "off",
     "react/react-in-jsx-scope": "off",
     "no-inline-comments": "off",
-    "max-lines": ["warn", { "max": 400 }],
+    "max-lines": "off",
     "max-lines-per-function": "off",
     "max-classes-per-file": "off",
     "import/max-dependencies": "off",
