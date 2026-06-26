@@ -1,5 +1,6 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 import { fixtureServer } from "./src/tests/harness/testServer.ts";
 
 // workerd cannot parse TC39 decorators, which the agents SDK uses via @callable.
@@ -23,6 +24,38 @@ export default defineConfig({
   plugins: [
     lowerDecorators(),
     react(),
+    VitePWA({
+      // Surface a prompt instead of silently swapping versions under the user.
+      registerType: "prompt",
+      // Icons live in publicDir (`public/`) and are copied verbatim to the dist root.
+      includeAssets: ["icon-192.png", "icon-512.png"],
+      manifest: {
+        name: "Bookclub",
+        short_name: "Bookclub",
+        description: "Read and annotate books together.",
+        start_url: "/",
+        display: "standalone",
+        background_color: "#ffffff",
+        theme_color: "#ffffff",
+        icons: [
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+          { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+      },
+      workbox: {
+        // Precache the built app shell so the app boots offline.
+        globPatterns: ["**/*.{js,css,html,wasm}"],
+        // Offline navigations fall back to the SPA shell...
+        navigateFallback: "/index.html",
+        // ...but never for API/agent traffic — let those hit the network and fail honestly.
+        navigateFallbackDenylist: [/^\/(auth|groups|me|agents|admin)\//u],
+        // pdf.js worker + epub assets can be large; lift the precache size ceiling.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+      },
+      // Keep the service worker out of `vite dev` to avoid HMR/caching confusion.
+      devOptions: { enabled: false },
+    }),
     fixtureServer(new URL("./assets", import.meta.url).pathname),
   ],
   resolve: {

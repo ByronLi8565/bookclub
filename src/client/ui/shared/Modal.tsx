@@ -17,7 +17,7 @@ export function Modal({
   onClose: () => void;
   children: React.ReactNode;
 }): React.ReactElement {
-  useHotkey("Escape", onClose, { preventDefault: true });
+  useHotkey("Escape", onClose, { preventDefault: true, conflictBehavior: "allow" });
   // While any modal is open, global reader hotkeys are suppressed (see
   // useAnyModalOpen) so the modal owns the keyboard.
   useEffect(() => pushModal(), []);

@@ -25,5 +25,6 @@
   "vars": {
     "SESSION_HMAC_SECRET": "dev-insecure-session-secret-change-me",
     "ADMIN_EMAIL": "byron.li@yale.edu",
+    "ADMIN_API_TOKEN": "dev-insecure-admin-token-change-me",
   },
 }

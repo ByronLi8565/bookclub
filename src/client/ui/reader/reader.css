@@ -26,6 +26,18 @@
   user-select: none;
 }
 
+.reader-bar {
+  min-height: calc(var(--control-min) + 16px + 3px);
+  max-height: 112px;
+  opacity: 1;
+  transition:
+    max-height var(--chrome-collapse-duration) var(--chrome-ease),
+    padding-top var(--chrome-collapse-duration) var(--chrome-ease),
+    padding-bottom var(--chrome-collapse-duration) var(--chrome-ease),
+    border-bottom-width var(--chrome-collapse-duration) var(--chrome-ease),
+    opacity var(--chrome-fade-duration) linear;
+}
+
 .reader-bar .spacer {
   flex: 1;
 }

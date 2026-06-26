@@ -100,6 +100,9 @@ interface LiveView {
   rendition: Rendition;
 }
 
+const EPUB_PANE_SWIPE_DELTA_PX = 60;
+const EPUB_CHROME_SWIPE_DELTA_PX = 90;
+
 interface ResizableView {
   on: (e: string, cb: () => void) => void;
   pane?: { render: () => void };
@@ -167,7 +170,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 export function useEpubSourceView(
   file: File | null,
   onSelect: OnSelect,
-  onSwipe?: (dir: "left" | "right") => void,
+  onSwipe?: (dir: "left" | "right" | "up" | "down") => void,
   onSearchHighlightCleared?: () => void,
   initialPosition?: SourceReadingPosition | null,
 ): SourceView {
@@ -188,7 +191,15 @@ export function useEpubSourceView(
   const swipe = useSwipeable({
     onSwipedLeft: () => onSwipeRef.current?.("left"),
     onSwipedRight: () => onSwipeRef.current?.("right"),
-    delta: 60,
+    onSwipedUp: () => onSwipeRef.current?.("up"),
+    onSwipedDown: () => onSwipeRef.current?.("down"),
+    delta: {
+      left: EPUB_PANE_SWIPE_DELTA_PX,
+      right: EPUB_PANE_SWIPE_DELTA_PX,
+      up: EPUB_CHROME_SWIPE_DELTA_PX,
+      down: EPUB_CHROME_SWIPE_DELTA_PX,
+    },
+    preventScrollOnSwipe: true,
   });
   const swipeRef = useRef(swipe.ref);
   swipeRef.current = swipe.ref;
@@ -276,6 +287,8 @@ export function useEpubSourceView(
       view.on("resized", () => requestAnimationFrame(() => view.pane?.render()));
       if (view.contents) {
         const doc = view.contents.document;
+        doc.documentElement.style.touchAction = "none";
+        doc.body.style.touchAction = "none";
         swipeRef.current(doc.body);
         const onKeyDown = (event: KeyboardEvent) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {

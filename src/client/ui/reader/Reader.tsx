@@ -47,6 +47,7 @@ export function Reader({
 
   useHotkey("F", () => view.fitToText?.(), {
     enabled: ready && !modalOpen && Boolean(view.fitToText),
+    preventDefault: true,
   });
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);

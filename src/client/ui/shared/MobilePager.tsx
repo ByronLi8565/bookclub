@@ -1,7 +1,11 @@
-import { useRef, type ReactNode, type Touch, type TouchEvent } from "react";
+import { useRef, type ReactNode } from "react";
 import { useSwipeable } from "react-swipeable";
 
 export type Pane = "reader" | "notes";
+
+const PANE_SWIPE_DELTA_PX = 50;
+const CHROME_SWIPE_DELTA_PX = 80;
+const PANE_SWIPE_DURATION_MS = 500;
 
 // A pane swipe must not steal a gesture that is panning a scrollable child
 // (notably a zoomed-in PDF, which scrolls horizontally). Walk up from the touch
@@ -37,7 +41,6 @@ export function MobilePager({
   onChromeHiddenChange?: (hidden: boolean) => void;
 }) {
   const lockedRef = useRef(false);
-  const verticalStartRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const swipe = useSwipeable({
     onSwipeStart: (e) => {
       lockedRef.current = startedOnHorizontalScroller(e.event.target);
@@ -48,44 +51,22 @@ export function MobilePager({
     onSwipedRight: () => {
       if (!lockedRef.current) onPane("reader");
     },
-    delta: 50,
-    // Swipes have a max duration.
-    swipeDuration: 500,
+    onSwipedUp: () => {
+      if (pane === "reader") onChromeHiddenChange?.(true);
+    },
+    onSwipedDown: () => {
+      if (pane === "reader") onChromeHiddenChange?.(false);
+    },
+    delta: {
+      left: PANE_SWIPE_DELTA_PX,
+      right: PANE_SWIPE_DELTA_PX,
+      up: CHROME_SWIPE_DELTA_PX,
+      down: CHROME_SWIPE_DELTA_PX,
+    },
+    preventScrollOnSwipe: pane === "reader",
+    swipeDuration: PANE_SWIPE_DURATION_MS,
     trackMouse: false,
   });
-
-  const onTouchStartCapture = (event: TouchEvent<HTMLDivElement>) => {
-    const touch = event.touches[0];
-    verticalStartRef.current =
-      pane === "reader" && touch ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
-  };
-
-  const maybeToggleChrome = (touch: Touch | undefined) => {
-    const start = verticalStartRef.current;
-    if (!start || !touch || !onChromeHiddenChange) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    const absX = Math.abs(dx);
-    const absY = Math.abs(dy);
-    const quickEnough = Date.now() - start.at <= 900;
-    if (quickEnough && absY >= 48 && absY > absX * 1.2) {
-      verticalStartRef.current = null;
-      onChromeHiddenChange(dy < 0);
-    }
-  };
-
-  const onTouchMoveCapture = (event: TouchEvent<HTMLDivElement>) => {
-    maybeToggleChrome(event.touches[0]);
-  };
-
-  const onTouchEndCapture = (event: TouchEvent<HTMLDivElement>) => {
-    maybeToggleChrome(event.changedTouches[0]);
-    verticalStartRef.current = null;
-  };
-
-  const onTouchCancelCapture = () => {
-    verticalStartRef.current = null;
-  };
 
   return (
     <div className="pager">
@@ -93,10 +74,6 @@ export function MobilePager({
         className="pager-track"
         style={{ transform: pane === "notes" ? "translateX(-100%)" : "none" }}
         {...swipe}
-        onTouchStartCapture={onTouchStartCapture}
-        onTouchMoveCapture={onTouchMoveCapture}
-        onTouchEndCapture={onTouchEndCapture}
-        onTouchCancelCapture={onTouchCancelCapture}
       >
         <div className="pager-page">{reader}</div>
         <div className="pager-page">{notes}</div>

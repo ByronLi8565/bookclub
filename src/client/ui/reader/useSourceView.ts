@@ -11,7 +11,7 @@ export function useSourceView(
   source: SourceRef | null,
   file: File | null,
   onSelect: OnSelect,
-  onSwipe?: (dir: "left" | "right") => void,
+  onSwipe?: (dir: "left" | "right" | "up" | "down") => void,
   onSearchHighlightCleared?: () => void,
   initialPosition?: SourceReadingPosition | null,
 ): SourceView {

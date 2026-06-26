@@ -124,6 +124,14 @@
   gap: 16px;
   padding: 12px 16px;
   border-bottom: var(--line);
+  max-height: 96px;
+  opacity: 1;
+  transition:
+    max-height var(--chrome-collapse-duration) var(--chrome-ease),
+    padding-top var(--chrome-collapse-duration) var(--chrome-ease),
+    padding-bottom var(--chrome-collapse-duration) var(--chrome-ease),
+    border-bottom-width var(--chrome-collapse-duration) var(--chrome-ease),
+    opacity var(--chrome-fade-duration) linear;
 }
 
 .topbar h1 {

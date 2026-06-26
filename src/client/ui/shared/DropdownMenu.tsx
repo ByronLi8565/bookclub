@@ -49,7 +49,11 @@ export function DropdownMenu<P extends object = object>({
     if (openSignal) setOpen(true);
   }
 
-  useHotkey("Escape", () => setOpen(false), { enabled: open, preventDefault: true });
+  useHotkey("Escape", () => setOpen(false), {
+    enabled: open,
+    preventDefault: true,
+    conflictBehavior: "allow",
+  });
 
   useEffect(() => {
     if (!open) return;

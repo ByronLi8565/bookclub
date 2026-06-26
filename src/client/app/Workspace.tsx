@@ -67,6 +67,8 @@ function scrollNoteIntoView(seq: number): void {
   });
 }
 
+const FIT_AFTER_CHROME_TOGGLE_MS = 140;
+
 export function Workspace({
   groupName,
   groupRef,
@@ -92,6 +94,8 @@ export function Workspace({
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
   const [chromeHidden, setChromeHidden] = useState(false);
+  const fitToTextRef = useRef<(() => void) | null>(null);
+  const chromeMountedRef = useRef(false);
   const [renamedDisplayName, setRenamedDisplayName] = useState<{
     base: string;
     value: string;
@@ -116,12 +120,26 @@ export function Workspace({
     source,
     file,
     (anchor, range) => onSelectRef.current(anchor, range),
-    (dir) => setPane(dir === "left" ? "notes" : "reader"),
+    (dir) => {
+      if (dir === "left") setPane("notes");
+      else if (dir === "right") setPane("reader");
+      else setChromeHidden(dir === "up");
+    },
     () => restoreAfterSearchClearRef.current(),
     initialReadingPosition,
   );
+  fitToTextRef.current = view.fitToText ?? null;
   const readerPending = file === null || !view.ready;
   const showReaderLoading = useDelayedFlag(readerPending, 300);
+
+  useEffect(() => {
+    if (!chromeMountedRef.current) {
+      chromeMountedRef.current = true;
+      return;
+    }
+    const timeout = window.setTimeout(() => fitToTextRef.current?.(), FIT_AFTER_CHROME_TOGGLE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [chromeHidden]);
 
   // While a modal is open it owns the keyboard; reader hotkeys are suppressed.
   const modalOpen = useAnyModalOpen();
@@ -144,7 +162,10 @@ export function Workspace({
     enabled: !modalOpen,
     preventDefault: true,
   });
-  useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open && !modalOpen });
+  useHotkey("Escape", () => view.search.closeSearch(), {
+    enabled: view.search.open && !modalOpen,
+    conflictBehavior: "allow",
+  });
 
   const drawnRef = useRef<Map<string, HighlightAnchor>>(null!);
   drawnRef.current ??= new Map<string, HighlightAnchor>();
@@ -378,7 +399,7 @@ export function Workspace({
             onSelectBook={onSelectBook}
             onRenameBook={onRenameBook}
             onAddBook={onAddBook}
-            chromeHidden={chromeHidden}
+            chromeHidden={chromeHidden && isMobile}
           />
         );
         const notePanel = (

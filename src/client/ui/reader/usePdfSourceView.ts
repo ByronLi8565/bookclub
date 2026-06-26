@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -47,6 +48,7 @@ import { type OnSelect } from "./types.ts";
 import { type SourceView } from "./types.ts";
 import { type SourceLocation } from "./types.ts";
 import { clamp } from "../../../shared/format.ts";
+import { isMobileViewport } from "../shared/hooks/useIsMobile.ts";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 
 interface Drawn {
@@ -61,6 +63,12 @@ const READER_NAV = {
   minZoom: 50,
   maxZoom: 400,
   pinchWheelSensitivity: 0.01,
+  // Cap the canvas backing-store density. Phones report devicePixelRatio 3, so
+  // an uncapped render rasterizes ~9x the CSS pixels — the dominant cost when
+  // opening a PDF on mobile (and a hazard near iOS's per-canvas memory limit).
+  // 2x is still visually crisp for text; everything else works in CSS px so
+  // geometry/highlight/scroll math is unaffected by the cap.
+  maxRenderDpr: 2,
   spreadGutterPx: SPREAD_GUTTER_PX,
   // Padding kept around the text when cropping a spread page to its text box.
   spreadCropPadPx: 16,
@@ -395,7 +403,15 @@ export function usePdfSourceView(
   );
   const renderSeqRef = useRef(0);
   const initialPdfPage = initialPosition?.kind === "pdf" ? initialPosition.page : null;
-  const renderCacheKey = pdfRenderCacheKey(sourceId, file);
+  // The cross-navigation PDF document cache keeps a `PDFDocumentProxy` (and its
+  // pdf.js worker) alive after the reader unmounts, so revisiting a book skips
+  // the reparse. On mobile that backfires: the OS reclaims the backgrounded
+  // worker's memory, and the next `getPage`/`render` RPC to the dead worker
+  // never resolves — the reader hangs forever on what should be a cached open.
+  // A null key disables both the cache read and write *and* makes cleanup
+  // always destroy the doc, restoring the pre-cache behavior (fresh load + fresh
+  // worker every open). Reparsing on mobile costs little next to a hang.
+  const renderCacheKey = isMobileViewport() ? null : pdfRenderCacheKey(sourceId, file);
   const [openedSource, setOpenedSource] = useState({ file, initialPdfPage, sourceId });
 
   if (
@@ -663,7 +679,7 @@ export function usePdfSourceView(
       const pages = spreadPages(left, enabled, doc.numPages);
       const panes = ensurePanes(pages.length);
 
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, READER_NAV.maxRenderDpr);
       const gutter = pages.length > 1 ? READER_NAV.spreadGutterPx : 0;
       const pad = READER_NAV.spreadCropPadPx;
       if (seq !== renderSeqRef.current) return;
@@ -715,75 +731,75 @@ export function usePdfSourceView(
         })),
       );
       if (seq !== renderSeqRef.current) return;
-      const renderedPanes = await Promise.all(
-        pageEntries.map(async ({ index, pageNum, page }) => {
-          const pane = panes[index]!;
-          const viewport = page.getViewport({ scale });
-          const pageW = viewport.width;
-          const pageH = viewport.height;
-          pane.page = pageNum;
+      const renderedPanes = [];
+      for (const { index, pageNum, page } of pageEntries) {
+        const pane = panes[index]!;
+        const viewport = page.getViewport({ scale });
+        const pageW = viewport.width;
+        const pageH = viewport.height;
+        pane.page = pageNum;
 
-          // Crop rect (CSS px within the full page). Horizontal: this page's text;
-          // vertical: the shared union so both panes align.
-          const hb = boundsByPage.get(pageNum);
-          const crop = cropBox(
-            enabled ? (hb ?? null) : null,
-            hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
-            pageW,
-            pageH,
-            pad,
-          );
+        // Crop rect (CSS px within the full page). Horizontal: this page's text;
+        // vertical: the shared union so both panes align.
+        const hb = boundsByPage.get(pageNum);
+        const crop = cropBox(
+          enabled ? (hb ?? null) : null,
+          hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
+          pageW,
+          pageH,
+          pad,
+        );
 
-          // `inner` holds the full page in page coordinates; offset it so only the
-          // crop region shows through `el` (which has overflow: hidden).
-          const applyLayout = () => {
-            pane.inner.style.width = `${pageW}px`;
-            pane.inner.style.height = `${pageH}px`;
-            pane.inner.style.left = `${-crop.left}px`;
-            pane.inner.style.top = `${-crop.top}px`;
-            pane.el.style.width = `${crop.width}px`;
-            pane.el.style.height = `${crop.height}px`;
-            pane.pageHeightPx = pageH;
-            pane.cropTopPx = crop.top;
-          };
+        // `inner` holds the full page in page coordinates; offset it so only the
+        // crop region shows through `el` (which has overflow: hidden).
+        const applyLayout = () => {
+          pane.inner.style.width = `${pageW}px`;
+          pane.inner.style.height = `${pageH}px`;
+          pane.inner.style.left = `${-crop.left}px`;
+          pane.inner.style.top = `${-crop.top}px`;
+          pane.el.style.width = `${crop.width}px`;
+          pane.el.style.height = `${crop.height}px`;
+          pane.pageHeightPx = pageH;
+          pane.cropTopPx = crop.top;
+        };
 
-          if (opts?.doubleBuffer) {
-            const next = document.createElement("canvas");
-            next.width = Math.floor(pageW * dpr);
-            next.height = Math.floor(pageH * dpr);
-            setCanvasCssSize(next, pageW, pageH);
-            const ctx = next.getContext("2d");
-            if (!ctx) return;
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            if (seq !== renderSeqRef.current) return;
-            await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
-            if (seq !== renderSeqRef.current) return;
-            return {
-              width: crop.width,
-              height: crop.height,
-              commit: () => {
-                const prev = pane.canvas;
-                if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
-                else pane.inner.insertBefore(next, pane.inner.firstChild);
-                prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
-                pane.canvas = next;
-                applyLayout();
-              },
-            };
-          }
-          const canvas = pane.canvas;
-          canvas.width = Math.floor(pageW * dpr);
-          canvas.height = Math.floor(pageH * dpr);
-          setCanvasCssSize(canvas, pageW, pageH);
-          const ctx = canvas.getContext("2d");
+        if (opts?.doubleBuffer) {
+          const next = document.createElement("canvas");
+          next.width = Math.floor(pageW * dpr);
+          next.height = Math.floor(pageH * dpr);
+          setCanvasCssSize(next, pageW, pageH);
+          const ctx = next.getContext("2d");
           if (!ctx) return;
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           if (seq !== renderSeqRef.current) return;
-          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+          await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
           if (seq !== renderSeqRef.current) return;
-          return { width: crop.width, height: crop.height, commit: applyLayout };
-        }),
-      );
+          renderedPanes.push({
+            width: crop.width,
+            height: crop.height,
+            commit: () => {
+              const prev = pane.canvas;
+              if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
+              else pane.inner.insertBefore(next, pane.inner.firstChild);
+              prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
+              pane.canvas = next;
+              applyLayout();
+            },
+          });
+          continue;
+        }
+        const canvas = pane.canvas;
+        canvas.width = Math.floor(pageW * dpr);
+        canvas.height = Math.floor(pageH * dpr);
+        setCanvasCssSize(canvas, pageW, pageH);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (seq !== renderSeqRef.current) return;
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        if (seq !== renderSeqRef.current) return;
+        renderedPanes.push({ width: crop.width, height: crop.height, commit: applyLayout });
+      }
       if (seq !== renderSeqRef.current) return;
       let totalWidth = 0;
       let maxHeight = 0;
@@ -810,7 +826,13 @@ export function usePdfSourceView(
       };
       dispatchView({ type: "location", location: nextLocation });
       publishPosition();
-      if (sourceId) {
+      // Snapshotting paints the whole spread into an offscreen canvas and
+      // `toDataURL`-encodes it (WebP/PNG) on every render — a synchronous
+      // main-thread cost that's punishing on mobile, where it runs on each page
+      // turn, zoom, and resize. Its only payoff is an instant placeholder when
+      // re-opening a book, which matters far less on mobile (slower, less book
+      // hopping), so we skip capture there and fall back to the loading spinner.
+      if (sourceId && !isMobileViewport()) {
         const scroller = scrollerRef.current;
         const nextSnapshot = scroller
           ? capturePdfSnapshot(sourceId, scroller, panes, nextLocation)
@@ -937,13 +959,28 @@ export function usePdfSourceView(
         if (initialPdfPage !== null) {
           pageRef.current = Math.min(Math.max(1, pageRef.current), doc.numPages);
         }
-        yield* Effect.promise(() => renderSpread());
         // Land on the saved page (already applied to pageRef above), but always
-        // frame it to fit the viewport — opening or swapping books should reset
-        // the zoom to fit-to-page rather than restore a stale zoom/scroll.
-        yield* Effect.promise(() => fitToTextRef.current());
+        // frame it to fit the viewport — opening or swapping books resets the
+        // zoom to fit-to-page rather than restoring a stale zoom/scroll. We
+        // compute the fit zoom *before* the first raster (it only needs page
+        // geometry, no canvas) and render once at that zoom; previously we
+        // rendered at 100% and then re-rendered at the fit zoom, paying for two
+        // full canvas paints + text-layer builds on every open — costly on
+        // mobile. A scanned page (no text) yields a null fit and opens at 100%.
+        spreadActiveRef.current = computeSpreadEnabled();
+        const fitZoom = yield* Effect.promise(() => computeFitZoomRef.current());
+        if (fitZoom !== null) {
+          setFontSizeState(fitZoom);
+          fontSizeRef.current = fitZoom;
+        }
+        yield* Effect.promise(() => renderSpread());
+        yield* Effect.promise(() => scrollToTextTop());
         dispatchView({ type: "ready", ready: true });
-      }).pipe(Effect.catchCause(() => Effect.sync(() => console.error("failed to open pdf")))),
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.sync(() => console.error("failed to open pdf", Cause.pretty(cause))),
+        ),
+      ),
     );
 
     return () => {
@@ -961,7 +998,16 @@ export function usePdfSourceView(
       wrapRef.current = null;
       dispatchView({ type: "ready", ready: false });
     };
-  }, [file, sourceId, renderCacheKey, renderSpread, clearFlash, initialPdfPage]);
+  }, [
+    file,
+    sourceId,
+    renderCacheKey,
+    renderSpread,
+    clearFlash,
+    initialPdfPage,
+    computeSpreadEnabled,
+    scrollToTextTop,
+  ]);
 
   // Re-render when the page-layout preference changes (single ⇄ two-page),
   // preserving the current spread's left page, then fit the new layout to the
@@ -1096,14 +1142,19 @@ export function usePdfSourceView(
   // (no horizontal scroll) and the tallest page's text fits the viewport height,
   // leaving a slight margin. Reuses the same text top/bottom detection (geometry
   // runs) that drives smart-arrow scrolling, so it tracks the real text.
-  const fitToText = useCallback(async (): Promise<void> => {
+  // Compute the fit-to-page zoom without rendering, so the open path can
+  // rasterize the page once at its final zoom (rather than rendering at 100%
+  // and immediately re-rendering at the fit zoom). Returns null when there's
+  // nothing to fit (no doc/scroller, page changed mid-flight, or a scanned page
+  // with no text), in which case callers keep the current zoom.
+  const computeFitZoom = useCallback(async (): Promise<number | null> => {
     const doc = docRef.current;
     const scroller = scrollerRef.current;
-    if (!doc || !scroller) return;
+    if (!doc || !scroller) return null;
     const enabled = spreadActiveRef.current;
     const left = pageRef.current;
     const pages = spreadPages(left, enabled, doc.numPages);
-    if (left !== pageRef.current) return;
+    if (left !== pageRef.current) return null;
     const pageData = await Promise.all(
       pages.map(async (pageNum) => {
         const page = await doc.getPage(pageNum);
@@ -1112,7 +1163,7 @@ export function usePdfSourceView(
         return { pageNum, base, bounds: textBounds(geom) };
       }),
     );
-    if (left !== pageRef.current || pageData.length === 0) return;
+    if (left !== pageRef.current || pageData.length === 0) return null;
     const leftBase = pageData[0]!.base;
 
     // When spread is active, pages are cropped to their text, so fit against the
@@ -1129,7 +1180,7 @@ export function usePdfSourceView(
     let anyText = false;
     for (const { base, bounds } of pageData) {
       maxBaseHeight = Math.max(maxBaseHeight, base.height);
-      if (left !== pageRef.current) return;
+      if (left !== pageRef.current) return null;
       if (bounds) {
         anyText = true;
         combinedWidth += enabled ? (bounds.maxX - bounds.minX) * base.width : base.width;
@@ -1139,7 +1190,7 @@ export function usePdfSourceView(
         combinedWidth += base.width; // scanned page: fall back to its full width.
       }
     }
-    if (!anyText || left !== pageRef.current) return;
+    if (!anyText || left !== pageRef.current) return null;
     const textHeight = (unionMaxY - unionMinY) * maxBaseHeight;
 
     const margin = READER_NAV.textTopMargin;
@@ -1158,17 +1209,23 @@ export function usePdfSourceView(
     // leaving scrollBounds with a sliver of scroll range and triggering smart
     // scroll right after a fit (most visible in single-page mode, which has no
     // crop pad to absorb the overshoot).
-    const clamped = Math.min(
+    return Math.min(
       READER_NAV.maxZoom,
       Math.max(READER_NAV.minZoom, Math.floor((scale / fit) * 100)),
     );
-    if (clamped !== fontSizeRef.current) {
+  }, [geometryFor]);
+  const computeFitZoomRef = useRef(computeFitZoom);
+  computeFitZoomRef.current = computeFitZoom;
+
+  const fitToText = useCallback(async (): Promise<void> => {
+    const clamped = await computeFitZoom();
+    if (clamped !== null && clamped !== fontSizeRef.current) {
       setFontSizeState(clamped);
       fontSizeRef.current = clamped;
       await renderSpread();
     }
     await scrollToTextTop();
-  }, [geometryFor, renderSpread, scrollToTextTop]);
+  }, [computeFitZoom, renderSpread, scrollToTextTop]);
   fitToTextRef.current = fitToText;
   const next = useCallback(() => {
     if (scrollWithinPage("down")) return;

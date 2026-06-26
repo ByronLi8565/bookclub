@@ -38,11 +38,41 @@ interface PdfInfo {
   Author?: string;
 }
 
+// pdf.js v6 calls `Promise.withResolvers()`, which only exists in Safari/iOS
+// 17.4+. On older mobile Safari it's `undefined`: the module worker fails to
+// initialize, pdf.js falls back to running the worker on the main thread, and
+// that path immediately calls the missing API — throwing "undefined is not a
+// function" while opening any document. Installing the (trivial) polyfill on
+// the main thread before pdf.js loads covers the fake-worker fallback, which is
+// where pdf.js routes every worker failure. No-op where the API is native.
+function installPromiseWithResolvers(): void {
+  const ctor = Promise as PromiseConstructor & {
+    withResolvers?: <T>() => {
+      promise: Promise<T>;
+      resolve: (value: T | PromiseLike<T>) => void;
+      reject: (reason?: unknown) => void;
+    };
+  };
+  if (typeof ctor.withResolvers === "function") return;
+  ctor.withResolvers = function withResolvers<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
 function pdfjsLib(): Promise<typeof PdfjsModule> {
-  pdfjsPromise ??= import("pdfjs-dist").then((lib) => {
-    lib.GlobalWorkerOptions.workerSrc = workerUrl;
-    return lib;
-  });
+  pdfjsPromise ??= (() => {
+    installPromiseWithResolvers();
+    return import("pdfjs-dist").then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = workerUrl;
+      return lib;
+    });
+  })();
   return pdfjsPromise;
 }
 

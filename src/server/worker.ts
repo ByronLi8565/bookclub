@@ -8,7 +8,8 @@ import { clearedCookie, currentIdentity, sessionCookie } from "./auth/cookies.ts
 import { normalizeEmail } from "../shared/email.ts";
 import { readJson } from "./http.ts";
 import { signSession, SESSION_TTL_MS } from "./auth/session.ts";
-import { backupAll, listBackups, restoreFrom } from "./backup.ts";
+import { backupAll, listBackups, pruneBackups, restoreFrom } from "./backup.ts";
+import { constantTimeEqual } from "../shared/crypto.ts";
 
 export { NoteAgent } from "./state/NoteAgent.ts";
 export { AuthAgent } from "./state/AuthAgent.ts";
@@ -81,9 +82,16 @@ app.get("/auth/me", async (c) => {
 registerUserRoutes(app);
 registerGroupRoutes(app);
 
-// Admin endpoints for manual Durable Object state backup/restore. Gated to the
-// configured ADMIN_EMAIL (a signed-session identity); disabled when unset.
+// Admin endpoints for manual Durable Object state backup/restore. Authorized
+// either by a machine bearer token (ADMIN_API_TOKEN, used by deploy/CI) or by
+// the configured ADMIN_EMAIL signed-session identity (a logged-in browser).
 async function isAdmin(c: Context<{ Bindings: Env }>): Promise<boolean> {
+  const token = c.env.ADMIN_API_TOKEN;
+  if (token) {
+    const header = c.req.header("Authorization");
+    const provided = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
+    if (provided && constantTimeEqual(provided, token)) return true;
+  }
   const admin = c.env.ADMIN_EMAIL;
   if (!admin) return false;
   const me = await currentIdentity(c.req.raw, c.env);
@@ -98,6 +106,11 @@ app.post("/admin/backup", async (c) => {
 app.get("/admin/backups", async (c) => {
   if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
   return c.json({ backups: await listBackups(c.env) });
+});
+
+app.post("/admin/prune", async (c) => {
+  if (!(await isAdmin(c))) return c.json({ error: "forbidden" }, 403);
+  return c.json(await pruneBackups(c.env));
 });
 
 app.post("/admin/restore", async (c) => {

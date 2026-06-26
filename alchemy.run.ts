@@ -30,6 +30,7 @@ export default Alchemy.Stack(
         BACKUPS: backups,
         SESSION_HMAC_SECRET: Config.redacted("SESSION_HMAC_SECRET"),
         ADMIN_EMAIL: Config.string("ADMIN_EMAIL").pipe(Config.withDefault("byron.li@yale.edu")),
+        ADMIN_API_TOKEN: Config.redacted("ADMIN_API_TOKEN"),
         EMAIL: Cloudflare.SendEmail("EMAIL"),
         EMAIL_FROM: Config.string("EMAIL_FROM"),
       },

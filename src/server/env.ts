@@ -14,6 +14,9 @@ export interface Env {
   // Email allowed to trigger manual backup/restore admin endpoints. Empty
   // disables them (scheduled backups still run regardless).
   ADMIN_EMAIL?: string;
+  // Bearer token for machine access to the admin backup/prune endpoints
+  // (used by the pre-deploy backup step). Empty disables token auth.
+  ADMIN_API_TOKEN?: string;
   EMAIL?: SendEmail;
   EMAIL_FROM?: string;
   ASSETS?: Fetcher;

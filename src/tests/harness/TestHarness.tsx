@@ -53,7 +53,10 @@ export function ReaderHarness() {
   );
 
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: view.ready, preventDefault: true });
-  useHotkey("Escape", () => view.search.closeSearch(), { enabled: view.search.open });
+  useHotkey("Escape", () => view.search.closeSearch(), {
+    enabled: view.search.open,
+    conflictBehavior: "allow",
+  });
 
   const reader = <Reader view={view} hasFile={file !== null} floatingNote={!mobile} />;
 
