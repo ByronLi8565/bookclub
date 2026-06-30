@@ -1,57 +1,22 @@
-const DB_NAME = "bookclub";
-const STORE = "books";
+import * as Effect from "effect/Effect";
+import { BOOKS_STORE, idbDelete, idbGet, idbPut } from "../db.ts";
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.addEventListener("upgradeneeded", () => req.result.createObjectStore(STORE));
-    req.addEventListener("success", () => resolve(req.result));
-    req.addEventListener("error", () => reject(req.error));
-  });
-}
-
+// Book blobs are a non-critical convenience cache, so failures here stay
+// best-effort (resolve null / no-op) rather than surfacing to the user.
 export async function getCachedSource(sourceId: string): Promise<File | null> {
-  try {
-    const db = await openDb();
-    return await new Promise((resolve, reject) => {
-      const req = db.transaction(STORE, "readonly").objectStore(STORE).get(sourceId);
-      req.addEventListener("success", () => {
-        const value = req.result as File | Blob | undefined;
-        if (!value) return resolve(null);
-
-        resolve(
-          value instanceof File
-            ? value
-            : new File([value], `${sourceId}.epub`, { type: "application/epub+zip" }),
-        );
-      });
-      req.addEventListener("error", () => reject(req.error));
-    });
-  } catch {
-    return null;
-  }
+  const value = await Effect.runPromise(
+    idbGet<File | Blob>(BOOKS_STORE, sourceId).pipe(Effect.orElseSucceed(() => null)),
+  );
+  if (!value) return null;
+  return value instanceof File
+    ? value
+    : new File([value], `${sourceId}.epub`, { type: "application/epub+zip" });
 }
 
 export async function deleteCachedSource(sourceId: string): Promise<void> {
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).delete(sourceId);
-      tx.addEventListener("complete", () => resolve());
-      tx.addEventListener("error", () => reject(tx.error));
-    });
-  } catch {}
+  await Effect.runPromise(idbDelete(BOOKS_STORE, sourceId).pipe(Effect.ignore));
 }
 
 export async function putCachedSource(sourceId: string, file: File): Promise<void> {
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(file, sourceId);
-      tx.addEventListener("complete", () => resolve());
-      tx.addEventListener("error", () => reject(tx.error));
-    });
-  } catch {}
+  await Effect.runPromise(idbPut(BOOKS_STORE, sourceId, file).pipe(Effect.ignore));
 }

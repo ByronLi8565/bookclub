@@ -354,15 +354,26 @@ export function useEpubSourceView(
         Effect.orElseSucceed(() => undefined),
       );
       yield* Effect.tryPromise(async () => {
-        if (!initialEpubCfi) {
-          await rendition.display(start);
-          return;
+        // Try the most specific target first, then progressively fall back.
+        // A TOC/landmark href (`start`) can fail to resolve to a spine item
+        // ("No Section Found") when it doesn't match the canonicalized spine
+        // href, so we end at epub.js's own "first linear section" behavior
+        // (`display()` with no target) and finally spine index 0.
+        const candidates: (string | number | undefined)[] = [
+          ...(initialEpubCfi ? [initialEpubCfi] : []),
+          start,
+          undefined,
+          0,
+        ];
+        for (const target of candidates) {
+          try {
+            await (rendition.display as (t?: string | number) => Promise<void>)(target);
+            return;
+          } catch {
+            // Fall through to the next, less specific target.
+          }
         }
-        try {
-          await rendition.display(initialEpubCfi);
-        } catch {
-          await rendition.display(start);
-        }
+        throw new Error("No displayable section found in epub");
       });
       yield* Effect.sync(() => publish(Option.some({ book, rendition })));
       yield* Effect.sync(showLocation);

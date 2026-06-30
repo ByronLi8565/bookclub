@@ -224,3 +224,28 @@
 .note-editor-actions .primary {
   font-weight: 700;
 }
+
+.note-editor-hint {
+  margin: 0;
+  padding: 4px 8px 6px;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--muted, #888);
+}
+
+.note-sync {
+  font-size: 0.7rem;
+  font-variant: all-small-caps;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.note-sync--pending {
+  color: var(--muted, #888);
+}
+
+.note-sync--failed {
+  color: #b4541b;
+  font-weight: 600;
+}

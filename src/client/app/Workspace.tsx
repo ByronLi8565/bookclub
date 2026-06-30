@@ -2,7 +2,7 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useAnyModalOpen } from "../ui/shared/modalLayer.ts";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Note } from "../../shared/types/notes.ts";
+import type { Note, NoteAuthor } from "../../shared/types/notes.ts";
 import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
 import { renameGroup, type RosterEntry } from "../logic/groups/groupClient.ts";
@@ -101,12 +101,20 @@ export function Workspace({
     value: string;
   } | null>(null);
   const displayName = renamedDisplayName?.base === groupName ? renamedDisplayName.value : groupName;
-  const agent = useNoteAgent(groupId);
+  const author = useMemo<NoteAuthor | null>(() => {
+    if (!viewer.userId) return null;
+    const me = members.find((m) => m.id === viewer.userId);
+    return { id: viewer.userId, name: me?.name ?? "You" };
+  }, [viewer.userId, members]);
+  const agent = useNoteAgent(groupId, author, viewer.isOwner);
   const notes = useMemo(
     () => selectNotes(agent.notes, { sources: [sourceId] }),
     [agent.notes, sourceId],
   );
-  const canWriteNotes = agent.syncStatus === "online";
+  // Notes are local-first: writing works offline (it queues). Only cross-note
+  // @references need the live socket, since their target seq is server-assigned.
+  const canWriteNotes = agent.notesReady;
+  const canReference = agent.syncStatus !== "offline";
   const [composing, setComposing] = useState<Highlight | null>(null);
   const composingRef = useRef<Highlight | null>(null);
   composingRef.current = composing;
@@ -288,8 +296,15 @@ export function Workspace({
   const { byId: allById, bySeq: allBySeq } = allConversation;
   const references = useMemo(() => referenceSpace(agent.notes), [agent.notes]);
   const noteRefs = useMemo<NoteRefs>(
-    () => ({ validSeqs: references.validSeqs, byId, refs: references.refs }),
-    [byId, references],
+    () => ({
+      validSeqs: references.validSeqs,
+      byId,
+      refs: references.refs,
+      canReference,
+      pendingNoteIds: agent.pendingNoteIds,
+      failedNoteIds: agent.failedNoteIds,
+    }),
+    [byId, references, canReference, agent.pendingNoteIds, agent.failedNoteIds],
   );
 
   const { flashHighlight, goTo, reader: sourceReader } = view;

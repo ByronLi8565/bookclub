@@ -4,6 +4,18 @@
   "main": "src/server/worker.ts",
   "compatibility_date": "2026-03-17",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [{ "pattern": "bookclub.byron.land", "custom_domain": true }],
+  // The client bundle's output directory is supplied by @cloudflare/vite-plugin
+  // at build time; only the serving behaviour is configured here. The worker
+  // reaches assets via the ASSETS binding for its SPA fallback.
+  "assets": {
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "single-page-application",
+  },
+  // SendEmail binding for transactional login/invite emails.
+  "send_email": [{ "name": "EMAIL" }],
   "durable_objects": {
     "bindings": [
       { "name": "NoteAgent", "class_name": "NoteAgent" },
@@ -12,19 +24,23 @@
       { "name": "GroupRegistry", "class_name": "GroupRegistry" },
     ],
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["NoteAgent"] },
-    { "tag": "v2", "new_sqlite_classes": ["AuthAgent"] },
-    { "tag": "v3", "new_sqlite_classes": ["GroupAgent", "GroupRegistry"] },
-  ],
+  // NOTE: no `migrations` block. These four SQLite DO classes were originally
+  // created by alchemy, so their instances already exist with data. Declaring
+  // `new_sqlite_classes` again would fail (code 10074) and re-declaring the
+  // lineage risks the live data. wrangler applies no migration when none are
+  // listed, leaving DO storage untouched. If DO schema changes are needed
+  // later, reintroduce a migrations block whose first tag follows the worker's
+  // current (alchemy-set) migration tag.
   "r2_buckets": [
     { "binding": "BOOKS", "bucket_name": "bookclub-books" },
     { "binding": "BACKUPS", "bucket_name": "bookclub-do-backups" },
   ],
   "triggers": { "crons": ["0 */6 * * *"] },
+  // Only non-secret vars live here (uploaded as plaintext on deploy). Secrets
+  // (SESSION_HMAC_SECRET, ADMIN_API_TOKEN, EMAIL_FROM) are set via
+  // `wrangler secret put` / `bun run secrets:sync`; dev values live in
+  // .dev.vars. Do NOT add secrets here or a deploy will overwrite them.
   "vars": {
-    "SESSION_HMAC_SECRET": "dev-insecure-session-secret-change-me",
     "ADMIN_EMAIL": "byron.li@yale.edu",
-    "ADMIN_API_TOKEN": "dev-insecure-admin-token-change-me",
   },
 }

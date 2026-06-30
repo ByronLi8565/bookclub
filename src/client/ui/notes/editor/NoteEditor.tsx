@@ -101,6 +101,8 @@ function Chrome({
   );
 }
 
+const NO_SEQS: Set<number> = new Set();
+
 export function NoteEditor({
   initialBody,
   submitLabel,
@@ -108,6 +110,7 @@ export function NoteEditor({
   onCancel,
   validSeqs,
   canSubmit = true,
+  canReference = true,
 }: {
   initialBody: string;
   submitLabel: string;
@@ -115,10 +118,14 @@ export function NoteEditor({
   onCancel: () => void;
   validSeqs: Set<number>;
   canSubmit?: boolean;
+  canReference?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Offline, the target note's seq is unknowable, so we feed the reference
+  // transformer an empty set — `@N` simply stays plain text — and tell the user
+  // why below the editor.
   const validSeqsRef = useRef(validSeqs);
-  validSeqsRef.current = validSeqs;
+  validSeqsRef.current = canReference ? validSeqs : NO_SEQS;
   const referenceTransformer = useMemo(
     () => createReferenceTransformer(() => validSeqsRef.current),
     [],
@@ -144,6 +151,9 @@ export function NoteEditor({
           referenceTransformer={referenceTransformer}
         />
       </LexicalComposer>
+      {!canReference && (
+        <p className="note-editor-hint">references are unsupported while offline!</p>
+      )}
     </div>
   );
 }

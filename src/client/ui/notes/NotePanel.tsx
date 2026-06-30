@@ -60,6 +60,7 @@ export function NotePanel({
               onCancel={onComposeCancel}
               validSeqs={refs.validSeqs}
               canSubmit={canWrite}
+              canReference={refs.canReference}
             />
           </li>
         )}

@@ -17,6 +17,13 @@ export interface NoteRefs {
   validSeqs: Set<number>;
   byId: Map<string, Note>;
   refs: Map<number, string>;
+  // Cross-note references need the live socket (server-assigned seq); gated off
+  // while disconnected.
+  canReference: boolean;
+  // Note ids with an unsynced (pending) or server-refused (failed) local op, so
+  // authors can see the sync state of their own writes.
+  pendingNoteIds: ReadonlySet<string>;
+  failedNoteIds: ReadonlySet<string>;
 }
 
 export interface NoteActions {
@@ -93,6 +100,11 @@ function NoteRow({
 }) {
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
+  const syncState = refs.failedNoteIds.has(note.id)
+    ? "failed"
+    : refs.pendingNoteIds.has(note.id)
+      ? "pending"
+      : null;
   const canEdit = canEditNote(note, viewer);
   const canDelete = canDeleteNote(note, viewer);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -126,6 +138,7 @@ function NoteRow({
           onCancel={actions.onEditCancel}
           validSeqs={refs.validSeqs}
           canSubmit={canWrite}
+          canReference={refs.canReference}
         />
       </div>
     );
@@ -148,6 +161,18 @@ function NoteRow({
         }}
         actions={
           <>
+            {syncState && (
+              <span
+                className={`note-sync note-sync--${syncState}`}
+                title={
+                  syncState === "failed"
+                    ? "This change couldn't sync and was skipped"
+                    : "Not yet synced — will send when you reconnect"
+                }
+              >
+                {syncState === "failed" ? "⚠ unsynced" : "• syncing"}
+              </span>
+            )}
             {!deleted && (
               <button
                 type="button"
@@ -225,6 +250,7 @@ function NoteRow({
             onCancel={actions.onReplyCancel}
             validSeqs={refs.validSeqs}
             canSubmit={canWrite}
+            canReference={refs.canReference}
           />
         </div>
       )}

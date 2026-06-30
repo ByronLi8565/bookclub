@@ -7,13 +7,19 @@ import {
   getCurrentAgent,
 } from "agents";
 import { monotonicFactory } from "ulidx";
-import type { Highlight, HighlightAnchor } from "../../shared/types/notes.ts";
+import type {
+  ApplyOpsResult,
+  Highlight,
+  HighlightAnchor,
+  NoteOp,
+} from "../../shared/types/notes.ts";
 import type { GroupRole } from "../../shared/types/groups.ts";
 import type { Env } from "../env.ts";
 import { currentIdentity } from "../auth/cookies.ts";
 import {
   addNote,
   addReply,
+  applyOperations,
   editNote,
   emptyNoteState,
   rebindHighlight,
@@ -101,6 +107,24 @@ export class NoteAgent extends Agent<Env, NoteState> {
   @callable()
   rebindHighlight(noteId: string, highlightId: string, anchor: HighlightAnchor): void {
     this.setState(rebindHighlight(this.state, noteId, highlightId, anchor));
+  }
+
+  // The local-first write path: a batch of client-authored ops is folded into
+  // authoritative state idempotently, in order. Author identity comes from the
+  // connection (never the payload), so a replayed queue cannot be misattributed.
+  // Returns which ops stuck and which were refused, so the client can prune its
+  // pending queue and surface conflicts without ever silently losing authored
+  // content. Reads `this.state` fresh: Durable Objects serialize RPC calls, so
+  // each batch sees the previous batch's committed state.
+  @callable()
+  applyOperations(ops: NoteOp[]): ApplyOpsResult {
+    const { userId, name, role } = this.me;
+    const result = applyOperations(this.state, ops, {
+      author: { id: userId, name },
+      isOwner: role === "owner",
+    });
+    this.setState(result.state);
+    return { appliedOpIds: result.appliedOpIds, rejectedOps: result.rejectedOps };
   }
 
   exportState(): NoteState {

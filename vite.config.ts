@@ -1,5 +1,6 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { cloudflare } from "@cloudflare/vite-plugin";
 import { VitePWA } from "vite-plugin-pwa";
 import { fixtureServer } from "./src/tests/harness/testServer.ts";
 
@@ -24,6 +25,9 @@ export default defineConfig({
   plugins: [
     lowerDecorators(),
     react(),
+    // Reads wrangler.jsonc and runs the worker (Durable Objects, bindings) in
+    // workerd for both `vite dev` and the production build/deploy.
+    cloudflare(),
     VitePWA({
       // Surface a prompt instead of silently swapping versions under the user.
       registerType: "prompt",
@@ -62,17 +66,6 @@ export default defineConfig({
     alias: {
       "@": new URL("./src", import.meta.url).pathname,
       "@assets": new URL("./assets", import.meta.url).pathname,
-    },
-  },
-  environments: { ssr: { build: { rollupOptions: { input: "src/server/worker.ts" } } } },
-  // Local dev: this server serves the client with HMR and forwards agent
-  // traffic (http + websocket) to `wrangler dev`, which hosts the durable
-  // objects. In production the deployed worker serves both itself.
-  server: {
-    proxy: {
-      "/agents": { target: "http://localhost:8787", ws: true, changeOrigin: true },
-      "/auth": { target: "http://localhost:8787", changeOrigin: true },
-      "/groups": { target: "http://localhost:8787", changeOrigin: true },
     },
   },
 });
