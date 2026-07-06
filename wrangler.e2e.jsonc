@@ -1,0 +1,60 @@
+{
+  // ============================================================================
+  // LOCAL E2E ONLY — NEVER DEPLOY THIS CONFIG.
+  // ============================================================================
+  // The production deploy always uses the default `wrangler.jsonc` (the `deploy`
+  // npm script runs plain `wrangler deploy`), which deliberately ships NO
+  // `migrations` block so live Durable Object data is never touched.
+  //
+  // This file exists only so the e2e harness can boot a *fresh, local* worker
+  // via `wrangler dev --config wrangler.e2e.jsonc --persist-to <throwaway>`.
+  // A fresh local DO namespace has no lineage, so it needs an explicit
+  // `new_sqlite_classes` migration to enable SQLite storage — which the agents
+  // SDK requires. That migration is safe here precisely because it only ever
+  // runs against a throwaway local persist dir, never against production.
+  //
+  // Paths are relative to the repo root (same as wrangler.jsonc), so this file
+  // must live at the repo root.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bookclub-e2e",
+  "main": "src/server/worker.ts",
+  "compatibility_date": "2026-03-17",
+  "compatibility_flags": ["nodejs_compat"],
+  // A directory must exist for the ASSETS binding; the e2e suite drives the API
+  // and websocket surfaces, not the SPA, so any real dir works. `public/` holds
+  // the PWA icons and is always present.
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "public",
+    "not_found_handling": "single-page-application",
+  },
+  // NOTE: intentionally NO `send_email` binding and NO EMAIL_FROM var. The worker
+  // treats a missing EMAIL binding as "dev auth" (see isDevAuth in worker.ts), so
+  // `POST /auth/start` auto-signs-in and returns a session cookie — which is what
+  // lets the harness mint isolated identities without a real mailbox.
+  "durable_objects": {
+    "bindings": [
+      { "name": "NoteAgent", "class_name": "NoteAgent" },
+      { "name": "AuthAgent", "class_name": "AuthAgent" },
+      { "name": "GroupAgent", "class_name": "GroupAgent" },
+      { "name": "GroupRegistry", "class_name": "GroupRegistry" },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "e2e-v1",
+      "new_sqlite_classes": ["NoteAgent", "AuthAgent", "GroupAgent", "GroupRegistry"],
+    },
+  ],
+  "r2_buckets": [
+    { "binding": "BOOKS", "bucket_name": "bookclub-books" },
+    { "binding": "BACKUPS", "bucket_name": "bookclub-do-backups" },
+  ],
+  // A fake, e2e-only session secret so the suite is self-contained even without
+  // a local `.dev.vars`. If `.dev.vars` is present in the cwd, wrangler's dev
+  // vars override this — either value works, it only has to be stable per run.
+  "vars": {
+    "ADMIN_EMAIL": "admin@example.com",
+    "SESSION_HMAC_SECRET": "e2e-only-not-a-real-secret",
+  },
+}

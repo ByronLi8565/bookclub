@@ -69,6 +69,15 @@
 .home-corner--login {
   top: 18px;
   right: 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-settings-button {
+  width: 26px;
+  height: 26px;
+  padding: 4px;
 }
 
 .home-corner--credit {

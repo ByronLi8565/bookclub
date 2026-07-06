@@ -7,6 +7,7 @@ import {
   type ReadingPositionOpenPolicy,
   type SmartArrows,
 } from "../../logic/settings/userPrefs.ts";
+import { AccountSettings } from "../shared/AccountSettings.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { DropdownMenu, type DropdownTriggerProps } from "../shared/DropdownMenu.tsx";
 import { Modal, ModalPagerTabs } from "../shared/Modal.tsx";
@@ -72,20 +73,32 @@ export interface SettingsBook {
   groupRef: string;
 }
 
-type Category = "info" | "pdf";
-const CATEGORIES: { id: Category; label: string }[] = [
-  { id: "info", label: "Info" },
-  { id: "pdf", label: "PDF" },
-];
+type Category = "account" | "info" | "pdf";
+
+// Categories are contextual: the Account tab needs a signed-in user, while the
+// book-specific tabs only make sense with a book (e.g. opened from the reader).
+// Opened from the homepage there's no book, so only Account shows.
+function categoriesFor(
+  book: SettingsBook | undefined,
+  signedIn: boolean,
+): { id: Category; label: string }[] {
+  const categories: { id: Category; label: string }[] = [];
+  if (signedIn) categories.push({ id: "account", label: "Account" });
+  if (book) categories.push({ id: "info", label: "Info" }, { id: "pdf", label: "PDF" });
+  return categories;
+}
 
 export function SettingsModal({
   book,
+  signedIn = false,
   onClose,
 }: {
-  book: SettingsBook;
+  book?: SettingsBook;
+  signedIn?: boolean;
   onClose: () => void;
 }): React.ReactElement {
-  const [category, setCategory] = useState<Category>("info");
+  const categories = categoriesFor(book, signedIn);
+  const [category, setCategory] = useState<Category>(categories[0]?.id ?? "account");
 
   const [cachedSize, setCachedSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,6 +106,7 @@ export function SettingsModal({
   const { readingPositionOpenPolicy, smartArrows, pdfPageLayout } = useReaderPrefs();
 
   useEffect(() => {
+    if (!book) return;
     let cancelled = false;
     void cachedSourceSize(book.sourceId).then((size) => {
       if (cancelled) return;
@@ -102,9 +116,10 @@ export function SettingsModal({
     return () => {
       cancelled = true;
     };
-  }, [book.sourceId]);
+  }, [book]);
 
   async function onDownload(): Promise<void> {
+    if (!book) return;
     setBusy(true);
     const result = await downloadSourceCopy(book.groupRef, book.sourceId);
     setBusy(false);
@@ -118,7 +133,8 @@ export function SettingsModal({
   return (
     <Modal title="settings" onClose={onClose}>
       <div className="modal-body settings-body">
-        {category === "info" && (
+        {category === "account" && <AccountSettings />}
+        {category === "info" && book && (
           <>
             <section className="settings-item">
               <div className="settings-item-text">
@@ -206,12 +222,14 @@ export function SettingsModal({
           </>
         )}
       </div>
-      <ModalPagerTabs
-        tabs={CATEGORIES.map((c) => ({ ...c, title: `${c.label} settings` }))}
-        active={category}
-        onChange={setCategory}
-        className="settings-tabs"
-      />
+      {categories.length > 1 && (
+        <ModalPagerTabs
+          tabs={categories.map((c) => ({ ...c, title: `${c.label} settings` }))}
+          active={category}
+          onChange={setCategory}
+          className="settings-tabs"
+        />
+      )}
     </Modal>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";
+import settingsIcon from "@assets/settings.svg";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
 import type { Session } from "../../app/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../logic/groups/groupClient.ts";
@@ -9,6 +10,7 @@ import { InviteModal } from "../group/InviteModal.tsx";
 import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
+import { SettingsModal } from "../workspace/SettingsModal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
 
 const NAME_ERRORS: Record<string, string> = {
@@ -30,11 +32,13 @@ interface HomeState {
   error: string | null;
   inviting: GroupSummary | null;
   infoOpen: boolean;
+  settingsOpen: boolean;
 }
 
 type HomeAction =
   | { type: "login"; open: boolean }
   | { type: "info"; open: boolean }
+  | { type: "settings"; open: boolean }
   | { type: "invite"; group: GroupSummary | null }
   | { type: "startCreating" }
   | { type: "cancelCreating" }
@@ -51,6 +55,7 @@ const initialHomeState: HomeState = {
   error: null,
   inviting: null,
   infoOpen: false,
+  settingsOpen: false,
 };
 
 function homeReducer(state: HomeState, action: HomeAction): HomeState {
@@ -59,6 +64,8 @@ function homeReducer(state: HomeState, action: HomeAction): HomeState {
       return { ...state, loginOpen: action.open };
     case "info":
       return { ...state, infoOpen: action.open };
+    case "settings":
+      return { ...state, settingsOpen: action.open };
     case "invite":
       return { ...state, inviting: action.group };
     case "startCreating":
@@ -127,7 +134,8 @@ function loadGroups(authed: boolean, userId: string | null): void {
 export function Home({ session }: { session: Session }): React.ReactElement {
   const authed = session.status === "authed";
   const [state, dispatch] = useReducer(homeReducer, initialHomeState);
-  const { loginOpen, name, creating, createPending, error, inviting, infoOpen } = state;
+  const { loginOpen, name, creating, createPending, error, inviting, infoOpen, settingsOpen } =
+    state;
   const {
     groups,
     loading: groupsLoading,
@@ -182,6 +190,17 @@ export function Home({ session }: { session: Session }): React.ReactElement {
         </button>
 
         <div className="home-corner home-corner--login">
+          {authed && (
+            <button
+              type="button"
+              className="home-settings-button icon-button"
+              onClick={() => dispatch({ type: "settings", open: true })}
+              aria-label="settings"
+              title="Settings"
+            >
+              <img src={settingsIcon} alt="" aria-hidden="true" />
+            </button>
+          )}
           <Login session={session} onSignIn={() => dispatch({ type: "login", open: true })} />
         </div>
 
@@ -269,6 +288,9 @@ export function Home({ session }: { session: Session }): React.ReactElement {
 
       {loginOpen && (
         <LoginModal session={session} onClose={() => dispatch({ type: "login", open: false })} />
+      )}
+      {settingsOpen && (
+        <SettingsModal signedIn onClose={() => dispatch({ type: "settings", open: false })} />
       )}
       {inviting && (
         <InviteModal

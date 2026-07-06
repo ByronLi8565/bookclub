@@ -1,13 +1,12 @@
 import { getAgentByName, routeAgentRequest } from "agents";
 import { Hono, type Context } from "hono";
-import type { User as AuthUser } from "./state/AuthAgent.ts";
 import type { Env } from "./env.ts";
 import { registerGroupRoutes } from "./routes/groupRoutes.ts";
 import { registerUserRoutes } from "./routes/userRoutes.ts";
-import { clearedCookie, currentIdentity, sessionCookie } from "./auth/cookies.ts";
+import { registerAuthRoutes } from "./routes/authRoutes.ts";
+import { clearedCookie, currentIdentity, mintSessionCookie, publicUser } from "./auth/cookies.ts";
 import { normalizeEmail } from "../shared/email.ts";
 import { readJson } from "./http.ts";
-import { signSession, SESSION_TTL_MS } from "./auth/session.ts";
 import { backupAll, listBackups, pruneBackups, restoreFrom } from "./backup.ts";
 import { constantTimeEqual } from "../shared/crypto.ts";
 
@@ -20,19 +19,6 @@ const app = new Hono<{ Bindings: Env }>();
 
 function isDevAuth(env: Env): boolean {
   return !env.EMAIL || !env.EMAIL_FROM;
-}
-
-async function mintSessionCookie(env: Env, user: AuthUser): Promise<string> {
-  const exp = Date.now() + SESSION_TTL_MS;
-  const token = await signSession(
-    { userId: user.id, email: user.email, name: user.displayName, exp },
-    env.SESSION_HMAC_SECRET,
-  );
-  return sessionCookie(token);
-}
-
-function publicUser(user: AuthUser): { id: string; email: string; name: string } {
-  return { id: user.id, email: user.email, name: user.displayName };
 }
 
 app.post("/auth/start", async (c) => {
@@ -79,6 +65,7 @@ app.get("/auth/me", async (c) => {
   return c.json({ user: { id: me.id, email: me.email, name: me.name } });
 });
 
+registerAuthRoutes(app);
 registerUserRoutes(app);
 registerGroupRoutes(app);
 

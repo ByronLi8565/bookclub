@@ -200,6 +200,17 @@
   font-size: var(--font-xs);
 }
 
+.login-passkey {
+  display: block;
+  margin-top: 12px;
+  font-size: var(--font-xs);
+  text-decoration: underline;
+}
+
+.login-passkey:hover:not(:disabled) {
+  text-decoration: none;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

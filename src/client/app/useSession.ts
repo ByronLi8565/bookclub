@@ -1,4 +1,8 @@
 import { useCallback, useSyncExternalStore } from "react";
+import {
+  startAuthentication,
+  type PublicKeyCredentialRequestOptionsJSON,
+} from "@simplewebauthn/browser";
 import { parseHttpError } from "../http.ts";
 import { isOnline, subscribeOnline } from "../logic/net/online.ts";
 import { readLocal, removeLocal, writeLocal } from "../logic/storage.ts";
@@ -26,6 +30,8 @@ export interface Session {
   startLogin: (email: string) => Promise<StartResult>;
 
   verify: (email: string, code: string, displayName?: string) => Promise<ActionResult>;
+  loginWithPassword: (email: string, password: string) => Promise<ActionResult>;
+  passkeyLogin: (email: string) => Promise<ActionResult>;
   signOut: () => Promise<void>;
 }
 
@@ -135,11 +141,58 @@ export function useSession(): Session {
     [],
   );
 
+  const loginWithPassword = useCallback(
+    async (email: string, password: string): Promise<ActionResult> => {
+      const r = await fetch("/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+      const body = (await r.json()) as { user: SessionUser };
+      cacheUser(body.user);
+      setSessionSnapshot({ user: body.user, status: "authed" });
+      return { ok: true };
+    },
+    [],
+  );
+
+  // Email-first passkey login: fetch this account's assertion options, run the
+  // WebAuthn ceremony, then verify. A thrown ceremony means the user dismissed
+  // the prompt (or no authenticator) — reported so the UI can fall back.
+  const passkeyLogin = useCallback(async (email: string): Promise<ActionResult> => {
+    const optionsRes = await fetch("/auth/passkey/login/options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
+    const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialRequestOptionsJSON;
+
+    let assertion;
+    try {
+      assertion = await startAuthentication({ optionsJSON });
+    } catch {
+      return { ok: false, error: "passkey_cancelled" };
+    }
+
+    const verifyRes = await fetch("/auth/passkey/login/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response: assertion }),
+    });
+    if (!verifyRes.ok) return { ok: false, error: await parseHttpError(verifyRes) };
+    const body = (await verifyRes.json()) as { user: SessionUser };
+    cacheUser(body.user);
+    setSessionSnapshot({ user: body.user, status: "authed" });
+    return { ok: true };
+  }, []);
+
   const signOut = useCallback(async (): Promise<void> => {
     await fetch("/auth/signout", { method: "POST" }).catch(() => {});
     cacheUser(null);
     setSessionSnapshot({ user: null, status: "anon" });
   }, []);
 
-  return { status, user, startLogin, verify, signOut };
+  return { status, user, startLogin, verify, loginWithPassword, passkeyLogin, signOut };
 }

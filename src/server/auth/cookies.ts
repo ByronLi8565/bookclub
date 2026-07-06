@@ -1,8 +1,22 @@
 import type { Env } from "../env.ts";
 import type { Identity } from "../state/GroupAgent.ts";
-import { SESSION_TTL_MS, verifySession } from "./session.ts";
+import type { User } from "../state/AuthAgent.ts";
+import { SESSION_TTL_MS, signSession, verifySession } from "./session.ts";
 
 const SESSION_COOKIE = "bc_session";
+
+export function publicUser(user: User): { id: string; email: string; name: string } {
+  return { id: user.id, email: user.email, name: user.displayName };
+}
+
+export async function mintSessionCookie(env: Env, user: User): Promise<string> {
+  const exp = Date.now() + SESSION_TTL_MS;
+  const token = await signSession(
+    { userId: user.id, email: user.email, name: user.displayName, exp },
+    env.SESSION_HMAC_SECRET,
+  );
+  return sessionCookie(token);
+}
 
 export function sessionCookie(token: string): string {
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);

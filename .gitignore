@@ -20,5 +20,8 @@ test-results
 playwright-report
 .playwright
 
+# e2e (live-worker) run artifacts
+e2e/runs
+
 # local data-recovery backup (do not commit)
 recovery/
