@@ -75,17 +75,19 @@ export interface SettingsBook {
 
 type Category = "account" | "info" | "pdf";
 
-// Categories are contextual: the Account tab needs a signed-in user, while the
-// book-specific tabs only make sense with a book (e.g. opened from the reader).
-// Opened from the homepage there's no book, so only Account shows.
+// Categories are contextual. Account settings belong to the person, not a club,
+// so they surface only from the homepage (no book) — the per-club settings a
+// reader opens are strictly about the book (Info, PDF), never the account.
 function categoriesFor(
   book: SettingsBook | undefined,
   signedIn: boolean,
 ): { id: Category; label: string }[] {
-  const categories: { id: Category; label: string }[] = [];
-  if (signedIn) categories.push({ id: "account", label: "Account" });
-  if (book) categories.push({ id: "info", label: "Info" }, { id: "pdf", label: "PDF" });
-  return categories;
+  if (book)
+    return [
+      { id: "info", label: "Info" },
+      { id: "pdf", label: "PDF" },
+    ];
+  return signedIn ? [{ id: "account", label: "Account" }] : [];
 }
 
 export function SettingsModal({
@@ -131,7 +133,7 @@ export function SettingsModal({
   }
 
   return (
-    <Modal title="settings" onClose={onClose}>
+    <Modal title={book ? "settings" : "account settings"} onClose={onClose}>
       <div className="modal-body settings-body">
         {category === "account" && <AccountSettings />}
         {category === "info" && book && (

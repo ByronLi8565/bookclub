@@ -87,9 +87,7 @@ export function WorkspaceHeader({
       >
         i
       </button>
-      {settingsOpen && (
-        <SettingsModal book={book} signedIn onClose={() => setSettingsOpen(false)} />
-      )}
+      {settingsOpen && <SettingsModal book={book} onClose={() => setSettingsOpen(false)} />}
       {infoOpen && <InfoScreen onClose={() => setInfoOpen(false)} />}
     </header>
   );
