@@ -179,17 +179,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   return (
     <div className="home">
       <div className="home-card">
-        <button
-          type="button"
-          className="home-info-button"
-          aria-label="open info"
-          title="About & release log"
-          onClick={() => dispatch({ type: "info", open: true })}
-        >
-          i
-        </button>
-
-        <div className="home-corner home-corner--login">
+        <div className="home-top-buttons">
           {authed && (
             <button
               type="button"
@@ -201,6 +191,18 @@ export function Home({ session }: { session: Session }): React.ReactElement {
               <img src={settingsIcon} alt="" aria-hidden="true" />
             </button>
           )}
+          <button
+            type="button"
+            className="home-info-button"
+            aria-label="open info"
+            title="About & release log"
+            onClick={() => dispatch({ type: "info", open: true })}
+          >
+            i
+          </button>
+        </div>
+
+        <div className="home-corner home-corner--login">
           <Login session={session} onSignIn={() => dispatch({ type: "login", open: true })} />
         </div>
 

@@ -128,9 +128,7 @@ export function AccountSettings(): React.ReactElement {
       <section className="settings-item settings-item--stacked">
         <div className="settings-item-text">
           <h2 className="settings-item-head">Passkeys</h2>
-          <p className="settings-item-desc">
-            Sign in with Face ID, Touch ID, or a security key — no code needed.
-          </p>
+          <p className="settings-item-desc">Sign in with Face ID, Touch ID, or a security key.</p>
         </div>
         {canUsePasskeys ? (
           <>

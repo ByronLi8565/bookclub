@@ -3,9 +3,11 @@ import { constantTimeEqualBytes } from "../../shared/crypto.ts";
 
 // Password storage uses PBKDF2-HMAC-SHA256. Workers has no native bcrypt/scrypt,
 // and PBKDF2 is the only password-suitable KDF exposed by WebCrypto. The
-// iteration count is a deliberate cost: high enough to slow brute force, low
-// enough to stay well within a Durable Object request's CPU budget.
-export const PBKDF2_ITERATIONS = 310_000;
+// production Workers runtime HARD-CAPS PBKDF2 at 100,000 iterations and throws
+// above it (local workerd/`wrangler dev` does NOT enforce this, so a higher
+// count passes tests but 500s once deployed). 100k is therefore the ceiling,
+// not merely a tuning choice.
+export const PBKDF2_ITERATIONS = 100_000;
 const HASH_BYTES = 32;
 const SALT_BYTES = 16;
 

@@ -49,11 +49,19 @@
   position: absolute;
 }
 
-.home-info-button {
+/* Top-right controls, mirroring an individual club page's header: a square
+   settings icon next to the round info button, anchored to the screen corner. */
+.home-top-buttons {
   position: fixed;
   top: 28px;
   right: 28px;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-info-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -66,18 +74,20 @@
   border-radius: 50%;
 }
 
+.home-settings-button {
+  width: 32px;
+  height: 32px;
+}
+
+.home-settings-button img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .home-corner--login {
   top: 18px;
   right: 22px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.home-settings-button {
-  width: 26px;
-  height: 26px;
-  padding: 4px;
 }
 
 .home-corner--credit {
