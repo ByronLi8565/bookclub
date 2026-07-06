@@ -415,3 +415,17 @@
   opacity: var(--muted-opacity);
   box-shadow: none;
 }
+
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 0.8rem;
+  background: #3a3226;
+  color: #f3e9d8;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
+}

@@ -40,7 +40,5 @@
   // (SESSION_HMAC_SECRET, ADMIN_API_TOKEN, EMAIL_FROM) are set via
   // `wrangler secret put` / `bun run secrets:sync`; dev values live in
   // .dev.vars. Do NOT add secrets here or a deploy will overwrite them.
-  "vars": {
-    "ADMIN_EMAIL": "byron.li@yale.edu",
-  },
+  "vars": { "ADMIN_EMAIL": "byron.li@yale.edu" },
 }

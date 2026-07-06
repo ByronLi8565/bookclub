@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { cachedSourceSize, refreshSource } from "../../logic/groups/sourceAccess.ts";
+import { cachedSourceSize, downloadSourceCopy } from "../../logic/groups/sourceAccess.ts";
 import {
   setReaderPref,
   useReaderPrefs,
@@ -104,19 +104,14 @@ export function SettingsModal({
     };
   }, [book.sourceId]);
 
-  async function onRedownload(): Promise<void> {
+  async function onDownload(): Promise<void> {
     setBusy(true);
-    const result = await refreshSource(book.groupRef, book.sourceId);
+    const result = await downloadSourceCopy(book.groupRef, book.sourceId);
     setBusy(false);
     if (result.ok) {
-      spawnToast("Book redownloaded", "The local copy was refreshed from storage.", {
-        type: "info",
-      });
-
-      location.reload();
+      spawnToast("Downloading book", "Saving a copy to your device.", { type: "info" });
     } else {
-      setCachedSize(null);
-      spawnToast("Redownload failed", "Couldn't fetch the book from storage.", { type: "error" });
+      spawnToast("Download failed", "Couldn't fetch the book from storage.", { type: "error" });
     }
   }
 
@@ -140,11 +135,11 @@ export function SettingsModal({
                 <button
                   type="button"
                   className="settings-action"
-                  onClick={() => void onRedownload()}
+                  onClick={() => void onDownload()}
                   disabled={busy || loading}
-                  title="Refresh the local book copy from storage"
+                  title="Download a copy of the book to your device"
                 >
-                  {busy ? "redownloading…" : cachedSize === null ? "Download a copy" : "Redownload"}
+                  {busy ? "downloading…" : "Download"}
                 </button>
               </div>
             </section>

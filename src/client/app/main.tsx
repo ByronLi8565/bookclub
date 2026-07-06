@@ -5,19 +5,14 @@ import App from "./App.tsx";
 import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 import "../index.css";
 
-const updateSW = registerSW({
-  onNeedRefresh() {
-    // A new app shell is cached and waiting; let the user choose when to take it.
-    spawnToast("Update available", "Reload to get the latest version.", {
-      type: "info",
-      durationMs: 8000,
-    });
-  },
+registerSW({
+  // `autoUpdate` mode: when a new version activates, the plugin reloads every
+  // open tab automatically. `immediate` registers the worker on first load.
+  immediate: true,
   onOfflineReady() {
     spawnToast("Offline ready", "Bookclub will work without a connection.", { type: "info" });
   },
 });
-void updateSW;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

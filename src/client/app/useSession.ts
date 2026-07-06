@@ -1,5 +1,11 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { parseHttpError } from "../http.ts";
+import { isOnline, subscribeOnline } from "../logic/net/online.ts";
+import { readLocal, removeLocal, writeLocal } from "../logic/storage.ts";
+
+// Last known identity, so an offline reload restores the signed-in UI instead
+// of falsely showing a signed-out state. Only a definitive 401 clears it.
+const SESSION_CACHE_KEY = "bookclub.session.user";
 
 export interface SessionUser {
   id: string;
@@ -37,14 +43,46 @@ function setSessionSnapshot(next: SessionSnapshot): void {
   for (const listener of sessionListeners) listener();
 }
 
+function cacheUser(user: SessionUser | null): void {
+  if (user) writeLocal(SESSION_CACHE_KEY, user);
+  else removeLocal(SESSION_CACHE_KEY);
+}
+
 function ensureSessionLoaded(): void {
   if (sessionStarted) return;
   sessionStarted = true;
-  void fetch("/auth/me")
-    .then(async (r) => (r.ok ? ((await r.json()) as { user: SessionUser }).user : null))
-    .catch(() => null)
-    .then((user) => setSessionSnapshot({ user, status: user ? "authed" : "anon" }));
+  revalidateSession();
 }
+
+// Confirm identity with the server. A successful response is authoritative and
+// refreshes the cache; a reachable-but-unauthenticated response (401/etc.)
+// definitively signs the user out; a *network* failure falls back to the cached
+// identity so offline users stay signed in and can keep working locally.
+function revalidateSession(): void {
+  void fetch("/auth/me")
+    .then(async (r) => {
+      if (r.ok) {
+        const user = ((await r.json()) as { user: SessionUser }).user;
+        cacheUser(user);
+        setSessionSnapshot({ user, status: "authed" });
+        return;
+      }
+      cacheUser(null);
+      setSessionSnapshot({ user: null, status: "anon" });
+    })
+    .catch(() => {
+      const cached = readLocal<SessionUser>(SESSION_CACHE_KEY);
+      setSessionSnapshot(
+        cached ? { user: cached, status: "authed" } : { user: null, status: "anon" },
+      );
+    });
+}
+
+// When connectivity returns, re-confirm identity so a possibly-expired session
+// is reconciled promptly rather than lingering as an optimistic cached login.
+subscribeOnline(() => {
+  if (sessionStarted && isOnline()) revalidateSession();
+});
 
 function subscribeSession(listener: () => void): () => void {
   sessionListeners.add(listener);
@@ -73,6 +111,7 @@ export function useSession(): Session {
         user?: SessionUser;
       } | null;
       if (body?.devSignedIn && body.user) {
+        cacheUser(body.user);
         setSessionSnapshot({ user: body.user, status: "authed" });
         return { ok: true, devSignedIn: true };
       }
@@ -89,6 +128,7 @@ export function useSession(): Session {
       });
       if (!r.ok) return { ok: false, error: await parseHttpError(r) };
       const body = (await r.json()) as { user: SessionUser };
+      cacheUser(body.user);
       setSessionSnapshot({ user: body.user, status: "authed" });
       return { ok: true };
     },
@@ -97,6 +137,7 @@ export function useSession(): Session {
 
   const signOut = useCallback(async (): Promise<void> => {
     await fetch("/auth/signout", { method: "POST" }).catch(() => {});
+    cacheUser(null);
     setSessionSnapshot({ user: null, status: "anon" });
   }, []);
 

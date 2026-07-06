@@ -115,13 +115,31 @@ export async function createGroup(displayName: string): Promise<ApiResult<GroupS
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-export async function fetchGroup(
-  groupRef: string,
-): Promise<{ group: GroupSummary; membership: Membership; members: RosterEntry[] } | null> {
-  const r = await fetch(`/groups/${groupRef}`);
-  if (r.status === 404) return null;
-  if (!r.ok) return null;
-  return parseJson(r, FetchGroupResponse);
+export interface FetchedGroup {
+  group: GroupSummary;
+  membership: Membership;
+  members: RosterEntry[];
+}
+
+// Distinguishes a genuine 404 ("no such club") from a network/server failure
+// ("can't reach the server") so the UI can fall back to a cached view and an
+// offline message instead of wrongly claiming the club doesn't exist.
+export type FetchGroupOutcome =
+  | ({ status: "ok" } & FetchedGroup)
+  | { status: "notfound" }
+  | { status: "error" };
+
+export async function fetchGroup(groupRef: string): Promise<FetchGroupOutcome> {
+  let r: Response;
+  try {
+    r = await fetch(`/groups/${groupRef}`);
+  } catch {
+    return { status: "error" };
+  }
+  if (r.status === 404) return { status: "notfound" };
+  if (!r.ok) return { status: "error" };
+  const body = await parseJson(r, FetchGroupResponse);
+  return body ? { status: "ok", ...body } : { status: "error" };
 }
 
 export async function redeemInvite(

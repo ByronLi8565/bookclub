@@ -9,6 +9,8 @@ import {
   type GroupSummary,
   type RosterEntry,
 } from "../../logic/groups/groupClient.ts";
+import { useOnline } from "../../logic/net/online.ts";
+import { readLocal, writeLocal } from "../../logic/storage.ts";
 import { books, loadSource } from "../../logic/groups/sourceAccess.ts";
 import { useBookUpload } from "../../logic/groups/useBookUpload.ts";
 import {
@@ -30,7 +32,18 @@ type Resolved =
   | { k: "anon" }
   | { k: "notfound" }
   | { k: "refused" }
+  | { k: "offline" }
   | { k: "member"; group: GroupSummary; isOwner: boolean; members: RosterEntry[] };
+
+interface CachedGroupView {
+  group: GroupSummary;
+  isOwner: boolean;
+  members: RosterEntry[];
+}
+
+function groupViewCacheKey(userId: string, groupRef: string): string {
+  return `bookclub.groupview.${userId}.${groupRef}`;
+}
 
 type LoadedFiles = Record<string, File | null>;
 
@@ -112,7 +125,9 @@ export function GroupView({
   const [loadedFiles, setLoadedFiles] = useState<LoadedFiles>({});
   const loadedFilesRef = useRef<LoadedFiles>({});
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const userId = session.user?.id ?? null;
+  const online = useOnline();
   const isMobile = useIsMobile();
   const loadKey = `${groupRef}:${session.status}:${userId ?? ""}`;
   const loadKeyRef = useRef(loadKey);
@@ -141,7 +156,7 @@ export function GroupView({
 
   async function onUploaded(newSourceId: string): Promise<void> {
     const refreshed = await fetchGroup(groupRef);
-    if (refreshed?.membership.isMember) {
+    if (refreshed.status === "ok" && refreshed.membership.isMember) {
       setResolved({
         k: "member",
         group: refreshed.group,
@@ -189,6 +204,13 @@ export function GroupView({
     });
   }
 
+  // Re-run the group load when connectivity is restored (offline -> online).
+  const wasOnlineRef = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnlineRef.current) setReloadTick((t) => t + 1);
+    wasOnlineRef.current = online;
+  }, [online]);
+
   useEffect(() => {
     let cancelled = false;
     if (session.status === "loading") return;
@@ -196,35 +218,56 @@ export function GroupView({
 
     void (async () => {
       let view = await fetchGroup(groupRef);
-      if (!view) {
+      if (view.status === "notfound") {
         if (!cancelled) setResolved({ k: "notfound" });
+        return;
+      }
+      if (view.status === "error") {
+        // Can't reach the server. Fall back to a cached membership view so a
+        // member can keep reading/annotating offline; otherwise say so plainly
+        // rather than claiming the club doesn't exist.
+        if (cancelled) return;
+        const cached = userId
+          ? readLocal<CachedGroupView>(groupViewCacheKey(userId, groupRef))
+          : null;
+        if (cached) {
+          setSelectedId(storedSelectedSource(cached.group));
+          setResolved({ k: "member", ...cached });
+        } else {
+          setResolved({ k: "offline" });
+        }
         return;
       }
       if (!view.membership.isMember) {
         const token = takeInviteToken();
         if (token) {
           const joined = await redeemInvite(groupRef, token);
-          if (joined.ok) view = (await fetchGroup(groupRef)) ?? view;
-          else spawnToast("Invite failed", "That invite link isn't valid.", { type: "error" });
+          if (joined.ok) {
+            const rejoined = await fetchGroup(groupRef);
+            if (rejoined.status === "ok") view = rejoined;
+          } else {
+            spawnToast("Invite failed", "That invite link isn't valid.", { type: "error" });
+          }
         }
       }
       if (cancelled) return;
-      if (!view.membership.isMember) {
+      if (view.status !== "ok" || !view.membership.isMember) {
         setResolved({ k: "refused" });
         return;
       }
-      setSelectedId(storedSelectedSource(view.group));
-      setResolved({
-        k: "member",
+      const resolvedView: CachedGroupView = {
         group: view.group,
         isOwner: view.group.ownerId === userId,
         members: view.members,
-      });
+      };
+      if (userId) writeLocal(groupViewCacheKey(userId, groupRef), resolvedView);
+      setSelectedId(storedSelectedSource(view.group));
+      setResolved({ k: "member", ...resolvedView });
     })();
     return () => {
       cancelled = true;
     };
-  }, [groupRef, session.status, userId]);
+  }, [groupRef, session.status, userId, reloadTick]);
 
   useEffect(() => {
     let cancelled = false;
@@ -289,6 +332,13 @@ export function GroupView({
     return <GroupGate session={session} message="Sign in to open this club." />;
   if (resolved.k === "notfound")
     return <GroupMessage title="No such club" body={`"${groupRef}" doesn't exist.`} />;
+  if (resolved.k === "offline")
+    return (
+      <GroupMessage
+        title="You're offline"
+        body="Can't reach the server, and this club isn't cached on this device yet. Reconnect and try again."
+      />
+    );
   if (resolved.k === "refused") {
     return <GroupMessage title="Members only" body="You need an invite to join this club." />;
   }

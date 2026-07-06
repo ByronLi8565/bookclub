@@ -5,6 +5,7 @@ import { useSession } from "./useSession.ts";
 import { hydrateUserPrefs } from "../logic/settings/userPrefs.ts";
 import { GroupView } from "../ui/group/GroupView.tsx";
 import { Home } from "../ui/home/Home.tsx";
+import { OfflineBanner } from "../ui/shared/OfflineBanner.tsx";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   }, [session.status]);
   return (
     <>
+      <OfflineBanner />
       <Switch>
         <Route path="/">{() => <Home session={session} />}</Route>
         <Route path="/clubs/:groupRef">

@@ -29,8 +29,10 @@ export default defineConfig({
     // workerd for both `vite dev` and the production build/deploy.
     cloudflare(),
     VitePWA({
-      // Surface a prompt instead of silently swapping versions under the user.
-      registerType: "prompt",
+      // Auto-update: the plugin forces skipWaiting + clientsClaim and reloads
+      // open tabs once a new version activates, so the cached app shell always
+      // stays internally consistent (no stale hashed-asset references).
+      registerType: "autoUpdate",
       // Icons live in publicDir (`public/`) and are copied verbatim to the dist root.
       includeAssets: ["icon-192.png", "icon-512.png"],
       manifest: {

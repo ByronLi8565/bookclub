@@ -146,7 +146,22 @@ app.all("*", async (c) => {
   if (!c.env.ASSETS) {
     return c.text("Run the client via the vite dev server (npm run dev).", 404);
   }
-  return c.env.ASSETS.fetch(c.req.raw);
+
+  const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+
+  // Hashed build assets live under /assets/. When one is missing (e.g. an old
+  // client requesting a chunk from a superseded deploy), the SPA fallback would
+  // otherwise hand back index.html as text/html — which browsers reject with a
+  // MIME-type error when loading it as a module. Return an honest 404 instead.
+  const pathname = new URL(c.req.url).pathname;
+  if (
+    pathname.startsWith("/assets/") &&
+    assetResponse.headers.get("content-type")?.includes("text/html")
+  ) {
+    return c.text("not found", 404);
+  }
+
+  return assetResponse;
 });
 
 export default {

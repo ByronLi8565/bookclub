@@ -3,6 +3,8 @@ import { useLocation } from "wouter";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
 import type { Session } from "../../app/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../logic/groups/groupClient.ts";
+import { readLocal, writeLocal } from "../../logic/storage.ts";
+import { useOnline } from "../../logic/net/online.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
 import { InfoScreen } from "../shared/InfoScreen.tsx";
 import { Loading } from "../shared/Loading.tsx";
@@ -88,25 +90,38 @@ function subscribeGroups(listener: () => void): () => void {
   return () => groupsListeners.delete(listener);
 }
 
-function loadGroups(authed: boolean): void {
+function groupsCacheKey(userId: string): string {
+  return `bookclub.groups.${userId}`;
+}
+
+function loadGroups(authed: boolean, userId: string | null): void {
   const request = ++groupsRequest;
-  if (!authed) {
+  if (!authed || !userId) {
     setGroupsStore({ groups: [], loading: false, failed: false });
     return;
   }
-  setGroupsStore({ groups: groupsStore.groups, loading: true, failed: false });
-  void listMyGroups().then((result) => {
-    if (request !== groupsRequest) return;
-    if (!result.ok) {
-      setGroupsStore({ groups: groupsStore.groups, loading: false, failed: true });
-      spawnToast("Couldn't load your clubs", "Something went wrong. Try refreshing.", {
-        type: "error",
-        durationMs: 6000,
-      });
-      return;
-    }
-    setGroupsStore({ groups: result.value, loading: false, failed: false });
-  });
+  // Paint the last-known list immediately (instant, works offline), then refresh.
+  const cached = readLocal<GroupSummary[]>(groupsCacheKey(userId)) ?? [];
+  setGroupsStore({ groups: cached, loading: true, failed: false });
+  void listMyGroups()
+    .catch(() => ({ ok: false as const, error: "offline" }))
+    .then((result) => {
+      if (request !== groupsRequest) return;
+      if (!result.ok) {
+        // Network/server failure: keep showing the cache; only flag failure when
+        // we have nothing to show.
+        setGroupsStore({ groups: cached, loading: false, failed: cached.length === 0 });
+        if (cached.length === 0) {
+          spawnToast("Couldn't load your clubs", "You appear to be offline. Try again later.", {
+            type: "error",
+            durationMs: 6000,
+          });
+        }
+        return;
+      }
+      writeLocal(groupsCacheKey(userId), result.value);
+      setGroupsStore({ groups: result.value, loading: false, failed: false });
+    });
 }
 
 export function Home({ session }: { session: Session }): React.ReactElement {
@@ -124,10 +139,17 @@ export function Home({ session }: { session: Session }): React.ReactElement {
   );
   const createInFlight = useRef(false);
   const [, navigate] = useLocation();
+  const userId = session.user?.id ?? null;
+  const online = useOnline();
 
   useEffect(() => {
-    loadGroups(authed);
-  }, [authed]);
+    loadGroups(authed, userId);
+  }, [authed, userId]);
+
+  // Refresh the club list when connectivity returns.
+  useEffect(() => {
+    if (online && authed) loadGroups(authed, userId);
+  }, [online, authed, userId]);
 
   async function onCreate(e: React.FormEvent): Promise<void> {
     e.preventDefault();

@@ -1,6 +1,6 @@
 import { fetchSource, uploadSource, type ApiResult, type GroupSummary } from "./groupClient.ts";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
-import { deleteCachedSource, getCachedSource, putCachedSource } from "./sourceCache.ts";
+import { getCachedSource, putCachedSource } from "./sourceCache.ts";
 import { sourceById, sourceRefById } from "../../../shared/sources.ts";
 import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { sourceKindFor, type SourceSummary } from "../../../shared/types/sources.ts";
@@ -62,21 +62,26 @@ export async function cachedSourceSize(sourceId: string): Promise<number | null>
   return (await getCachedSource(sourceId))?.size ?? null;
 }
 
-export async function refreshSource(
+function triggerBrowserDownload(file: File): void {
+  const url = URL.createObjectURL(file);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Saves the book to the user's device as a normal browser download, reusing the
+// cached copy when present and otherwise fetching it from storage.
+export async function downloadSourceCopy(
   groupRef: string,
   sourceId: string,
-): Promise<ApiResult<LoadedSource>> {
-  await deleteCachedSource(sourceId);
-  const fetched = await fetchSource(groupRef, sourceId);
-  if (!fetched) return { ok: false, error: "no_source" };
-  const id = fetched.sourceId ?? sourceId;
-  await putCachedSource(id, fetched.file);
-  const source: SourceSummary = {
-    id,
-    kind: sourceKindFor(fetched.contentType) ?? "epub",
-    contentType: fetched.contentType,
-    size: fetched.file.size,
-    title: null,
-  };
-  return { ok: true, value: { source, file: fetched.file, fromCache: true } };
+): Promise<ApiResult<{ name: string }>> {
+  const cached = await getCachedSource(sourceId);
+  const file = cached ?? (await fetchSource(groupRef, sourceId))?.file ?? null;
+  if (!file) return { ok: false, error: "no_source" };
+  triggerBrowserDownload(file);
+  return { ok: true, value: { name: file.name } };
 }

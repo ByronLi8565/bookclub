@@ -83,7 +83,7 @@ export function InviteModal({
     });
     void fetchGroup(groupRef).then((g) => {
       if (cancelled) return;
-      dispatch({ type: "membersLoaded", members: g?.members ?? [] });
+      dispatch({ type: "membersLoaded", members: g.status === "ok" ? g.members : [] });
     });
     return () => {
       cancelled = true;
