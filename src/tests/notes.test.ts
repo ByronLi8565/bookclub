@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Note } from "../shared/types/notes.ts";
+import { HIGHLIGHT_TAG, type Note } from "../shared/types/notes.ts";
 import { renderNoteBody } from "../client/logic/notes/renderHtml.ts";
-import { noteSnippet } from "../client/logic/notes/format.ts";
+import { blockquote, highlightMark, noteSnippet, noteTitle } from "../client/logic/notes/format.ts";
 
 function note(over: Partial<Note>): Note {
   return {
@@ -49,5 +49,40 @@ describe("noteSnippet", () => {
 
   it("falls back to the anchored quote, then the bare seq", () => {
     expect(noteSnippet(note({ seq: 5 }))).toBe("#5");
+  });
+
+  it("strips the == wrapper from a highlight body", () => {
+    expect(noteSnippet(note({ body: "==Call me Ishmael.==" }))).toBe("Call me Ishmael.");
+  });
+});
+
+describe("noteTitle", () => {
+  it("says posted for a plain top-level note", () => {
+    expect(noteTitle(note({ author: { id: "u", name: "angela.huo" } }))).toMatch(
+      /^angela\.huo posted /u,
+    );
+  });
+
+  it("says highlighted for a note tagged as a highlight", () => {
+    const title = noteTitle(
+      note({ author: { id: "u", name: "angela.huo" }, tags: [HIGHLIGHT_TAG] }),
+    );
+    expect(title).toMatch(/^angela\.huo highlighted /u);
+  });
+
+  it("says replied for a reply even when tagged (replies are never highlights)", () => {
+    expect(noteTitle(note({ parent: "root", tags: [HIGHLIGHT_TAG] }))).toMatch(/ replied /u);
+  });
+});
+
+describe("blockquote", () => {
+  it("prefixes with > and collapses inner whitespace", () => {
+    expect(blockquote("  Call me\n  Ishmael.  ")).toBe("> Call me Ishmael.");
+  });
+});
+
+describe("highlightMark", () => {
+  it("wraps the passage in == so it renders as a highlight, collapsing whitespace", () => {
+    expect(highlightMark("  Call me\n  Ishmael.  ")).toBe("==Call me Ishmael.==");
   });
 });

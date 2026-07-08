@@ -8,6 +8,21 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.split.is-dragging .split-pane {
+  transition: none;
+}
+
+.split--expanded-left .split-pane,
+.split--expanded-right .split-pane {
+  transition-duration: 0.3s;
+}
+
+.split-pane--hidden {
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .split-pane--grow {
@@ -80,9 +95,13 @@
 }
 
 .pager-tabs .pager-add-note {
-  background: var(--highlight);
+  background: var(--white);
   color: var(--black);
   font-weight: 700;
+}
+
+.pager-tabs .pager-highlight {
+  background: var(--highlight);
 }
 
 .loading {
@@ -230,6 +249,13 @@
   background: var(--white);
   border: var(--line);
   box-shadow: var(--shadow-lg);
+}
+
+/* This wrapper only exists to stop backdrop-dismiss clicks; it must not break
+   the modal's flex column, so its children lay out as if direct children of
+   .modal. That lets .home-info-panel bound its scroll region by max-height. */
+.modal-inner {
+  display: contents;
 }
 
 .modal-head {

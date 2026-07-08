@@ -21,13 +21,33 @@ function lowerDecorators(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
     lowerDecorators(),
     react(),
     // Reads wrangler.jsonc and runs the worker (Durable Objects, bindings) in
     // workerd for both `vite dev` and the production build/deploy.
-    cloudflare(),
+    //
+    // Dev-only migration: the four DO classes are SQLite-backed (the agents SDK
+    // requires SQL), but `wrangler.jsonc` intentionally ships no `migrations`
+    // block (prod's classes were created by alchemy under a tag we must not
+    // re-declare — see the note there). A fresh local workerd namespace has no
+    // lineage, so without a migration it creates the classes as KV-backed and
+    // every DO op fails with "SQL is not enabled". Injecting the migration only
+    // for `vite dev` (command === "serve") gives local DOs SQL storage while
+    // leaving the production build/deploy config completely untouched.
+    command === "serve"
+      ? cloudflare({
+          config: (config) => {
+            config.migrations = [
+              {
+                tag: "dev-sqlite-v1",
+                new_sqlite_classes: ["NoteAgent", "AuthAgent", "GroupAgent", "GroupRegistry"],
+              },
+            ];
+          },
+        })
+      : cloudflare(),
     VitePWA({
       // Auto-update: the plugin forces skipWaiting + clientsClaim and reloads
       // open tabs once a new version activates, so the cached app shell always
@@ -70,4 +90,4 @@ export default defineConfig({
       "@assets": new URL("./assets", import.meta.url).pathname,
     },
   },
-});
+}));

@@ -18,7 +18,7 @@ import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { bumpSeq } from "./engine/seq.ts";
-import { type OnSelect } from "./types.ts";
+import { type OnSelect, type SelectIntent } from "./types.ts";
 import { type SourceView } from "./types.ts";
 import { type SourceLocation } from "./types.ts";
 
@@ -595,11 +595,14 @@ export function useEpubSourceView(
     pendingRef.current = null;
     dispatchView({ type: "selection", selection: null });
   }, []);
-  const commitSelection = useCallback(() => {
-    const pending = pendingRef.current;
-    if (pending) onSelectRef.current(epubAnchor(pending.cfi), pending.range);
-    dismissSelection();
-  }, [dismissSelection]);
+  const commitSelection = useCallback(
+    (intent: SelectIntent = "note") => {
+      const pending = pendingRef.current;
+      if (pending) onSelectRef.current(epubAnchor(pending.cfi), pending.range, intent);
+      dismissSelection();
+    },
+    [dismissSelection],
+  );
 
   const reader = useMemo<SourceReader>(
     () =>

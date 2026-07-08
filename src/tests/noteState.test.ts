@@ -50,6 +50,14 @@ describe("addNote", () => {
     });
     expect(note.highlights).toHaveLength(1);
   });
+
+  it("omits tags entirely for an untagged note but stores them when given", () => {
+    const plain = addNote(emptyNoteState(), "book", ALICE, "hi", [], fakeStamp());
+    expect(plain.notes[0]).not.toHaveProperty("tags");
+
+    const tagged = addNote(emptyNoteState(), "book", ALICE, "> q", [], fakeStamp(), ["highlight"]);
+    expect(tagged.notes[0]?.tags).toEqual(["highlight"]);
+  });
 });
 
 describe("addReply", () => {

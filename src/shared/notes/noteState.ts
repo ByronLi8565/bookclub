@@ -40,8 +40,9 @@ export function addNote(
   body: string,
   highlights: Highlight[],
   stamp: NoteStamp,
+  tags: string[] = [],
 ): NoteState {
-  return append(state, stamp.id(), sourceId, author, null, body, highlights, stamp.now());
+  return append(state, stamp.id(), sourceId, author, null, body, highlights, stamp.now(), tags);
 }
 
 export function addReply(
@@ -52,7 +53,7 @@ export function addReply(
   body: string,
   stamp: NoteStamp,
 ): NoteState {
-  return append(state, stamp.id(), sourceId, author, parent, body, [], stamp.now());
+  return append(state, stamp.id(), sourceId, author, parent, body, [], stamp.now(), []);
 }
 
 export function editNote(
@@ -149,6 +150,7 @@ function append(
   body: string,
   highlights: Highlight[],
   createdAt: string,
+  tags: string[],
 ): NoteState {
   const seq = state.nextSeq ?? 1;
   const note: Note = {
@@ -163,6 +165,9 @@ function append(
     editedAt: null,
     deletedAt: null,
     version: 1,
+    // Only carry the field when there's something to say, so untagged notes
+    // stay byte-for-byte identical to their pre-tags shape.
+    ...(tags.length > 0 ? { tags } : {}),
   };
   return {
     notes: [...state.notes, note],
@@ -205,6 +210,7 @@ function applyOp(state: NoteState, op: NoteOp, ctx: ApplyContext): OpOutcome {
           op.body,
           op.kind === "add" ? op.highlights : [],
           op.createdAt,
+          op.kind === "add" ? (op.tags ?? []) : [],
         ),
       };
     }

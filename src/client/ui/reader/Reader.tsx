@@ -67,7 +67,7 @@ export function Reader({
     if (!floatingNote || !selection) return;
     const onDown = (event: PointerEvent) => {
       const target = event.target;
-      if (!(target instanceof Element) || !target.closest(".add-note")) dismissSelection();
+      if (!(target instanceof Element) || !target.closest(".selection-actions")) dismissSelection();
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
@@ -223,15 +223,24 @@ export function Reader({
         )}
       </div>
       {floatingNote && selection && showAddNote && (
-        <button
-          type="button"
-          className="add-note"
-          style={{ left: selection.x, top: selection.y }}
-          onClick={view.commitSelection}
-          title="Add a note on this selection"
-        >
-          Add Note
-        </button>
+        <div className="selection-actions" style={{ left: selection.x, top: selection.y }}>
+          <button
+            type="button"
+            className="add-note"
+            onClick={() => view.commitSelection("highlight")}
+            title="Highlight this selection"
+          >
+            Highlight
+          </button>
+          <button
+            type="button"
+            className="add-note"
+            onClick={() => view.commitSelection("note")}
+            title="Add a note on this selection"
+          >
+            Add Note
+          </button>
+        </div>
       )}
     </div>
   );

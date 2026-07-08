@@ -44,7 +44,7 @@ import {
   spreadStart,
 } from "./engine/pdfSpread.ts";
 import { bumpSeq } from "./engine/seq.ts";
-import { type OnSelect } from "./types.ts";
+import { type OnSelect, type SelectIntent } from "./types.ts";
 import { type SourceView } from "./types.ts";
 import { type SourceLocation } from "./types.ts";
 import { clamp } from "../../../shared/format.ts";
@@ -1275,11 +1275,14 @@ export function usePdfSourceView(
     repaintSelection();
     dispatchView({ type: "selection", selection: null });
   }, [repaintSelection]);
-  const commitSelection = useCallback(() => {
-    const pending = pendingRef.current;
-    if (pending) onSelectRef.current(pending.anchor, pending.range);
-    dismissSelection();
-  }, [dismissSelection]);
+  const commitSelection = useCallback(
+    (intent: SelectIntent = "note") => {
+      const pending = pendingRef.current;
+      if (pending) onSelectRef.current(pending.anchor, pending.range, intent);
+      dismissSelection();
+    },
+    [dismissSelection],
+  );
 
   useEffect(() => {
     if (!ready) return;

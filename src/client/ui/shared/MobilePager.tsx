@@ -29,6 +29,7 @@ export function MobilePager({
   notes,
   selecting,
   onAddNote,
+  onHighlight,
   onChromeHiddenChange,
 }: {
   pane: Pane;
@@ -38,6 +39,7 @@ export function MobilePager({
 
   selecting: boolean;
   onAddNote: () => void;
+  onHighlight: () => void;
   onChromeHiddenChange?: (hidden: boolean) => void;
 }) {
   const lockedRef = useRef(false);
@@ -80,14 +82,24 @@ export function MobilePager({
       </div>
       <div className="pager-tabs">
         {selecting ? (
-          <button
-            type="button"
-            className="pager-add-note"
-            onClick={onAddNote}
-            title="Add a note on this selection"
-          >
-            Add Note
-          </button>
+          <>
+            <button
+              type="button"
+              className="pager-add-note"
+              onClick={onAddNote}
+              title="Add a note on this selection"
+            >
+              Add Note
+            </button>
+            <button
+              type="button"
+              className="pager-add-note pager-highlight"
+              onClick={onHighlight}
+              title="Highlight this selection"
+            >
+              Highlight
+            </button>
+          </>
         ) : (
           <>
             <button

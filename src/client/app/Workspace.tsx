@@ -2,12 +2,13 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useAnyModalOpen } from "../ui/shared/modalLayer.ts";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Note, NoteAuthor } from "../../shared/types/notes.ts";
+import { HIGHLIGHT_TAG, type Note, type NoteAuthor } from "../../shared/types/notes.ts";
 import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
 import { renameGroup, type RosterEntry } from "../logic/groups/groupClient.ts";
 import { useNoteAgent } from "../logic/notes/useNoteAgent.ts";
 import { buildConversation, referenceSpace, selectNotes } from "../logic/notes/conversation.ts";
+import { blockquote, highlightMark } from "../logic/notes/format.ts";
 import {
   captureHighlight,
   type Highlight,
@@ -32,7 +33,7 @@ import {
   type DesiredHighlight,
   type HighlightPainter,
 } from "../ui/reader/engine/highlightReconciler.ts";
-import { useSourceView } from "../ui/reader/useSourceView.ts";
+import { useSourceView, type SelectIntent } from "../ui/reader/useSourceView.ts";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
 
 export interface WorkspaceProps {
@@ -68,6 +69,8 @@ function scrollNoteIntoView(seq: number): void {
 }
 
 const FIT_AFTER_CHROME_TOGGLE_MS = 140;
+const FIT_AFTER_SPLIT_EXPAND_MS = 240;
+type DesktopExpandedPane = "left" | "right" | null;
 
 export function Workspace({
   groupName,
@@ -93,6 +96,7 @@ export function Workspace({
   const [showingPresence, setShowingPresence] = useState(false);
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
+  const [desktopExpandedPane, setDesktopExpandedPane] = useState<DesktopExpandedPane>(null);
   const [chromeHidden, setChromeHidden] = useState(false);
   const fitToTextRef = useRef<(() => void) | null>(null);
   const chromeMountedRef = useRef(false);
@@ -122,12 +126,14 @@ export function Workspace({
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const sourceIdRef = useRef<string | null>(null);
   sourceIdRef.current = sourceId;
-  const onSelectRef = useRef<(anchor: HighlightAnchor, range: Range) => void>(() => {});
+  const onSelectRef = useRef<(anchor: HighlightAnchor, range: Range, intent: SelectIntent) => void>(
+    () => {},
+  );
   const restoreAfterSearchClearRef = useRef<() => void>(() => {});
   const view = useSourceView(
     source,
     file,
-    (anchor, range) => onSelectRef.current(anchor, range),
+    (anchor, range, intent) => onSelectRef.current(anchor, range, intent),
     (dir) => {
       if (dir === "left") setPane("notes");
       else if (dir === "right") setPane("reader");
@@ -149,12 +155,30 @@ export function Workspace({
     return () => window.clearTimeout(timeout);
   }, [chromeHidden]);
 
+  useEffect(() => {
+    if (desktopExpandedPane !== "left") return;
+    const timeout = window.setTimeout(() => fitToTextRef.current?.(), FIT_AFTER_SPLIT_EXPAND_MS);
+    return () => window.clearTimeout(timeout);
+  }, [desktopExpandedPane]);
+
   // While a modal is open it owns the keyboard; reader hotkeys are suppressed.
   const modalOpen = useAnyModalOpen();
   const readerKeys = view.ready && !modalOpen;
   const { pdfPageLayout } = useReaderPrefs();
   useHotkey("ArrowLeft", () => view.prev(), { enabled: readerKeys });
   useHotkey("ArrowRight", () => view.next(), { enabled: readerKeys });
+  useHotkey("Shift+ArrowLeft", () => setDesktopExpandedPane("right"), {
+    enabled: readerKeys && !isMobile,
+    preventDefault: true,
+  });
+  useHotkey("Shift+ArrowRight", () => setDesktopExpandedPane("left"), {
+    enabled: readerKeys && !isMobile,
+    preventDefault: true,
+  });
+  useHotkey("Shift+ArrowDown", () => setDesktopExpandedPane(null), {
+    enabled: readerKeys && !isMobile,
+    preventDefault: true,
+  });
   // Toggle single ⇄ two-page (book) layout for PDFs and EPUBs alike.
   useHotkey(
     "D",
@@ -194,10 +218,18 @@ export function Workspace({
     }
   };
 
-  onSelectRef.current = (anchor, range) => {
+  onSelectRef.current = (anchor, range, intent) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
     Effect.runPromise(captureHighlight(sid, anchor, range)).then((highlight) => {
+      // A highlight skips the composer: post it straight away as a note whose
+      // body is the quoted passage, tagged so it reads "highlighted". The
+      // highlight reconciler paints it once it lands in `notes`.
+      if (intent === "highlight") {
+        agent.addNote(sid, highlightMark(highlight.quote.exact), [highlight], [HIGHLIGHT_TAG]);
+        setPane("notes");
+        return;
+      }
       const prev = composingRef.current;
       if (prev) {
         view.eraseHighlight(prev.id);
@@ -380,9 +412,7 @@ export function Workspace({
     [allBySeq, allById, sourceId, onSelectBook, isMobile, jumpToHighlight],
   );
 
-  const composeInitialBody = composing
-    ? `> ${composing.quote.exact.replaceAll(/\s+/gu, " ").trim()}\n\n`
-    : "";
+  const composeInitialBody = composing ? `${blockquote(composing.quote.exact)}\n\n` : "";
   async function onRenameGroup(title: string): Promise<void> {
     const result = await renameGroup(groupRef, title);
     if (result.ok) setRenamedDisplayName({ base: groupName, value: title });
@@ -450,11 +480,17 @@ export function Workspace({
             reader={reader}
             notes={notePanel}
             selecting={view.selection !== null}
-            onAddNote={view.commitSelection}
+            onAddNote={() => view.commitSelection("note")}
+            onHighlight={() => view.commitSelection("highlight")}
             onChromeHiddenChange={setChromeHidden}
           />
         ) : (
-          <SplitPane left={reader} right={notePanel} />
+          <SplitPane
+            left={reader}
+            right={notePanel}
+            expandedPane={desktopExpandedPane}
+            onExpandedPaneChange={setDesktopExpandedPane}
+          />
         );
       })()}
       {inviting && (

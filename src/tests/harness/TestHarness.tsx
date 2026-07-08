@@ -77,7 +77,8 @@ export function ReaderHarness() {
           reader={reader}
           notes={<div className="harness-notes">notes</div>}
           selecting={view.selection !== null}
-          onAddNote={view.commitSelection}
+          onAddNote={() => view.commitSelection("note")}
+          onHighlight={() => view.commitSelection("highlight")}
         />
       ) : (
         reader

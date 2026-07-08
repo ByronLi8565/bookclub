@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 
-const INLINE_PATTERN = /\[\[(\d+)\]\]|\*\*(.+?)\*\*|\*(.+?)\*/gu;
+const INLINE_PATTERN =
+  /`([^`]+)`|\[\[key:([^\]]+)\]\]|\[\[(\d+)\]\]|==(.+?)==|\*\*(.+?)\*\*|\*(.+?)\*|_(.+?)_/gu;
 
 function renderInlineNodes(
   text: string,
@@ -14,9 +15,21 @@ function renderInlineNodes(
   for (const match of text.matchAll(INLINE_PATTERN)) {
     const start = match.index ?? 0;
     if (start > last) nodes.push(text.slice(last, start));
-    const [whole, ref, bold, italic] = match;
+    const [whole, code, keycap, ref, mark, bold, italic, underscoreItalic] = match;
     const key = `${keyPrefix}-${index++}`;
-    if (ref !== undefined) {
+    if (code !== undefined) {
+      nodes.push(
+        <code className="note-code" key={key}>
+          {code}
+        </code>,
+      );
+    } else if (keycap !== undefined) {
+      nodes.push(
+        <kbd className="note-key" key={key}>
+          {keycap}
+        </kbd>,
+      );
+    } else if (ref !== undefined) {
       const seq = Number(ref);
       const snippet = refs.get(seq);
       nodes.push(
@@ -35,10 +48,16 @@ function renderInlineNodes(
           </button>
         ),
       );
+    } else if (mark !== undefined) {
+      nodes.push(
+        <mark className="note-mark" key={key}>
+          {mark}
+        </mark>,
+      );
     } else if (bold !== undefined) {
       nodes.push(<strong key={key}>{bold}</strong>);
-    } else if (italic !== undefined) {
-      nodes.push(<em key={key}>{italic}</em>);
+    } else if (italic !== undefined || underscoreItalic !== undefined) {
+      nodes.push(<em key={key}>{italic ?? underscoreItalic}</em>);
     }
     last = start + whole.length;
   }

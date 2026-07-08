@@ -15,6 +15,19 @@ export interface Note {
   editedAt: string | null;
   deletedAt: string | null;
   version: number;
+  // Free-form markers on a note. Optional so notes persisted before tags
+  // existed (and the DO snapshots holding them) keep deserializing untouched.
+  tags?: string[];
+}
+
+// The one tag the app gives special meaning: a highlight is a note whose body
+// is just the quoted passage, surfaced with a "highlighted" verb instead of
+// "posted". Kept as a tag (not a distinct note kind) so it flows through the
+// existing note machinery unchanged.
+export const HIGHLIGHT_TAG = "highlight";
+
+export function isHighlight(note: Note): boolean {
+  return note.tags?.includes(HIGHLIGHT_TAG) ?? false;
 }
 
 export interface PdfRect {
@@ -65,6 +78,7 @@ export type NoteOp =
       body: string;
       highlights: Highlight[];
       createdAt: string;
+      tags?: string[];
     }
   | {
       opId: string;

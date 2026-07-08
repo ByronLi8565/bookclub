@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { InfoCardPage } from "../../logic/info/infoCards.ts";
 import { infoCards } from "../../logic/info/infoCards.ts";
-import { noteHeading } from "../../logic/notes/format.ts";
 import { NoteCardView } from "../notes/NoteThread.tsx";
 import { Modal, ModalPagerTabs } from "./Modal.tsx";
 
@@ -27,7 +26,7 @@ export function InfoScreen({ onClose }: { onClose: () => void }): React.ReactEle
               <li key={card.path} title={card.title}>
                 <NoteCardView
                   seq={index + 1}
-                  title={noteHeading(card.author, "posted", card.date)}
+                  title={card.title}
                   body={card.body}
                   refs={EMPTY_REFS}
                   onReference={() => {}}

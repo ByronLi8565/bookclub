@@ -28,6 +28,10 @@ function renderInline(text: string, refs: Map<number, string>): string {
     return `<button type="button" class="note-ref" data-seq="${seq}" title="${escapeHtml(snippet)}">${seq}</button>`;
   });
   return withRefs
+    .replaceAll(/`([^`]+)`/gu, '<code class="note-code">$1</code>')
+    .replaceAll(/\[\[key:([^\]]+)\]\]/gu, '<kbd class="note-key">$1</kbd>')
+    .replaceAll(/==(.+?)==/gu, '<mark class="note-mark">$1</mark>')
     .replaceAll(/\*\*(.+?)\*\*/gu, "<strong>$1</strong>")
-    .replaceAll(/\*(.+?)\*/gu, "<em>$1</em>");
+    .replaceAll(/\*(.+?)\*/gu, "<em>$1</em>")
+    .replaceAll(/_(.+?)_/gu, "<em>$1</em>");
 }

@@ -218,7 +218,7 @@
 }
 
 .home-info-panel {
-  max-height: min(720px, 86vh);
+  max-height: 64vh;
   display: flex;
   flex-direction: column;
 }

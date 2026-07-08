@@ -44,6 +44,7 @@ export function WorkspaceLoadingShell({ isMobile }: { isMobile: boolean }): Reac
           notes={LOADING_NOTES}
           selecting={false}
           onAddNote={() => {}}
+          onHighlight={() => {}}
         />
       ) : (
         <SplitPane left={LOADING_READER} right={LOADING_NOTES} />

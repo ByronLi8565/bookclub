@@ -50,6 +50,21 @@ describe("applyOperations", () => {
     expect(r.state.notes[0]?.author).toEqual(bob.author);
   });
 
+  it("carries an add op's tags onto the committed note", () => {
+    const op: NoteOp = {
+      opId: "op1",
+      kind: "add",
+      noteId: "n1",
+      sourceId: "src",
+      body: "> quote",
+      highlights: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      tags: ["highlight"],
+    };
+    const r = applyOperations(emptyNoteState(), [op], alice);
+    expect(r.state.notes[0]?.tags).toEqual(["highlight"]);
+  });
+
   describe("idempotent replay (no data loss / no duplication)", () => {
     it("re-applying the same add does not duplicate or consume a new seq", () => {
       const once = applyOperations(emptyNoteState(), [addOp("op1", "n1", "hi")], alice);

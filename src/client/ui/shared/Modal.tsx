@@ -30,7 +30,7 @@ export function Modal({
         aria-label={ariaLabel}
         aria-labelledby={ariaLabel ? undefined : labelledBy}
       >
-        <div role="presentation" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal-inner" role="presentation" onMouseDown={(e) => e.stopPropagation()}>
           <div className="modal-head">
             <strong id={labelledBy}>{title}</strong>
             <button type="button" onClick={onClose} aria-label="close" title="Close">

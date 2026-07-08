@@ -491,10 +491,15 @@
   mix-blend-mode: multiply;
 }
 
-.add-note {
+.selection-actions {
   position: fixed;
   transform: translate(-50%, 8px);
   z-index: 10;
+  display: flex;
+  box-shadow: var(--shadow-sm);
+}
+
+.add-note {
   text-transform: uppercase;
   letter-spacing: var(--letter-label);
   font-size: var(--font-xs);
@@ -502,6 +507,10 @@
   padding: 0 16px;
   background: var(--white);
   border: var(--line);
-  box-shadow: var(--shadow-sm);
   touch-action: manipulation;
+}
+
+/* Two actions read as one segmented control: share the seam between them. */
+.selection-actions .add-note + .add-note {
+  border-left: none;
 }

@@ -25,7 +25,7 @@ export interface SourceView {
   drawHighlight: (id: string, anchor: HighlightAnchor, onClick: () => void) => void;
   eraseHighlight: (id: string) => void;
   selection: { x: number; y: number } | null;
-  commitSelection: () => void;
+  commitSelection: (intent?: SelectIntent) => void;
   dismissSelection: () => void;
   location: SourceLocation | null;
   position: SourceReadingPosition | null;
@@ -33,4 +33,7 @@ export interface SourceView {
   reader: SourceReader;
   search: ReaderSearch;
 }
-export type OnSelect = (anchor: HighlightAnchor, range: Range) => void;
+// Whether a committed selection becomes a note to compose or a highlight to
+// post immediately.
+export type SelectIntent = "note" | "highlight";
+export type OnSelect = (anchor: HighlightAnchor, range: Range, intent: SelectIntent) => void;

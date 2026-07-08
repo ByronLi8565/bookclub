@@ -5,7 +5,7 @@ import { usePdfSourceView } from "./usePdfSourceView.ts";
 import type { OnSelect } from "./types.ts";
 import type { SourceView } from "./types.ts";
 
-export type { SourceView, SourceLocation, OnSelect } from "./types.ts";
+export type { SourceView, SourceLocation, OnSelect, SelectIntent } from "./types.ts";
 
 export function useSourceView(
   source: SourceRef | null,

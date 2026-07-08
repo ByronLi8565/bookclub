@@ -15,7 +15,7 @@ export interface InfoCard {
 
 export type InfoCardPage = "info" | "release";
 
-const rawInfoCards = import.meta.glob("../../../info_cards/*.md", {
+const rawInfoCards = import.meta.glob("../../../../info_cards/*.md", {
   query: "?raw",
   import: "default",
   eager: true,

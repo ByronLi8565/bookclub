@@ -8,7 +8,12 @@ const ulid = monotonicFactory();
 
 const now = (): string => new Date().toISOString();
 
-export function addNoteOp(sourceId: string, body: string, highlights: Highlight[]): NoteOp {
+export function addNoteOp(
+  sourceId: string,
+  body: string,
+  highlights: Highlight[],
+  tags: string[] = [],
+): NoteOp {
   return {
     opId: ulid(),
     kind: "add",
@@ -17,6 +22,7 @@ export function addNoteOp(sourceId: string, body: string, highlights: Highlight[
     body,
     highlights,
     createdAt: now(),
+    ...(tags.length > 0 ? { tags } : {}),
   };
 }
 

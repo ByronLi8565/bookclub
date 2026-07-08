@@ -171,6 +171,56 @@
   opacity: 0.8;
 }
 
+.note-mark {
+  display: inline-block;
+  padding: 0 4px;
+  background: var(--highlight);
+  color: var(--black);
+  font-weight: 700;
+}
+
+.note-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4em;
+  min-height: 2.4em;
+  padding: 0 0.55em;
+  border: var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  box-shadow: 2px 2px 0 var(--black);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.note-code {
+  padding: 0 4px;
+  border: var(--line-thin);
+  background: var(--white);
+  font-family: inherit;
+  font-weight: 700;
+}
+
+.home-info-cards .note-body {
+  font-size: var(--font-md);
+  line-height: 1.5;
+}
+
+.home-info-cards .note-body p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.home-info-cards .note-body p:last-child {
+  margin-bottom: 0;
+}
+
 .note-ref {
   display: inline-block;
   padding: 0 4px;

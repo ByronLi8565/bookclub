@@ -80,10 +80,10 @@ export class NoteAgent extends Agent<Env, NoteState> {
   }
 
   @callable()
-  addNote(sourceId: string, body: string, highlights: Highlight[]): void {
+  addNote(sourceId: string, body: string, highlights: Highlight[], tags: string[] = []): void {
     const { userId, name } = this.me;
     this.setState(
-      addNote(this.state, sourceId, { id: userId, name }, body, highlights, this.stamp),
+      addNote(this.state, sourceId, { id: userId, name }, body, highlights, this.stamp, tags),
     );
   }
 

@@ -22,7 +22,7 @@ export interface NoteSync {
   pendingNoteIds: ReadonlySet<string>;
   failedNoteIds: ReadonlySet<string>;
   online: OnlinePeer[];
-  addNote: (sourceId: string, body: string, highlights: Highlight[]) => boolean;
+  addNote: (sourceId: string, body: string, highlights: Highlight[], tags?: string[]) => boolean;
   addReply: (sourceId: string, parent: string, body: string) => boolean;
   editNote: (id: string, body: string) => boolean;
   removeNote: (id: string) => boolean;
@@ -155,7 +155,8 @@ export function useNoteAgent(
       agent.identified,
       view.pendingCount,
     ),
-    addNote: (sourceId, body, highlights) => enqueue(addNoteOp(sourceId, body, highlights)),
+    addNote: (sourceId, body, highlights, tags) =>
+      enqueue(addNoteOp(sourceId, body, highlights, tags)),
     addReply: (sourceId, parent, body) => enqueue(addReplyOp(sourceId, parent, body)),
     editNote: (id, body) => enqueue(editNoteOp(id, body)),
     removeNote: (id) => enqueue(removeNoteOp(id)),
