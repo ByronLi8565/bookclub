@@ -16,6 +16,7 @@ export interface User {
   id: string;
   email: string;
   displayName: string;
+  avatarImageId?: string;
   createdAt: string;
   groupIds: string[];
 }
@@ -52,15 +53,27 @@ export interface AuthState {
   pwRate?: RateWindow | null;
 }
 
-export type VerifyResult =
-  | { ok: true; user: User }
-  | { ok: false; reason: "no_pending" | "expired" | "too_many_attempts" | "bad_code" };
+export const AuthFailureReason = {
+  NoPending: "no_pending",
+  Expired: "expired",
+  TooManyAttempts: "too_many_attempts",
+  BadCode: "bad_code",
+  NoPassword: "no_password",
+  RateLimited: "rate_limited",
+  BadPassword: "bad_password",
+  NoUser: "no_user",
+  BadCurrent: "bad_current",
+} as const;
+
+export type AuthFailureReason = (typeof AuthFailureReason)[keyof typeof AuthFailureReason];
+
+export type VerifyResult = { ok: true; user: User } | { ok: false; reason: AuthFailureReason };
 
 export type PasswordLoginResult =
   | { ok: true; user: User }
-  | { ok: false; reason: "no_password" | "rate_limited" | "bad_password" };
+  | { ok: false; reason: AuthFailureReason };
 
-export type SetPasswordResult = { ok: true } | { ok: false; reason: "no_user" | "bad_current" };
+export type SetPasswordResult = { ok: true } | { ok: false; reason: AuthFailureReason };
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -110,20 +123,20 @@ export class AuthAgent extends Agent<Env, AuthState> {
 
   async verifyLogin(email: string, code: string, displayName?: string): Promise<VerifyResult> {
     const pending = this.state.pending;
-    if (!pending) return { ok: false, reason: "no_pending" };
+    if (!pending) return { ok: false, reason: AuthFailureReason.NoPending };
     if (Date.now() > pending.expiresAt) {
       this.setState({ ...this.state, pending: null });
-      return { ok: false, reason: "expired" };
+      return { ok: false, reason: AuthFailureReason.Expired };
     }
     if (pending.attempts >= MAX_ATTEMPTS) {
       this.setState({ ...this.state, pending: null });
-      return { ok: false, reason: "too_many_attempts" };
+      return { ok: false, reason: AuthFailureReason.TooManyAttempts };
     }
 
     const hash = await hashCode(email, code);
     if (!constantTimeEqual(hash, pending.hash)) {
       this.setState({ ...this.state, pending: { ...pending, attempts: pending.attempts + 1 } });
-      return { ok: false, reason: "bad_code" };
+      return { ok: false, reason: AuthFailureReason.BadCode };
     }
 
     const user = this.upsertUser(email, displayName);
@@ -141,62 +154,61 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return this.state.user;
   }
 
-  // --- Password ---
+  setAvatarImageId(imageId: string): User | null {
+    if (!this.state.user) return null;
+    const user = { ...this.state.user, avatarImageId: imageId };
+    this.setState({ ...this.state, user });
+    return user;
+  }
 
   hasPassword(): boolean {
     return Boolean(this.state.password);
   }
 
-  // Login with a set password. Rate-limited per DO (i.e. per email) so a set
-  // password can't be brute-forced. A missing password is reported distinctly
-  // so callers can fall back to the email-code flow rather than treating it as
-  // a wrong password.
   async loginWithPassword(email: string, password: string): Promise<PasswordLoginResult> {
     const stored = this.state.password;
-    if (!stored) return { ok: false, reason: "no_password" };
+    if (!stored) return { ok: false, reason: AuthFailureReason.NoPassword };
 
     const now = Date.now();
     const rate =
       this.state.pwRate && now - this.state.pwRate.windowStart < RATE_WINDOW_MS
         ? this.state.pwRate
         : { windowStart: now, sends: 0 };
-    if (rate.sends >= MAX_PW_ATTEMPTS_PER_WINDOW) return { ok: false, reason: "rate_limited" };
+    if (rate.sends >= MAX_PW_ATTEMPTS_PER_WINDOW)
+      return { ok: false, reason: AuthFailureReason.RateLimited };
     this.setState({
       ...this.state,
       pwRate: { windowStart: rate.windowStart, sends: rate.sends + 1 },
     });
 
-    if (!(await verifyPassword(password, stored))) return { ok: false, reason: "bad_password" };
+    if (!(await verifyPassword(password, stored)))
+      return { ok: false, reason: AuthFailureReason.BadPassword };
 
     const user = this.upsertUser(email);
     this.setState({ ...this.state, user, pwRate: null });
     return { ok: true, user };
   }
 
-  // Set or change the password for an existing user. When a password is already
-  // set, the caller must prove knowledge of the current one.
   async setPassword(next: string, current?: string): Promise<SetPasswordResult> {
-    if (!this.state.user) return { ok: false, reason: "no_user" };
+    if (!this.state.user) return { ok: false, reason: AuthFailureReason.NoUser };
     if (
       this.state.password &&
       (!current || !(await verifyPassword(current, this.state.password)))
     ) {
-      return { ok: false, reason: "bad_current" };
+      return { ok: false, reason: AuthFailureReason.BadCurrent };
     }
     this.setState({ ...this.state, password: await hashPassword(next), pwRate: null });
     return { ok: true };
   }
 
   async removePassword(current: string): Promise<SetPasswordResult> {
-    if (!this.state.user) return { ok: false, reason: "no_user" };
+    if (!this.state.user) return { ok: false, reason: AuthFailureReason.NoUser };
     if (this.state.password && !(await verifyPassword(current, this.state.password))) {
-      return { ok: false, reason: "bad_current" };
+      return { ok: false, reason: AuthFailureReason.BadCurrent };
     }
     this.setState({ ...this.state, password: null });
     return { ok: true };
   }
-
-  // --- Passkeys ---
 
   listCredentials(): StoredCredential[] {
     return this.state.credentials ?? [];
@@ -214,9 +226,6 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return (this.state.credentials ?? []).find((c) => c.id === id) ?? null;
   }
 
-  // Stash the registration challenge between the options and verify round-trips.
-  // Registration always happens within an authenticated session, so the email
-  // key is known and the challenge can live in this DO (short-lived).
   startRegistration(challenge: string): void {
     this.setState({
       ...this.state,
@@ -278,13 +287,7 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return position;
   }
 
-  // Links a group to this user. Self-heals a missing user record from the
-  // caller's identity: auth is cookie-based (a signed session, independent of
-  // this DO), so a valid caller can exist before/without a stored user record
-  // (e.g. after the DO's state was reset). `identity` is required so this can
-  // never silently no-op when there's no stored user — the original bug where a
-  // club got created but never indexed into the owner's account. Idempotent:
-  // re-linking an already-linked group is a no-op.
+  // Self-heals a missing user record from the caller's signed-session identity.
   addGroup(groupId: string, identity: { id: string; email: string; name: string }): void {
     const user = this.state.user ?? {
       id: identity.id,
@@ -295,6 +298,21 @@ export class AuthAgent extends Agent<Env, AuthState> {
     };
     if (user.groupIds.includes(groupId)) return;
     this.setState({ ...this.state, user: { ...user, groupIds: [...user.groupIds, groupId] } });
+  }
+
+  removeGroup(groupId: string): void {
+    const user = this.state.user;
+    if (!user || !user.groupIds.includes(groupId)) return;
+    const prefix = `${groupId}:`;
+    this.setState({
+      ...this.state,
+      user: { ...user, groupIds: user.groupIds.filter((id) => id !== groupId) },
+      readingPositions: Object.fromEntries(
+        Object.entries(this.state.readingPositions ?? {}).filter(
+          ([key]) => !key.startsWith(prefix),
+        ),
+      ),
+    });
   }
 
   getGroupIds(): string[] {

@@ -11,7 +11,8 @@ import {
 } from "../../logic/groups/groupClient.ts";
 import { useOnline } from "../../logic/net/online.ts";
 import { readLocal, writeLocal } from "../../logic/storage.ts";
-import { books, loadSource } from "../../logic/groups/sourceAccess.ts";
+import { books, downloadGroupForOffline, loadSource } from "../../logic/groups/sourceAccess.ts";
+import { isNative } from "../../logic/net/api.ts";
 import { useBookUpload } from "../../logic/groups/useBookUpload.ts";
 import {
   fetchServerReadingPosition,
@@ -204,7 +205,6 @@ export function GroupView({
     });
   }
 
-  // Re-run the group load when connectivity is restored (offline -> online).
   const wasOnlineRef = useRef(online);
   useEffect(() => {
     if (online && !wasOnlineRef.current) setReloadTick((t) => t + 1);
@@ -223,9 +223,6 @@ export function GroupView({
         return;
       }
       if (view.status === "error") {
-        // Can't reach the server. Fall back to a cached membership view so a
-        // member can keep reading/annotating offline; otherwise say so plainly
-        // rather than claiming the club doesn't exist.
         if (cancelled) return;
         const cached = userId
           ? readLocal<CachedGroupView>(groupViewCacheKey(userId, groupRef))
@@ -282,6 +279,15 @@ export function GroupView({
       cancelled = true;
     };
   }, [group?.groupId, effectiveId]);
+
+  useEffect(() => {
+    // Read through the ref (like the loadSource effect above) so the deps stay
+    // the primitives that should actually retrigger a shelf sync.
+    const shelf = groupStateRef.current;
+    if (!isNative || !shelf) return;
+    void downloadGroupForOffline(shelf);
+    // Keyed on identity + shelf contents so a newly-added book also downloads.
+  }, [group?.groupId, group?.sources.length]);
 
   const source =
     effectiveId && group ? (sourceById(group, effectiveId) ?? currentSource(group)) : null;

@@ -12,8 +12,8 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { $isQuoteNode, QuoteNode } from "@lexical/rich-text";
-import { $createParagraphNode, $getRoot, FORMAT_TEXT_COMMAND } from "lexical";
-import { useCallback, useMemo, useRef } from "react";
+import { $createParagraphNode, $createTextNode, $getRoot, FORMAT_TEXT_COMMAND } from "lexical";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NOTE_TRANSFORMERS } from "../../../logic/notes/renderHtml.ts";
 import { ReferenceNode } from "./ReferenceNode.ts";
 import { createReferenceTransformer } from "./referenceTransformer.ts";
@@ -46,6 +46,7 @@ function Chrome({
   canSubmit,
   onSubmit,
   onCancel,
+  onPasteImage,
   transformers,
   referenceTransformer,
 }: {
@@ -54,10 +55,12 @@ function Chrome({
   canSubmit: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
+  onPasteImage?: (file: File) => Promise<string | null>;
   transformers: Transformer[];
   referenceTransformer: Transformer;
 }) {
   const [editor] = useLexicalComposerContext();
+  const [pasteStatus, setPasteStatus] = useState<string | null>(null);
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
@@ -75,6 +78,34 @@ function Chrome({
   });
   useHotkey("Mod+Enter", () => submit(), { target: containerRef, preventDefault: true });
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !onPasteImage) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const image = [...(event.clipboardData?.items ?? [])]
+        .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+        ?.getAsFile();
+      if (!image) return;
+      event.preventDefault();
+      setPasteStatus("uploading image...");
+      void onPasteImage(image).then((imageId) => {
+        if (!imageId) {
+          setPasteStatus("image upload failed");
+          return;
+        }
+        editor.update(() => {
+          const paragraph = $createParagraphNode();
+          paragraph.append($createTextNode(`[[image:${imageId}]]`));
+          $getRoot().append(paragraph);
+          paragraph.selectEnd();
+        });
+        setPasteStatus(null);
+      });
+    };
+    container.addEventListener("paste", onPaste);
+    return () => container.removeEventListener("paste", onPaste);
+  }, [containerRef, editor, onPasteImage]);
+
   return (
     <>
       <RichTextPlugin
@@ -83,6 +114,7 @@ function Chrome({
       />
       <HistoryPlugin />
       <MarkdownShortcutPlugin transformers={[referenceTransformer]} />
+      {pasteStatus && <p className="note-editor-hint">{pasteStatus}</p>}
       <div className="note-editor-actions">
         <button
           type="button"
@@ -108,6 +140,7 @@ export function NoteEditor({
   submitLabel,
   onSave,
   onCancel,
+  onPasteImage,
   validSeqs,
   canSubmit = true,
   canReference = true,
@@ -116,6 +149,7 @@ export function NoteEditor({
   submitLabel: string;
   onSave: (body: string) => void;
   onCancel: () => void;
+  onPasteImage?: (file: File) => Promise<string | null>;
   validSeqs: Set<number>;
   canSubmit?: boolean;
   canReference?: boolean;
@@ -147,6 +181,7 @@ export function NoteEditor({
           canSubmit={canSubmit}
           onSubmit={onSave}
           onCancel={onCancel}
+          onPasteImage={onPasteImage}
           transformers={transformers}
           referenceTransformer={referenceTransformer}
         />

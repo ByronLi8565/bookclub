@@ -7,6 +7,7 @@ import type {
   NoteOp,
   RejectedOp,
 } from "../types/notes.ts";
+import { NoteRejectionReason } from "../types/notes.ts";
 import { extractReferences } from "../references.ts";
 
 export interface NoteState {
@@ -216,9 +217,11 @@ function applyOp(state: NoteState, op: NoteOp, ctx: ApplyContext): OpOutcome {
     }
     case "edit": {
       const note = state.notes.find((n) => n.id === op.noteId);
-      if (!note) return { kind: "rejected", reason: "gone" };
-      if (note.deletedAt !== null) return { kind: "rejected", reason: "gone" };
-      if (note.author.id !== ctx.author.id) return { kind: "rejected", reason: "forbidden" };
+      if (!note) return { kind: "rejected", reason: NoteRejectionReason.Gone };
+      if (note.deletedAt !== null) return { kind: "rejected", reason: NoteRejectionReason.Gone };
+      if (note.author.id !== ctx.author.id) {
+        return { kind: "rejected", reason: NoteRejectionReason.Forbidden };
+      }
       // Last-write-wins: an edit older than the note's current revision is
       // silently superseded (a no-op to prune), never an error.
       const current = note.editedAt ?? note.createdAt;
@@ -229,7 +232,7 @@ function applyOp(state: NoteState, op: NoteOp, ctx: ApplyContext): OpOutcome {
       const note = state.notes.find((n) => n.id === op.noteId);
       if (!note) return { kind: "noop" }; // already gone
       if (note.author.id !== ctx.author.id && !ctx.isOwner) {
-        return { kind: "rejected", reason: "forbidden" };
+        return { kind: "rejected", reason: NoteRejectionReason.Forbidden };
       }
       return {
         kind: "applied",
@@ -239,6 +242,9 @@ function applyOp(state: NoteState, op: NoteOp, ctx: ApplyContext): OpOutcome {
     case "rebind": {
       const note = state.notes.find((n) => n.id === op.noteId);
       if (!note || !note.highlights.some((h) => h.id === op.highlightId)) return { kind: "noop" };
+      if (note.author.id !== ctx.author.id && !ctx.isOwner) {
+        return { kind: "rejected", reason: NoteRejectionReason.Forbidden };
+      }
       return {
         kind: "applied",
         state: rebindHighlight(state, op.noteId, op.highlightId, op.anchor),

@@ -200,7 +200,7 @@ export function Reader({
           {loading ? (
             <Loading className="loading--reader" />
           ) : (
-            !hasFile && <p className="reader-empty">Open a book to begin.</p>
+            !hasFile && <p className="reader-empty label">Open a book to begin.</p>
           )}
         </div>
         {ready && !view.location?.atStart && (
@@ -226,7 +226,7 @@ export function Reader({
         <div className="selection-actions" style={{ left: selection.x, top: selection.y }}>
           <button
             type="button"
-            className="add-note"
+            className="add-note label"
             onClick={() => view.commitSelection("highlight")}
             title="Highlight this selection"
           >
@@ -234,7 +234,7 @@ export function Reader({
           </button>
           <button
             type="button"
-            className="add-note"
+            className="add-note label"
             onClick={() => view.commitSelection("note")}
             title="Add a note on this selection"
           >

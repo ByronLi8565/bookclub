@@ -60,9 +60,7 @@ function infoRows(inspected: InspectedBook): InfoRow[] {
   if (metadata.wordCount !== null) {
     rows.push({ label: "Words", value: metadata.wordCount.toLocaleString() });
   }
-  rows.push({ label: "Size", value: formatBytes(file.size) });
-  rows.push(...healthRows(health));
-  return rows;
+  return [...rows, { label: "Size", value: formatBytes(file.size) }, ...healthRows(health)];
 }
 
 export function UploadModal({

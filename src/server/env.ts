@@ -9,6 +9,7 @@ export interface Env {
   GroupAgent: DurableObjectNamespace<GroupAgent>;
   GroupRegistry: DurableObjectNamespace<GroupRegistry>;
   BOOKS: R2Bucket;
+  IMAGES: R2Bucket;
   BACKUPS: R2Bucket;
   SESSION_HMAC_SECRET: string;
   // Email allowed to trigger manual backup/restore admin endpoints. Empty

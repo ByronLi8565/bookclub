@@ -5,17 +5,38 @@ import { SESSION_TTL_MS, signSession, verifySession } from "./session.ts";
 
 const SESSION_COOKIE = "bc_session";
 
-export function publicUser(user: User): { id: string; email: string; name: string } {
-  return { id: user.id, email: user.email, name: user.displayName };
+export function publicUser(user: User): {
+  id: string;
+  email: string;
+  name: string;
+  avatarImageId?: string;
+} {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.displayName,
+    ...(user.avatarImageId ? { avatarImageId: user.avatarImageId } : {}),
+  };
 }
 
-export async function mintSessionCookie(env: Env, user: User): Promise<string> {
+export async function mintSessionToken(env: Env, user: User): Promise<string> {
   const exp = Date.now() + SESSION_TTL_MS;
-  const token = await signSession(
+  return await signSession(
     { userId: user.id, email: user.email, name: user.displayName, exp },
     env.SESSION_HMAC_SECRET,
   );
-  return sessionCookie(token);
+}
+
+export async function mintSessionCookie(env: Env, user: User): Promise<string> {
+  return sessionCookie(await mintSessionToken(env, user));
+}
+
+export async function sessionCredentials(
+  env: Env,
+  user: User,
+): Promise<{ cookie: string; token: string }> {
+  const token = await mintSessionToken(env, user);
+  return { cookie: sessionCookie(token), token };
 }
 
 export function sessionCookie(token: string): string {
@@ -37,8 +58,20 @@ function readSessionCookie(request: Request): string | null {
   return null;
 }
 
+// Native uses bearer auth for HTTP and `?token=` for WebSocket upgrades.
+function readSessionToken(request: Request): string | null {
+  const cookie = readSessionCookie(request);
+  if (cookie) return cookie;
+
+  const auth = request.headers.get("Authorization");
+  if (auth?.startsWith("Bearer ")) return auth.slice("Bearer ".length).trim() || null;
+
+  const queryToken = new URL(request.url).searchParams.get("token");
+  return queryToken?.trim() || null;
+}
+
 export async function currentIdentity(request: Request, env: Env): Promise<Identity | null> {
-  const tokenValue = readSessionCookie(request);
+  const tokenValue = readSessionToken(request);
   if (!tokenValue) return null;
   const claims = await verifySession(tokenValue, env.SESSION_HMAC_SECRET);
   if (!claims) return null;

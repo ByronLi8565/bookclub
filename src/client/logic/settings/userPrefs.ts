@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import { useSyncExternalStore } from "react";
+import { apiFetch } from "../net/api.ts";
+import { decode } from "../../../shared/schema.ts";
 import {
   DEFAULT_USER_PREFS,
   mergeUserPrefs,
@@ -17,30 +18,13 @@ export type {
 
 const STORAGE_KEY = "bookclub.userPrefs";
 
-function decode<S extends Schema.Top>(schema: S, value: unknown): Schema.Schema.Type<S> | null {
-  try {
-    return Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown, never>)(
-      value,
-    ) as Schema.Schema.Type<S>;
-  } catch {
-    return null;
-  }
-}
-
 function load(): UserPrefs {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_USER_PREFS;
-    return mergeUserPrefs(JSON.parse(raw) as Partial<UserPrefs>);
-  } catch {
-    return DEFAULT_USER_PREFS;
-  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw ? mergeUserPrefs(JSON.parse(raw) as Partial<UserPrefs>) : DEFAULT_USER_PREFS;
 }
 
 function save(next: UserPrefs): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {}
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
 let prefs = load();
@@ -66,7 +50,7 @@ export function setReaderPref<K extends keyof UserPrefs["reader"]>(
 
 export function hydrateUserPrefs(): Effect.Effect<UserPrefs> {
   return Effect.tryPromise(async () => {
-    const response = await fetch("/me/prefs");
+    const response = await apiFetch("/me/prefs");
     if (!response.ok) throw new Error(`http_${response.status}`);
     const body = decode(UserPrefsResponse, await response.json());
     if (!body) throw new Error("bad_response");
@@ -78,7 +62,7 @@ export function hydrateUserPrefs(): Effect.Effect<UserPrefs> {
 
 function syncUserPrefs(): Effect.Effect<UserPrefs> {
   return Effect.tryPromise(async () => {
-    const response = await fetch("/me/prefs", {
+    const response = await apiFetch("/me/prefs", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prefs }),

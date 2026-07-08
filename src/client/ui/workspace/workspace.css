@@ -10,6 +10,12 @@
 
 .settings-button {
   width: 32px;
+
+  & img {
+    width: 16px;
+    height: 16px;
+    display: block;
+  }
 }
 
 .workspace-info-button {
@@ -19,12 +25,6 @@
   font-size: 18px;
   font-weight: 700;
   line-height: 1;
-}
-
-.settings-button img {
-  width: 16px;
-  height: 16px;
-  display: block;
 }
 
 .settings-tabs {
@@ -51,8 +51,6 @@
   min-width: 0;
 }
 
-/* Account tab sections stack their controls under the description rather than
-   sitting in a side column, since they hold lists and multi-field forms. */
 .settings-item--stacked {
   flex-direction: column;
   align-items: stretch;
@@ -77,30 +75,22 @@
   padding: 6px 10px;
 }
 
-.account-passkey-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .account-passkey-add,
 .account-password-form {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
 
-.account-passkey-add input,
-.account-password-form input {
-  flex: 1;
-  min-width: 140px;
-}
+  & input {
+    flex: 1;
+    min-width: 140px;
+  }
 
-.account-passkey-add .settings-action,
-.account-password-form .settings-action {
-  width: auto;
-  flex: 0 0 auto;
+  & .settings-action {
+    width: auto;
+    flex: 0 0 auto;
+  }
 }
 
 .settings-item-control {
@@ -108,6 +98,11 @@
   max-width: 40%;
   display: flex;
   justify-content: flex-end;
+
+  & .settings-dropdown {
+    flex: 0 0 100%;
+    max-width: none;
+  }
 }
 
 .settings-item-head {
@@ -139,11 +134,12 @@
   position: relative;
   max-width: none;
   width: 100%;
-}
 
-.settings-item-control .settings-dropdown {
-  flex: 0 0 100%;
-  max-width: none;
+  & .book-menu-list {
+    left: auto;
+    right: 0;
+    min-width: max(240px, 100%);
+  }
 }
 
 .settings-dropdown-trigger {
@@ -153,21 +149,15 @@
   gap: 8px;
   text-align: left;
   white-space: nowrap;
-}
 
-.settings-dropdown-trigger > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+  & > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-.settings-dropdown-trigger .book-menu-arrow {
-  padding: 0;
-}
-
-.settings-dropdown .book-menu-list {
-  left: auto;
-  right: 0;
-  min-width: max(240px, 100%);
+  & .book-menu-arrow {
+    padding: 0;
+  }
 }
 
 .topbar {
@@ -184,13 +174,13 @@
     padding-bottom var(--chrome-collapse-duration) var(--chrome-ease),
     border-bottom-width var(--chrome-collapse-duration) var(--chrome-ease),
     opacity var(--chrome-fade-duration) linear;
-}
 
-.topbar h1 {
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: 2px;
-  cursor: text;
+  & h1 {
+    margin: 0;
+    font-size: 20px;
+    letter-spacing: 2px;
+    cursor: text;
+  }
 }
 
 .topbar-title-edit {

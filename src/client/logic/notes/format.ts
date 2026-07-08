@@ -2,7 +2,7 @@ import { REFERENCE_PATTERN } from "../../../shared/references.ts";
 import { isHighlight, type Note } from "../../../shared/types/notes.ts";
 
 export function noteTitle(note: Note): string {
-  const verb = note.parent !== null ? "replied" : isHighlight(note) ? "highlighted" : "posted";
+  const verb = note.parent === null ? (isHighlight(note) ? "highlighted" : "posted") : "replied";
   return noteHeading(note.author.name, verb, note.createdAt);
 }
 export function noteHeading(
@@ -13,15 +13,10 @@ export function noteHeading(
   return `${authorName} ${verb} ${formatNoteTimestamp(createdAt)}`;
 }
 
-// The quote a note composer pre-fills: the selected passage as a block quote,
-// giving the author room to write commentary beneath it.
 export function blockquote(exact: string): string {
   return `> ${exact.replaceAll(/\s+/gu, " ").trim()}`;
 }
 
-// The body a highlight post carries: the selected passage marked up so it
-// renders as highlighted text (the same yellow ==mark== used elsewhere) rather
-// than a quote, since a highlight *is* the passage, not a comment on it.
 export function highlightMark(exact: string): string {
   return `==${exact.replaceAll(/\s+/gu, " ").trim()}==`;
 }

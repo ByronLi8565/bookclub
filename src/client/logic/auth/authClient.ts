@@ -3,6 +3,7 @@ import {
   type PublicKeyCredentialCreationOptionsJSON,
 } from "@simplewebauthn/browser";
 import { parseHttpError } from "../../http.ts";
+import { apiFetch } from "../net/api.ts";
 import type { PasskeyInfo } from "../../../shared/types/passkeys.ts";
 
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
@@ -10,7 +11,7 @@ export type Result<T = void> = { ok: true; value: T } | { ok: false; error: stri
 const json = { "Content-Type": "application/json" };
 
 export async function listPasskeys(): Promise<Result<PasskeyInfo[]>> {
-  const r = await fetch("/me/passkeys");
+  const r = await apiFetch("/me/passkeys");
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = (await r.json()) as { passkeys: PasskeyInfo[] };
   return { ok: true, value: body.passkeys };
@@ -19,7 +20,7 @@ export async function listPasskeys(): Promise<Result<PasskeyInfo[]>> {
 // Registration ceremony: fetch creation options, prompt the authenticator, then
 // verify. A thrown ceremony means the user dismissed the prompt.
 export async function registerPasskey(label: string): Promise<Result> {
-  const optionsRes = await fetch("/auth/passkey/register/options", { method: "POST" });
+  const optionsRes = await apiFetch("/auth/passkey/register/options", { method: "POST" });
   if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
   const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialCreationOptionsJSON;
 
@@ -30,7 +31,7 @@ export async function registerPasskey(label: string): Promise<Result> {
     return { ok: false, error: "passkey_cancelled" };
   }
 
-  const verifyRes = await fetch("/auth/passkey/register/verify", {
+  const verifyRes = await apiFetch("/auth/passkey/register/verify", {
     method: "POST",
     headers: json,
     body: JSON.stringify({ response: attestation, label }),
@@ -40,13 +41,13 @@ export async function registerPasskey(label: string): Promise<Result> {
 }
 
 export async function removePasskey(id: string): Promise<Result> {
-  const r = await fetch(`/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const r = await apiFetch(`/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   return { ok: true, value: undefined };
 }
 
 export async function setPassword(password: string, currentPassword?: string): Promise<Result> {
-  const r = await fetch("/me/password", {
+  const r = await apiFetch("/me/password", {
     method: "PUT",
     headers: json,
     body: JSON.stringify({ password, currentPassword }),
@@ -56,7 +57,7 @@ export async function setPassword(password: string, currentPassword?: string): P
 }
 
 export async function removePassword(currentPassword: string): Promise<Result> {
-  const r = await fetch("/me/password", {
+  const r = await apiFetch("/me/password", {
     method: "DELETE",
     headers: json,
     body: JSON.stringify({ currentPassword }),

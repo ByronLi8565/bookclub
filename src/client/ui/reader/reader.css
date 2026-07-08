@@ -10,8 +10,6 @@
 
 .reader-empty {
   margin: auto;
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
   opacity: var(--muted-opacity);
 }
 
@@ -36,33 +34,38 @@
     padding-bottom var(--chrome-collapse-duration) var(--chrome-ease),
     border-bottom-width var(--chrome-collapse-duration) var(--chrome-ease),
     opacity var(--chrome-fade-duration) linear;
-}
 
-.reader-bar .spacer {
-  flex: 1;
-}
+  & .spacer {
+    flex: 1;
+  }
 
-.reader-bar .font-size {
-  min-width: 48px;
-  text-align: center;
-}
+  & .font-size {
+    min-width: 48px;
+    text-align: center;
+  }
 
-.reader-bar .reader-fit {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-}
+  & .reader-fit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
 
-.reader-bar .reader-fit svg {
-  width: 1.15em;
-  height: 1.15em;
-  display: block;
-}
+    & svg {
+      width: 1.15em;
+      height: 1.15em;
+      display: block;
+    }
+  }
 
-.reader-bar .reader-title {
-  font-weight: 700;
-  max-width: 40%;
+  & .reader-title {
+    font-weight: 700;
+    max-width: 40%;
+  }
+
+  & .page-count {
+    font-variant-numeric: tabular-nums;
+    opacity: var(--subtle-opacity);
+  }
 }
 
 .book-menu {
@@ -73,16 +76,16 @@
   flex: 1 1 auto;
   min-width: 0;
   max-width: 40%;
-}
 
-.book-menu .reader-title {
-  flex: 0 1 auto;
-  max-width: none;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: text;
+  & .reader-title {
+    flex: 0 1 auto;
+    max-width: none;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: text;
+  }
 }
 
 .reader-title-edit {
@@ -105,10 +108,10 @@
   color: inherit;
   opacity: var(--subtle-opacity);
   cursor: pointer;
-}
 
-.book-menu-arrow:hover {
-  opacity: 1;
+  &:hover {
+    opacity: 1;
+  }
 }
 
 .book-menu-list {
@@ -138,34 +141,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
 
-/* `:focus` (not `:focus-visible`) so programmatic focus from arrow-key
-   navigation visibly snaps the highlight to the menu item — `:focus-visible`
-   does not match `.focus()` calls in most browsers. */
-.book-menu-item:hover,
-.book-menu-item:focus {
-  background: var(--black);
-  color: var(--white);
-}
+  &:hover,
+  &:focus {
+    background: var(--black);
+    color: var(--white);
+  }
 
-.book-menu-item:focus {
-  outline: none;
-}
+  &:focus {
+    outline: none;
+  }
 
-.book-menu-item.is-active {
-  font-weight: 700;
+  &.is-active {
+    font-weight: 700;
+  }
 }
 
 .book-menu-add {
   border-top: var(--line);
   margin-top: 4px;
   padding-top: 4px;
-}
-
-.reader-bar .page-count {
-  font-variant-numeric: tabular-nums;
-  opacity: var(--subtle-opacity);
 }
 
 .reader-search-input {
@@ -176,10 +171,10 @@
   background: var(--white);
   color: var(--black);
   border: var(--line);
-}
 
-.reader-search-input:focus {
-  outline: none;
+  &:focus {
+    outline: none;
+  }
 }
 
 .reader-search-count {
@@ -199,6 +194,17 @@
   height: 100%;
   min-height: 0;
   position: relative;
+
+  & .loading--reader {
+    z-index: 2;
+  }
+
+  & .reader-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+  }
 }
 
 .reader-snapshot {
@@ -210,24 +216,13 @@
   overflow: hidden;
   background: var(--white);
   pointer-events: none;
-}
 
-.reader-snapshot img {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.reader-surface .loading--reader {
-  z-index: 2;
-}
-
-.reader-surface .reader-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
+  & img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
 }
 
 .reader-page-turn {
@@ -243,14 +238,14 @@
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-}
 
-.reader-page-turn:hover {
-  background: transparent;
-}
+  &:hover {
+    background: transparent;
+  }
 
-.reader-page-turn:focus-visible {
-  outline: none;
+  &:focus-visible {
+    outline: none;
+  }
 }
 
 .reader-page-turn--prev {
@@ -331,135 +326,97 @@
   }
 }
 
-/* The scroller and page are the non-text "frame". Keeping them unselectable
-   confines native selection to the text layer alone, so a long-press or drag
-   can never escalate into selecting the whole reader (the canvas, overlays, and
-   empty margins). This mirrors the isolation an EPUB gets for free from its
-   iframe. Only .textLayer (and its spans) opt back in to user-select: text. */
 .pdf-scroller {
   position: absolute;
   inset: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  /* Allow tap-and-drag panning in both axes (so a zoomed-in page can be
-     dragged around), but NOT browser pinch-zoom — we handle pinch ourselves to
-     zoom the PDF content, not the whole page/viewport. */
   touch-action: pan-x pan-y;
   scrollbar-width: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
-}
 
-.pdf-scroller::-webkit-scrollbar {
-  display: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .pdf-page {
   position: relative;
-  /* Row of one or two page panes (book-style spread). The gutter between two
-     pages is supplied via the --pdf-spread-gutter var set per render. */
   display: flex;
   flex-direction: row;
   align-items: flex-start;
   gap: var(--pdf-spread-gutter, 0px);
   -webkit-user-select: none;
   user-select: none;
-}
 
-/* Each pane is the positioning context for one page's canvas, text layer, and
-   highlight/selection overlays — all sized in fractions of *this* pane's box,
-   so the existing page-relative rect math holds for either page in a spread. */
-.pdf-pane {
-  position: relative;
-  flex: none;
-  /* In a spread the pane is cropped to the page's text box; `inner` (the full
-     page) is offset inside it, so clip the overflow. */
-  overflow: hidden;
-}
+  & canvas {
+    touch-action: pan-x pan-y;
+  }
 
-.pdf-pane-inner {
-  position: absolute;
-}
+  & .textLayer {
+    position: absolute;
+    inset: 0;
+    overflow: clip;
+    opacity: 1;
+    line-height: 1;
+    text-align: initial;
+    forced-color-adjust: none;
+    transform-origin: 0 0;
+    z-index: 2;
+    pointer-events: auto;
+    touch-action: pan-x pan-y;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+    user-select: text;
+    --min-font-size: 1;
+    --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+    --min-font-size-inv: calc(1 / var(--min-font-size));
 
-.pdf-page canvas {
-  /* Drag to pan in both axes; never let the browser pinch-zoom the viewport —
-     we handle pinch ourselves to zoom the PDF content. touch-action is not
-     inherited, so it must be set on the actual touched elements, not just the
-     scroller. */
-  touch-action: pan-x pan-y;
-}
+    & :is(span, br) {
+      position: absolute;
+      white-space: pre;
+      color: transparent;
+      transform-origin: 0% 0%;
+      cursor: text;
+      -webkit-user-select: text;
+      -webkit-touch-callout: default;
+      user-select: text;
+    }
 
-.pdf-page .textLayer {
-  position: absolute;
-  inset: 0;
-  overflow: clip;
-  opacity: 1;
-  line-height: 1;
-  text-align: initial;
-  forced-color-adjust: none;
-  transform-origin: 0 0;
-  z-index: 2;
-  pointer-events: auto;
-  touch-action: pan-x pan-y;
-  -webkit-user-select: text;
-  -webkit-touch-callout: default;
-  user-select: text;
-  --min-font-size: 1;
-  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
-  --min-font-size-inv: calc(1 / var(--min-font-size));
-}
+    & > :not(.markedContent),
+    & .markedContent span:not(.markedContent) {
+      z-index: 1;
+      --font-height: 0;
+      --scale-x: 1;
+      --rotate: 0deg;
+      font-size: calc(var(--text-scale-factor) * var(--font-height));
+      transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+    }
 
-.pdf-page .textLayer :is(span, br) {
-  position: absolute;
-  white-space: pre;
-  color: transparent;
-  transform-origin: 0% 0%;
-  cursor: text;
-  -webkit-user-select: text;
-  -webkit-touch-callout: default;
-  user-select: text;
-}
+    & .markedContent {
+      display: contents;
+    }
 
-.pdf-page .textLayer > :not(.markedContent),
-.pdf-page .textLayer .markedContent span:not(.markedContent) {
-  z-index: 1;
-  --font-height: 0;
-  --scale-x: 1;
-  --rotate: 0deg;
-  font-size: calc(var(--text-scale-factor) * var(--font-height));
-  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
-}
+    & .endOfContent {
+      display: block;
+      position: absolute;
+      inset: 100% 0 0;
+      z-index: 0;
+      cursor: default;
+      -webkit-user-select: none;
+      user-select: none;
+    }
 
-.pdf-page .textLayer .markedContent {
-  display: contents;
-}
+    &.selecting .endOfContent {
+      top: 0;
+    }
 
-/* pdf.js's selection sink. The builder parks this element below the text and,
-   during a selection, stretches it to the layer's size and moves it next to the
-   selection anchor. That absorbs the selection so dragging across absolutely
-   positioned spans extends word-by-word instead of grabbing the entire page. */
-.pdf-page .textLayer .endOfContent {
-  display: block;
-  position: absolute;
-  inset: 100% 0 0;
-  z-index: 0;
-  cursor: default;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.pdf-page .textLayer.selecting .endOfContent {
-  top: 0;
-}
-
-/* Native selection is rendered invisibly; we paint our own preview overlay
-   (.pdf-selection) from word-confined rects instead. pdf.js's text spans are
-   absolutely positioned and don't follow visual order, so the browser's own
-   ::selection paints stray rectangles in the margins. The DOM selection still
-   drives word-by-word extension — only its rendering is suppressed. */
-.pdf-page .textLayer ::selection {
-  background: transparent;
+    & ::selection {
+      background: transparent;
+    }
+  }
 }
 
 .pdf-highlights,
@@ -497,20 +454,17 @@
   z-index: 10;
   display: flex;
   box-shadow: var(--shadow-sm);
+
+  & .add-note + .add-note {
+    border-left: none;
+  }
 }
 
 .add-note {
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
   font-size: var(--font-xs);
   min-height: var(--control-min);
   padding: 0 16px;
   background: var(--white);
   border: var(--line);
   touch-action: manipulation;
-}
-
-/* Two actions read as one segmented control: share the seam between them. */
-.selection-actions .add-note + .add-note {
-  border-left: none;
 }

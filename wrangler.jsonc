@@ -33,6 +33,7 @@
   // current (alchemy-set) migration tag.
   "r2_buckets": [
     { "binding": "BOOKS", "bucket_name": "bookclub-books" },
+    { "binding": "IMAGES", "bucket_name": "bookclub-images" },
     { "binding": "BACKUPS", "bucket_name": "bookclub-do-backups" },
   ],
   "triggers": { "crons": ["0 */6 * * *"] },

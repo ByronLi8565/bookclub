@@ -20,37 +20,35 @@
     15px 15px 0 0 var(--white),
     15px 15px 0 3px var(--black),
     20px 20px 0 0 var(--black);
-}
 
-.home-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  border-left: var(--line);
-  transform: translateX(-50%);
-}
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    border-left: var(--line);
+    transform: translateX(-50%);
+  }
 
-.home-card::after {
-  content: "";
-  position: absolute;
-  top: -42px;
-  left: 90%;
-  width: 36px;
-  height: 70px;
-  background: var(--red);
-  border: var(--line);
-  border-radius: 4px 4px 8px 8px;
-  z-index: -1;
+  &::after {
+    content: "";
+    position: absolute;
+    top: -42px;
+    left: 90%;
+    width: 36px;
+    height: 70px;
+    background: var(--red);
+    border: var(--line);
+    border-radius: 4px 4px 8px 8px;
+    z-index: -1;
+  }
 }
 
 .home-corner {
   position: absolute;
 }
 
-/* Top-right controls, mirroring an individual club page's header: a square
-   settings icon next to the round info button, anchored to the screen corner. */
 .home-top-buttons {
   position: fixed;
   top: 28px;
@@ -77,12 +75,12 @@
 .home-settings-button {
   width: 32px;
   height: 32px;
-}
 
-.home-settings-button img {
-  width: 16px;
-  height: 16px;
-  display: block;
+  & img {
+    width: 16px;
+    height: 16px;
+    display: block;
+  }
 }
 
 .home-corner--login {
@@ -139,11 +137,11 @@
   background: var(--black);
   color: var(--white);
   border: var(--line);
-}
 
-.home-back:hover {
-  background: var(--white);
-  color: var(--black);
+  &:hover {
+    background: var(--white);
+    color: var(--black);
+  }
 }
 
 .home-upload-link {
@@ -157,15 +155,15 @@
 .home-create {
   display: flex;
   align-items: stretch;
-}
 
-.home-create input {
-  font: inherit;
-  border: var(--line);
-  border-radius: 0;
-  outline: none;
-  padding: 4px 10px;
-  background: var(--white);
+  & input {
+    font: inherit;
+    border: var(--line);
+    border-radius: 0;
+    outline: none;
+    padding: 4px 10px;
+    background: var(--white);
+  }
 }
 
 .home-create-confirm {
@@ -180,17 +178,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-}
 
-.home-create-confirm:hover {
-  background: var(--white);
-  color: var(--black);
-}
+  &:hover {
+    background: var(--white);
+    color: var(--black);
+  }
 
-.home-create-confirm:disabled,
-.home-create-confirm:disabled:hover {
-  background: var(--black);
-  color: var(--white);
+  &:disabled,
+  &:disabled:hover {
+    background: var(--black);
+    color: var(--white);
+  }
 }
 
 .home-clubs {
@@ -204,12 +202,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
 
-.home-club-list li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  & li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
 }
 
 .home-existing-label {
@@ -227,10 +225,10 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-}
 
-.home-info-cards.note-panel {
-  padding: 16px;
+  &.note-panel {
+    padding: 16px;
+  }
 }
 
 .home-info-empty {

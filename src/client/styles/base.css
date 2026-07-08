@@ -119,6 +119,11 @@ button:disabled:hover {
   white-space: nowrap;
 }
 
+.label {
+  text-transform: uppercase;
+  letter-spacing: var(--letter-label);
+}
+
 .app {
   display: flex;
   flex-direction: column;

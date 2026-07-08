@@ -4,17 +4,17 @@ import {
   type PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
 import { parseHttpError } from "../http.ts";
+import { apiFetch, setSessionToken } from "../logic/net/api.ts";
 import { isOnline, subscribeOnline } from "../logic/net/online.ts";
 import { readLocal, removeLocal, writeLocal } from "../logic/storage.ts";
 
-// Last known identity, so an offline reload restores the signed-in UI instead
-// of falsely showing a signed-out state. Only a definitive 401 clears it.
 const SESSION_CACHE_KEY = "bookclub.session.user";
 
 export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  avatarImageId?: string;
 }
 
 export type SessionStatus = "loading" | "anon" | "authed";
@@ -60,12 +60,9 @@ function ensureSessionLoaded(): void {
   revalidateSession();
 }
 
-// Confirm identity with the server. A successful response is authoritative and
-// refreshes the cache; a reachable-but-unauthenticated response (401/etc.)
-// definitively signs the user out; a *network* failure falls back to the cached
-// identity so offline users stay signed in and can keep working locally.
+// Network failure falls back to the cached identity; any server response is authoritative.
 function revalidateSession(): void {
-  void fetch("/auth/me")
+  void apiFetch("/auth/me")
     .then(async (r) => {
       if (r.ok) {
         const user = ((await r.json()) as { user: SessionUser }).user;
@@ -84,8 +81,6 @@ function revalidateSession(): void {
     });
 }
 
-// When connectivity returns, re-confirm identity so a possibly-expired session
-// is reconciled promptly rather than lingering as an optimistic cached login.
 subscribeOnline(() => {
   if (sessionStarted && isOnline()) revalidateSession();
 });
@@ -104,7 +99,7 @@ export function useSession(): Session {
   );
 
   const startLogin = useCallback(async (email: string): Promise<StartResult> => {
-    const r = await fetch("/auth/start", {
+    const r = await apiFetch("/auth/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -112,11 +107,13 @@ export function useSession(): Session {
     if (!r.ok) return { ok: false, error: await parseHttpError(r) };
 
     if (r.status !== 204) {
-      const body = (await r.json().catch(() => null)) as {
+      const body = (await r.json()) as {
         devSignedIn?: boolean;
         user?: SessionUser;
-      } | null;
+        token?: string;
+      };
       if (body?.devSignedIn && body.user) {
+        await setSessionToken(body.token ?? null);
         cacheUser(body.user);
         setSessionSnapshot({ user: body.user, status: "authed" });
         return { ok: true, devSignedIn: true };
@@ -127,13 +124,14 @@ export function useSession(): Session {
 
   const verify = useCallback(
     async (email: string, code: string, displayName?: string): Promise<ActionResult> => {
-      const r = await fetch("/auth/verify", {
+      const r = await apiFetch("/auth/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, code, displayName }),
       });
       if (!r.ok) return { ok: false, error: await parseHttpError(r) };
-      const body = (await r.json()) as { user: SessionUser };
+      const body = (await r.json()) as { user: SessionUser; token?: string };
+      await setSessionToken(body.token ?? null);
       cacheUser(body.user);
       setSessionSnapshot({ user: body.user, status: "authed" });
       return { ok: true };
@@ -143,13 +141,14 @@ export function useSession(): Session {
 
   const loginWithPassword = useCallback(
     async (email: string, password: string): Promise<ActionResult> => {
-      const r = await fetch("/auth/password", {
+      const r = await apiFetch("/auth/password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
       if (!r.ok) return { ok: false, error: await parseHttpError(r) };
-      const body = (await r.json()) as { user: SessionUser };
+      const body = (await r.json()) as { user: SessionUser; token?: string };
+      await setSessionToken(body.token ?? null);
       cacheUser(body.user);
       setSessionSnapshot({ user: body.user, status: "authed" });
       return { ok: true };
@@ -157,11 +156,8 @@ export function useSession(): Session {
     [],
   );
 
-  // Email-first passkey login: fetch this account's assertion options, run the
-  // WebAuthn ceremony, then verify. A thrown ceremony means the user dismissed
-  // the prompt (or no authenticator) — reported so the UI can fall back.
   const passkeyLogin = useCallback(async (email: string): Promise<ActionResult> => {
-    const optionsRes = await fetch("/auth/passkey/login/options", {
+    const optionsRes = await apiFetch("/auth/passkey/login/options", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -176,20 +172,22 @@ export function useSession(): Session {
       return { ok: false, error: "passkey_cancelled" };
     }
 
-    const verifyRes = await fetch("/auth/passkey/login/verify", {
+    const verifyRes = await apiFetch("/auth/passkey/login/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ response: assertion }),
     });
     if (!verifyRes.ok) return { ok: false, error: await parseHttpError(verifyRes) };
-    const body = (await verifyRes.json()) as { user: SessionUser };
+    const body = (await verifyRes.json()) as { user: SessionUser; token?: string };
+    await setSessionToken(body.token ?? null);
     cacheUser(body.user);
     setSessionSnapshot({ user: body.user, status: "authed" });
     return { ok: true };
   }, []);
 
   const signOut = useCallback(async (): Promise<void> => {
-    await fetch("/auth/signout", { method: "POST" }).catch(() => {});
+    await apiFetch("/auth/signout", { method: "POST" });
+    await setSessionToken(null);
     cacheUser(null);
     setSessionSnapshot({ user: null, status: "anon" });
   }, []);

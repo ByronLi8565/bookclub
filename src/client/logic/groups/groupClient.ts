@@ -1,13 +1,15 @@
 import * as Schema from "effect/Schema";
-import type {
+import { apiFetch } from "../net/api.ts";
+import {
   GroupRole,
-  GroupSummary,
-  Membership,
-  RosterEntry,
+  type GroupSummary,
+  type Membership,
+  type RosterEntry,
 } from "../../../shared/types/groups.ts";
 import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../../shared/types/sources.ts";
 import { parseHttpError } from "../../http.ts";
+import { decode } from "../../../shared/schema.ts";
 
 export type {
   GroupRole,
@@ -24,7 +26,12 @@ export interface FetchedSource {
   file: File;
 }
 
-const GroupRole = Schema.Union([Schema.Literal("owner"), Schema.Literal("member")]);
+const GroupRoleSchema = Schema.Union([
+  Schema.Literal(GroupRole.Owner),
+  Schema.Literal(GroupRole.Admin),
+  Schema.Literal(GroupRole.Member),
+  Schema.Literal(GroupRole.Visitor),
+]);
 
 const SourceMeta = Schema.Struct({
   kind: Schema.Union([Schema.Literal("epub"), Schema.Literal("pdf")]),
@@ -32,6 +39,7 @@ const SourceMeta = Schema.Struct({
   size: Schema.Number,
   title: Schema.optionalKey(Schema.NullOr(Schema.String)),
   author: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  addedBy: Schema.String,
 });
 
 const GroupSummary = Schema.Struct({
@@ -46,13 +54,16 @@ const GroupSummary = Schema.Struct({
   memberCount: Schema.Number,
 });
 
-const Membership = Schema.Struct({ isMember: Schema.Boolean, role: Schema.NullOr(GroupRole) });
+const Membership = Schema.Struct({
+  isMember: Schema.Boolean,
+  role: Schema.NullOr(GroupRoleSchema),
+});
 
 const RosterEntry = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   email: Schema.String,
-  role: GroupRole,
+  role: GroupRoleSchema,
 });
 
 const ErrorBody = Schema.Struct({
@@ -60,7 +71,7 @@ const ErrorBody = Schema.Struct({
   reason: Schema.optionalKey(Schema.String),
 });
 
-const GroupsEnvelope = Schema.Struct({ groups: Schema.Array(Schema.Unknown) });
+const GroupsEnvelope = Schema.Struct({ groups: Schema.mutable(Schema.Array(GroupSummary)) });
 
 const GroupResponse = Schema.Struct({ group: GroupSummary });
 
@@ -71,38 +82,81 @@ const FetchGroupResponse = Schema.Struct({
 });
 
 const InviteLinkResponse = Schema.Struct({ token: Schema.String, link: Schema.String });
+const MembersResponse = Schema.Struct({ members: Schema.mutable(Schema.Array(RosterEntry)) });
 const UploadBookResponse = Schema.Struct({ hash: Schema.String });
+const UploadImageResponse = Schema.Struct({
+  id: Schema.String,
+  contentType: Schema.String,
+  size: Schema.Number,
+});
+
+const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
+
+type ImageUploadKind = "note" | "avatar";
+
+const IMAGE_UPLOAD_PRESETS: Record<ImageUploadKind, { edges: number[]; qualities: number[] }> = {
+  note: { edges: [1600, 1400, 1200, 960], qualities: [0.78, 0.68, 0.58] },
+  avatar: { edges: [768, 512, 384], qualities: [0.78, 0.68, 0.58] },
+};
+
+async function compressedImage(file: File, kind: ImageUploadKind): Promise<ApiResult<File>> {
+  if (!file.type.startsWith("image/")) return { ok: false, error: "unsupported_type" };
+  if (file.type === "image/gif") {
+    return file.size <= MAX_IMAGE_UPLOAD_BYTES
+      ? { ok: true, value: file }
+      : { ok: false, error: "too_large" };
+  }
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { ok: false, error: "image_processing_failed" };
+    let smallest: File | null = file.size <= MAX_IMAGE_UPLOAD_BYTES ? file : null;
+    const preset = IMAGE_UPLOAD_PRESETS[kind];
+    for (const edge of preset.edges) {
+      const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+      const width = Math.max(1, Math.round(bitmap.width * scale));
+      const height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.width = width;
+      canvas.height = height;
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      for (const quality of preset.qualities) {
+        const blob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob(resolve, "image/webp", quality);
+        });
+        if (!blob) continue;
+        const compressed = new File([blob], file.name.replace(/\.[^.]*$/u, ".webp"), {
+          type: blob.type,
+        });
+        if (!smallest || compressed.size < smallest.size) smallest = compressed;
+        if (compressed.size <= MAX_IMAGE_UPLOAD_BYTES) return { ok: true, value: compressed };
+      }
+    }
+    return smallest && smallest.size <= MAX_IMAGE_UPLOAD_BYTES
+      ? { ok: true, value: smallest }
+      : { ok: false, error: "too_large" };
+  } finally {
+    bitmap.close();
+  }
+}
 
 async function parseJson<S extends Schema.Top>(
   response: Response,
   schema: S,
 ): Promise<Schema.Schema.Type<S> | null> {
-  try {
-    return Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown, never>)(
-      await response.json(),
-    ) as Schema.Schema.Type<S>;
-  } catch {
-    return null;
-  }
+  return decode(schema, await response.json());
 }
 
 export async function listMyGroups(): Promise<ApiResult<GroupSummary[]>> {
-  const r = await fetch("/groups");
+  const r = await apiFetch("/groups");
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const envelope = await parseJson(r, GroupsEnvelope);
   if (!envelope) return { ok: false, error: "bad_response" };
-  const decode = Schema.decodeUnknownSync(GroupSummary);
-  const groups: GroupSummary[] = [];
-  for (const raw of envelope.groups) {
-    try {
-      groups.push(decode(raw));
-    } catch {}
-  }
-  return { ok: true, value: groups };
+  return { ok: true, value: envelope.groups };
 }
 
 export async function createGroup(displayName: string): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch("/groups", {
+  const r = await apiFetch("/groups", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ displayName }),
@@ -132,7 +186,7 @@ export type FetchGroupOutcome =
 export async function fetchGroup(groupRef: string): Promise<FetchGroupOutcome> {
   let r: Response;
   try {
-    r = await fetch(`/groups/${groupRef}`);
+    r = await apiFetch(`/groups/${groupRef}`);
   } catch {
     return { status: "error" };
   }
@@ -146,7 +200,7 @@ export async function redeemInvite(
   groupRef: string,
   token: string,
 ): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${groupRef}/join`, {
+  const r = await apiFetch(`/groups/${groupRef}/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
@@ -157,7 +211,7 @@ export async function redeemInvite(
 }
 
 export async function inviteToGroup(groupRef: string, email: string): Promise<ApiResult<null>> {
-  const r = await fetch(`/groups/${groupRef}/invite`, {
+  const r = await apiFetch(`/groups/${groupRef}/invite`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -169,7 +223,7 @@ export async function getInviteLink(
   groupRef: string,
   rotate = false,
 ): Promise<ApiResult<{ token: string; link: string }>> {
-  const r = await fetch(`/groups/${groupRef}/invite-link${rotate ? "?rotate=1" : ""}`, {
+  const r = await apiFetch(`/groups/${groupRef}/invite-link${rotate ? "?rotate=1" : ""}`, {
     method: "POST",
   });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
@@ -177,11 +231,26 @@ export async function getInviteLink(
   return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
 }
 
+export async function changeMemberRole(
+  groupRef: string,
+  memberId: string,
+  role: GroupRole,
+): Promise<ApiResult<RosterEntry[]>> {
+  const r = await apiFetch(`/groups/${groupRef}/members/${encodeURIComponent(memberId)}/role`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, MembersResponse);
+  return body ? { ok: true, value: body.members } : { ok: false, error: "bad_response" };
+}
+
 export async function renameGroup(
   groupRef: string,
   title: string,
 ): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${groupRef}/title`, {
+  const r = await apiFetch(`/groups/${groupRef}/title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -196,7 +265,7 @@ export async function renameBook(
   sourceId: string,
   title: string,
 ): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${groupRef}/book/title`, {
+  const r = await apiFetch(`/groups/${groupRef}/book/title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sourceId, title }),
@@ -211,7 +280,7 @@ export async function resolveBookTitle(
   sourceId: string,
   title: string,
 ): Promise<ApiResult<GroupSummary>> {
-  const r = await fetch(`/groups/${groupRef}/book/parsed-title`, {
+  const r = await apiFetch(`/groups/${groupRef}/book/parsed-title`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sourceId, title }),
@@ -234,10 +303,59 @@ export async function uploadSource(
   };
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
   if (author) headers["X-Source-Author"] = encodeURIComponent(author);
-  const r = await fetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
+  const r = await apiFetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
+}
+
+export async function deleteBook(
+  groupRef: string,
+  sourceId: string,
+): Promise<ApiResult<GroupSummary>> {
+  const r = await apiFetch(`/groups/${groupRef}/book/${encodeURIComponent(sourceId)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, GroupResponse);
+  return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
+}
+
+export async function deleteGroup(groupRef: string): Promise<ApiResult<null>> {
+  const r = await apiFetch(`/groups/${groupRef}`, { method: "DELETE" });
+  return r.ok ? { ok: true, value: null } : { ok: false, error: await parseHttpError(r) };
+}
+
+export async function uploadNoteImage(groupRef: string, file: File): Promise<ApiResult<string>> {
+  const compressed = await compressedImage(file, "note");
+  if (!compressed.ok) return compressed;
+  const image = compressed.value;
+  const r = await apiFetch(`/groups/${groupRef}/images`, {
+    method: "POST",
+    headers: { "Content-Type": image.type || "application/octet-stream" },
+    body: image,
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, UploadImageResponse);
+  return body ? { ok: true, value: body.id } : { ok: false, error: "bad_response" };
+}
+
+export async function uploadAvatarImage(file: File): Promise<ApiResult<string>> {
+  const compressed = await compressedImage(file, "avatar");
+  if (!compressed.ok) return compressed;
+  const image = compressed.value;
+  const r = await apiFetch("/me/avatar", {
+    method: "PUT",
+    headers: { "Content-Type": image.type || "application/octet-stream" },
+    body: image,
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, UploadImageResponse);
+  return body ? { ok: true, value: body.id } : { ok: false, error: "bad_response" };
+}
+
+export function avatarImagePath(userId: string, imageId: string): string {
+  return `/users/${encodeURIComponent(userId)}/avatar/${encodeURIComponent(imageId)}`;
 }
 
 export async function fetchSource(
@@ -245,7 +363,7 @@ export async function fetchSource(
   requestId?: string,
 ): Promise<FetchedSource | null> {
   const query = requestId ? `?sourceId=${encodeURIComponent(requestId)}` : "";
-  const r = await fetch(`/groups/${groupRef}/book${query}`);
+  const r = await apiFetch(`/groups/${groupRef}/book${query}`);
   if (!r.ok) return null;
   const sourceId = r.headers.get("X-Source-Id");
   const contentType = r.headers.get("Content-Type") ?? EPUB_CONTENT_TYPE;

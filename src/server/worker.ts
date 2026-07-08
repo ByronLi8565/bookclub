@@ -4,7 +4,7 @@ import type { Env } from "./env.ts";
 import { registerGroupRoutes } from "./routes/groupRoutes.ts";
 import { registerUserRoutes } from "./routes/userRoutes.ts";
 import { registerAuthRoutes } from "./routes/authRoutes.ts";
-import { clearedCookie, currentIdentity, mintSessionCookie, publicUser } from "./auth/cookies.ts";
+import { clearedCookie, currentIdentity, publicUser, sessionCredentials } from "./auth/cookies.ts";
 import { normalizeEmail } from "../shared/email.ts";
 import { readJson } from "./http.ts";
 import { backupAll, listBackups, pruneBackups, restoreFrom } from "./backup.ts";
@@ -16,6 +16,34 @@ export { GroupAgent } from "./state/GroupAgent.ts";
 export { GroupRegistry } from "./state/GroupRegistry.ts";
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Native uses bearer auth from distinct webview origins; don't allow credentials.
+const NATIVE_ORIGINS = new Set(["capacitor://localhost", "https://localhost", "http://localhost"]);
+
+app.use("*", async (c, next) => {
+  const origin = c.req.header("Origin");
+  const allowed = origin !== undefined && NATIVE_ORIGINS.has(origin);
+
+  if (c.req.method === "OPTIONS" && allowed) {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Max-Age": "86400",
+        Vary: "Origin",
+      },
+    });
+  }
+
+  await next();
+
+  if (allowed) {
+    c.res.headers.set("Access-Control-Allow-Origin", origin);
+    c.res.headers.append("Vary", "Origin");
+  }
+});
 
 function isDevAuth(env: Env): boolean {
   return !env.EMAIL || !env.EMAIL_FROM;
@@ -30,8 +58,9 @@ app.post("/auth/start", async (c) => {
 
   if (isDevAuth(c.env)) {
     const user = await auth.devLogin(email);
-    c.header("Set-Cookie", await mintSessionCookie(c.env, user));
-    return c.json({ devSignedIn: true, user: publicUser(user) });
+    const { cookie, token } = await sessionCredentials(c.env, user);
+    c.header("Set-Cookie", cookie);
+    return c.json({ devSignedIn: true, user: publicUser(user), token });
   }
 
   const sent = await auth.startLogin(email);
@@ -50,8 +79,9 @@ app.post("/auth/verify", async (c) => {
   const result = await auth.verifyLogin(email, code, displayName);
   if (!result.ok) return c.json({ error: result.reason }, 400);
 
-  c.header("Set-Cookie", await mintSessionCookie(c.env, result.user));
-  return c.json({ user: publicUser(result.user) });
+  const { cookie, token } = await sessionCredentials(c.env, result.user);
+  c.header("Set-Cookie", cookie);
+  return c.json({ user: publicUser(result.user), token });
 });
 
 app.post("/auth/signout", (c) => {
@@ -69,9 +99,6 @@ registerAuthRoutes(app);
 registerUserRoutes(app);
 registerGroupRoutes(app);
 
-// Admin endpoints for manual Durable Object state backup/restore. Authorized
-// either by a machine bearer token (ADMIN_API_TOKEN, used by deploy/CI) or by
-// the configured ADMIN_EMAIL signed-session identity (a logged-in browser).
 async function isAdmin(c: Context<{ Bindings: Env }>): Promise<boolean> {
   const token = c.env.ADMIN_API_TOKEN;
   if (token) {
@@ -136,10 +163,7 @@ app.all("*", async (c) => {
 
   const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
 
-  // Hashed build assets live under /assets/. When one is missing (e.g. an old
-  // client requesting a chunk from a superseded deploy), the SPA fallback would
-  // otherwise hand back index.html as text/html — which browsers reject with a
-  // MIME-type error when loading it as a module. Return an honest 404 instead.
+  // Missing hashed assets must 404 instead of receiving the SPA fallback HTML.
   const pathname = new URL(c.req.url).pathname;
   if (
     pathname.startsWith("/assets/") &&
@@ -154,7 +178,6 @@ app.all("*", async (c) => {
 export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> =>
     app.fetch(request, env, ctx),
-  // Scheduled (cron) Durable Object state backup to R2.
   scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext): void => {
     ctx.waitUntil(
       backupAll(env)

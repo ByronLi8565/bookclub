@@ -39,7 +39,7 @@ export function PresenceModal({
     <Modal title="online now" className="modal--invite" onClose={onClose}>
       <div className="modal-body">
         <div className="invite-people">
-          <p className="invite-people-head">
+          <p className="invite-people-head label">
             {onlineCount} of {people.length} online
           </p>
           <ul className="invite-people-list">
@@ -53,7 +53,7 @@ export function PresenceModal({
                   <span className="invite-person-name truncate">{p.name}</span>
                   {p.email && <span className="invite-person-email truncate">{p.email}</span>}
                 </span>
-                <span className="invite-person-role">{p.isOnline ? p.role : "offline"}</span>
+                <span className="invite-person-role label">{p.isOnline ? p.role : "offline"}</span>
               </li>
             ))}
           </ul>

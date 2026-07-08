@@ -35,11 +35,11 @@
   cursor: col-resize;
   flex: 0 0 auto;
   touch-action: none;
-}
 
-.split-divider:hover {
-  border-left-color: var(--black);
-  box-shadow: 0 0 0 2px var(--black);
+  &:hover {
+    border-left-color: var(--black);
+    box-shadow: 0 0 0 2px var(--black);
+  }
 }
 
 .split-overlay {
@@ -77,31 +77,31 @@
   border-bottom: var(--line);
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--black);
-}
 
-.pager-tabs button {
-  flex: 1;
-  border: none;
-  min-height: var(--control-min);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
-  background: var(--white);
-  color: var(--black);
-}
+  & button {
+    flex: 1;
+    border: none;
+    min-height: var(--control-min);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-label);
+    background: var(--white);
+    color: var(--black);
+  }
 
-.pager-tabs button[aria-pressed="true"] {
-  background: var(--black);
-  color: var(--white);
-}
+  & button[aria-pressed="true"] {
+    background: var(--black);
+    color: var(--white);
+  }
 
-.pager-tabs .pager-add-note {
-  background: var(--white);
-  color: var(--black);
-  font-weight: 700;
-}
+  & .pager-add-note {
+    background: var(--white);
+    color: var(--black);
+    font-weight: 700;
+  }
 
-.pager-tabs .pager-highlight {
-  background: var(--highlight);
+  & .pager-highlight {
+    background: var(--highlight);
+  }
 }
 
 .loading {
@@ -123,14 +123,14 @@
 
 .loading-dots span {
   animation: loading-dot 1.2s steps(2, end) infinite;
-}
 
-.loading-dots span:nth-child(2) {
-  animation-delay: 0.2s;
-}
+  &:nth-child(2) {
+    animation-delay: 0.2s;
+  }
 
-.loading-dots span:nth-child(3) {
-  animation-delay: 0.4s;
+  &:nth-child(3) {
+    animation-delay: 0.4s;
+  }
 }
 
 .loading-progress {
@@ -207,10 +207,10 @@
 
 .login-link {
   text-decoration: underline;
-}
 
-.login-link:hover {
-  text-decoration: none;
+  &:hover {
+    text-decoration: none;
+  }
 }
 
 .login-error {
@@ -224,10 +224,10 @@
   margin-top: 12px;
   font-size: var(--font-xs);
   text-decoration: underline;
-}
 
-.login-passkey:hover:not(:disabled) {
-  text-decoration: none;
+  &:hover:not(:disabled) {
+    text-decoration: none;
+  }
 }
 
 .modal-backdrop {
@@ -251,9 +251,6 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* This wrapper only exists to stop backdrop-dismiss clicks; it must not break
-   the modal's flex column, so its children lay out as if direct children of
-   .modal. That lets .home-info-panel bound its scroll region by max-height. */
 .modal-inner {
   display: contents;
 }
@@ -262,42 +259,42 @@
   display: flex;
   align-items: stretch;
   border-bottom: var(--line);
-}
 
-.modal-head strong {
-  flex: 1;
-  padding: 8px 12px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
-}
+  & strong {
+    flex: 1;
+    padding: 8px 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: var(--letter-label);
+  }
 
-.modal-head button {
-  border: none;
-  border-left: var(--line);
-  padding: 0 12px;
+  & button {
+    border: none;
+    border-left: var(--line);
+    padding: 0 12px;
+  }
 }
 
 .modal-body {
   padding: 16px;
-}
 
-.modal-body form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 20px;
-}
+  & form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
 
-.modal-body input {
-  font: inherit;
-  border: var(--line);
-  padding: 8px 10px;
-  width: 100%;
-}
+  & input {
+    font: inherit;
+    border: var(--line);
+    padding: 8px 10px;
+    width: 100%;
+  }
 
-.modal-body .primary {
-  font-weight: 700;
+  & .primary {
+    font-weight: 700;
+  }
 }
 
 .modal-note {
@@ -334,11 +331,11 @@
   border: 3px dashed var(--black);
   text-align: center;
   cursor: pointer;
-}
 
-.upload-drop.is-dragging {
-  background: var(--highlight);
-  opacity: var(--highlight-opacity);
+  &.is-dragging {
+    background: var(--highlight);
+    opacity: var(--highlight-opacity);
+  }
 }
 
 .upload-drop-icon {
@@ -399,16 +396,16 @@
   padding: 8px 2px;
   border-bottom: var(--line-thin);
   font-size: var(--font-sm);
-}
 
-.upload-info-row dt {
-  opacity: var(--subtle-opacity);
-}
+  & dt {
+    opacity: var(--subtle-opacity);
+  }
 
-.upload-info-row dd {
-  margin: 0;
-  text-align: right;
-  word-break: break-word;
+  & dd {
+    margin: 0;
+    text-align: right;
+    word-break: break-word;
+  }
 }
 
 .upload-info-edit {
@@ -446,11 +443,11 @@
   border: var(--line);
   padding: 8px 20px;
   box-shadow: var(--shadow-sm);
-}
 
-.upload-submit:disabled {
-  opacity: var(--muted-opacity);
-  box-shadow: none;
+  &:disabled {
+    opacity: var(--muted-opacity);
+    box-shadow: none;
+  }
 }
 
 .offline-banner {

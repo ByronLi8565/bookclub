@@ -93,11 +93,15 @@ export type NoteOp =
   | { opId: string; kind: "remove"; noteId: string; at: string }
   | { opId: string; kind: "rebind"; noteId: string; highlightId: string; anchor: HighlightAnchor };
 
+export const NoteRejectionReason = { Forbidden: "forbidden", Gone: "gone" } as const;
+
+export type NoteRejectionReason = (typeof NoteRejectionReason)[keyof typeof NoteRejectionReason];
+
 export interface RejectedOp {
   opId: string;
   // Why the server refused the op. These are surfaced to the author rather than
   // silently dropped, so authored content never disappears without explanation.
-  reason: "forbidden" | "gone";
+  reason: NoteRejectionReason;
 }
 
 export interface ApplyOpsResult {

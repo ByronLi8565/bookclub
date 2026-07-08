@@ -1,6 +1,7 @@
 import { fetchSource, uploadSource, type ApiResult, type GroupSummary } from "./groupClient.ts";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
-import { getCachedSource, putCachedSource } from "./sourceCache.ts";
+import { deleteCachedSource, getCachedSource, putCachedSource } from "./sourceCache.ts";
+import { isNative } from "../net/api.ts";
 import { sourceById, sourceRefById } from "../../../shared/sources.ts";
 import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { sourceKindFor, type SourceSummary } from "../../../shared/types/sources.ts";
@@ -62,6 +63,38 @@ export async function cachedSourceSize(sourceId: string): Promise<number | null>
   return (await getCachedSource(sourceId))?.size ?? null;
 }
 
+export async function ensureSourceCached(groupRef: string, sourceId: string): Promise<boolean> {
+  if (await getCachedSource(sourceId)) return true;
+  const fetched = await fetchSource(groupRef, sourceId).catch(() => null);
+  if (!fetched) return false;
+  const id = fetched.sourceId ?? sourceId;
+  await putCachedSource(id, fetched.file);
+  return true;
+}
+
+export interface OfflineProgress {
+  done: number;
+  total: number;
+}
+
+export async function downloadGroupForOffline(
+  group: GroupSummary,
+  onProgress?: (progress: OfflineProgress) => void,
+): Promise<OfflineProgress> {
+  const ref = groupUrlName(group);
+  const total = group.sources.length;
+  let done = 0;
+  for (const sourceId of group.sources) {
+    if (await ensureSourceCached(ref, sourceId)) done++;
+    onProgress?.({ done, total });
+  }
+  return { done, total };
+}
+
+export async function removeDownloadedSource(sourceId: string): Promise<void> {
+  await deleteCachedSource(sourceId);
+}
+
 function triggerBrowserDownload(file: File): void {
   const url = URL.createObjectURL(file);
   const anchor = document.createElement("a");
@@ -73,12 +106,17 @@ function triggerBrowserDownload(file: File): void {
   URL.revokeObjectURL(url);
 }
 
-// Saves the book to the user's device as a normal browser download, reusing the
-// cached copy when present and otherwise fetching it from storage.
 export async function downloadSourceCopy(
   groupRef: string,
   sourceId: string,
 ): Promise<ApiResult<{ name: string }>> {
+  if (isNative) {
+    const saved = await ensureSourceCached(groupRef, sourceId);
+    if (!saved) return { ok: false, error: "no_source" };
+    const file = await getCachedSource(sourceId);
+    return { ok: true, value: { name: file?.name ?? sourceId } };
+  }
+
   const cached = await getCachedSource(sourceId);
   const file = cached ?? (await fetchSource(groupRef, sourceId))?.file ?? null;
   if (!file) return { ok: false, error: "no_source" };

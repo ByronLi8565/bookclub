@@ -7,13 +7,15 @@ import {
   getCurrentAgent,
 } from "agents";
 import { monotonicFactory } from "ulidx";
-import type {
-  ApplyOpsResult,
-  Highlight,
-  HighlightAnchor,
-  NoteOp,
+import {
+  NoteRejectionReason,
+  type ApplyOpsResult,
+  type Highlight,
+  type HighlightAnchor,
+  type NoteOp,
 } from "../../shared/types/notes.ts";
 import type { GroupRole } from "../../shared/types/groups.ts";
+import { GroupAction, permits } from "../../shared/groupPermissions.ts";
 import type { Env } from "../env.ts";
 import { currentIdentity } from "../auth/cookies.ts";
 import {
@@ -81,7 +83,8 @@ export class NoteAgent extends Agent<Env, NoteState> {
 
   @callable()
   addNote(sourceId: string, body: string, highlights: Highlight[], tags: string[] = []): void {
-    const { userId, name } = this.me;
+    const { userId, name, role } = this.me;
+    if (!permits(role, GroupAction.CreateNote)) return;
     this.setState(
       addNote(this.state, sourceId, { id: userId, name }, body, highlights, this.stamp, tags),
     );
@@ -89,23 +92,40 @@ export class NoteAgent extends Agent<Env, NoteState> {
 
   @callable()
   addReply(sourceId: string, parent: string, body: string): void {
-    const { userId, name } = this.me;
+    const { userId, name, role } = this.me;
+    if (!permits(role, GroupAction.ReplyToNote)) return;
     this.setState(addReply(this.state, sourceId, { id: userId, name }, parent, body, this.stamp));
   }
 
   @callable()
   editNote(id: string, body: string): void {
+    if (!permits(this.me.role, GroupAction.EditOwnNote)) return;
     this.setState(editNote(this.state, id, body, this.stamp.now(), this.me.userId));
   }
 
   @callable()
   removeNote(id: string): void {
     const { userId, role } = this.me;
-    this.setState(removeNote(this.state, id, this.stamp.now(), userId, role === "owner"));
+    if (!permits(role, GroupAction.DeleteOwnNote)) return;
+    this.setState(
+      removeNote(
+        this.state,
+        id,
+        this.stamp.now(),
+        userId,
+        permits(role, GroupAction.ModerateNotes),
+      ),
+    );
   }
 
   @callable()
   rebindHighlight(noteId: string, highlightId: string, anchor: HighlightAnchor): void {
+    const { userId, role } = this.me;
+    const note = this.state.notes.find((candidate) => candidate.id === noteId);
+    if (!note) return;
+    const action =
+      note.author.id === userId ? GroupAction.RebindOwnHighlight : GroupAction.RebindAnyHighlight;
+    if (!permits(role, action)) return;
     this.setState(rebindHighlight(this.state, noteId, highlightId, anchor));
   }
 
@@ -119,9 +139,15 @@ export class NoteAgent extends Agent<Env, NoteState> {
   @callable()
   applyOperations(ops: NoteOp[]): ApplyOpsResult {
     const { userId, name, role } = this.me;
+    if (!permits(role, GroupAction.CreateNote)) {
+      return {
+        appliedOpIds: [],
+        rejectedOps: ops.map((op) => ({ opId: op.opId, reason: NoteRejectionReason.Forbidden })),
+      };
+    }
     const result = applyOperations(this.state, ops, {
       author: { id: userId, name },
-      isOwner: role === "owner",
+      isOwner: permits(role, GroupAction.ModerateNotes),
     });
     this.setState(result.state);
     return { appliedOpIds: result.appliedOpIds, rejectedOps: result.rejectedOps };
@@ -133,5 +159,25 @@ export class NoteAgent extends Agent<Env, NoteState> {
 
   importState(state: NoteState): void {
     this.setState(state);
+  }
+
+  removeSource(sourceId: string): void {
+    this.setState({
+      ...this.state,
+      notes: this.state.notes.filter((note) => note.sourceId !== sourceId),
+    });
+  }
+
+  clear(): void {
+    this.setState(emptyNoteState());
+  }
+
+  updateMemberRole(userId: string, role: GroupRole): void {
+    for (const connection of this.getConnections<ConnIdentity>()) {
+      if (connection.state?.userId === userId) {
+        connection.setState({ ...connection.state, role });
+      }
+    }
+    this.broadcastPresence();
   }
 }

@@ -2,6 +2,9 @@ import { useMemo, type ReactNode } from "react";
 
 const INLINE_PATTERN =
   /`([^`]+)`|\[\[key:([^\]]+)\]\]|\[\[(\d+)\]\]|==(.+?)==|\*\*(.+?)\*\*|\*(.+?)\*|_(.+?)_/gu;
+const IMAGE_BLOCK_PATTERN = /^\[\[image:([0-9A-HJKMNP-TV-Z]{26})\]\]$/u;
+
+type BodyBlock = { key: string; quote: boolean; text: string; imageId: string | null };
 
 function renderInlineNodes(
   text: string,
@@ -81,22 +84,26 @@ export function NoteBodyView({
   body,
   refs,
   onReference,
+  imageUrlBase,
 }: {
   body: string;
   refs: Map<number, string>;
   onReference: (seq: number) => void;
+  imageUrlBase?: string;
 }) {
   const blocks = useMemo(
     () =>
-      body.split(/\n{2,}/u).flatMap((raw) => {
+      body.split(/\n{2,}/u).flatMap((raw): BodyBlock[] => {
         const block = raw.trim();
         if (!block) return [];
+        const image = IMAGE_BLOCK_PATTERN.exec(block);
+        if (image) return [{ key: block, quote: false, text: "", imageId: image[1] }];
         const lines = block.split("\n");
         const quote = lines.every((line) => line.startsWith(">"));
         const text = quote
           ? lines.map((line) => line.replace(/^>\s?/u, "")).join(" ")
           : lines.join(" ");
-        return [{ key: block, quote, text }];
+        return [{ key: block, quote, text, imageId: null }];
       }),
     [body],
   );
@@ -104,6 +111,16 @@ export function NoteBodyView({
   return (
     <div className="note-body">
       {blocks.map((block) => {
+        if (block.imageId) {
+          const src = imageUrlBase ? `${imageUrlBase}/${block.imageId}` : null;
+          return src ? (
+            <figure className="note-image" key={block.key}>
+              <img src={src} alt="" loading="lazy" />
+            </figure>
+          ) : (
+            <p key={block.key}>[image unavailable]</p>
+          );
+        }
         if (block.quote) {
           return (
             <blockquote key={block.key}>

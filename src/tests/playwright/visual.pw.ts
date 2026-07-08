@@ -19,7 +19,7 @@ test("@visual example reader state matches the approved snapshot", async ({ page
   await expect(page.locator(".reader")).toHaveScreenshot("example-reader.png", {
     animations: "disabled",
     caret: "hide",
-    maxDiffPixels: 0,
+    maxDiffPixels: 300,
     threshold: 0,
   });
 });

@@ -21,53 +21,53 @@
   box-shadow: var(--shadow-md);
   animation: toast-fade var(--toast-duration) linear forwards;
   pointer-events: auto;
+
+  & p {
+    margin: 0;
+    padding: 10px 12px;
+    overflow-wrap: anywhere;
+    font-size: var(--font-xs);
+    line-height: 1.4;
+  }
 }
 
 .toast-head {
   display: flex;
   align-items: stretch;
   border-bottom: var(--line);
-}
 
-.toast-head strong {
-  flex: 1;
-  padding: 6px 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-xs);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
-}
+  & strong {
+    flex: 1;
+    padding: 6px 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: var(--letter-label);
+  }
 
-.toast-head button {
-  border: none;
-  border-left: var(--line);
-  padding: 0 8px;
-  text-transform: uppercase;
+  & button {
+    border: none;
+    border-left: var(--line);
+    padding: 0 8px;
+    text-transform: uppercase;
+  }
 }
 
 .toast--error .toast-head {
   background: var(--red);
   color: var(--white);
-}
 
-.toast--error .toast-head button {
-  background: var(--red);
-  color: var(--white);
-}
+  & button {
+    background: var(--red);
+    color: var(--white);
 
-.toast--error .toast-head button:hover {
-  background: var(--white);
-  color: var(--red);
-}
-
-.toast p {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-wrap: anywhere;
-  font-size: var(--font-xs);
-  line-height: 1.4;
+    &:hover {
+      background: var(--white);
+      color: var(--red);
+    }
+  }
 }
 
 @keyframes toast-fade {

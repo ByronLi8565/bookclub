@@ -1,8 +1,12 @@
 import type { Hono } from "hono";
 import type { Env } from "../env.ts";
 import {
+  changeMemberRole,
   createGroup,
+  deleteBook,
+  deleteGroup,
   fetchSource,
+  fetchImage,
   inviteByEmail,
   inviteLink,
   listMyGroups,
@@ -11,6 +15,7 @@ import {
   renameGroupTitle,
   resolveBookTitle,
   resolveGroupView,
+  uploadImage,
   uploadSource,
   type WorkflowFailure,
 } from "../workflows/groupWorkflows.ts";
@@ -85,6 +90,18 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.body(null, 204) : workflowError(result);
   });
 
+  app.put("/groups/:groupId/members/:memberId/role", async (c) => {
+    const body = await readJson(c.req.raw);
+    const result = await changeMemberRole(
+      c.env,
+      c.req.raw,
+      c.req.param("groupId"),
+      c.req.param("memberId"),
+      body?.role,
+    );
+    return result.ok ? c.json(result.value) : workflowError(result);
+  });
+
   app.post("/groups/:groupId/join", async (c) => {
     const body = await readJson(c.req.raw);
     const result = await redeemInvite(c.env, c.req.raw, c.req.param("groupId"), body?.token);
@@ -106,6 +123,42 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     if (!result.ok) return workflowError(result);
     return new Response(result.value.object.body, {
       headers: { "Content-Type": result.value.contentType, "X-Source-Id": result.value.hash },
+    });
+  });
+
+  app.delete("/groups/:groupId/book/:sourceId", async (c) => {
+    const result = await deleteBook(
+      c.env,
+      c.req.raw,
+      c.req.param("groupId"),
+      c.req.param("sourceId"),
+    );
+    return result.ok ? c.json(result.value) : workflowError(result);
+  });
+
+  app.delete("/groups/:groupId", async (c) => {
+    const result = await deleteGroup(c.env, c.req.raw, c.req.param("groupId"));
+    return result.ok ? c.body(null, 204) : workflowError(result);
+  });
+
+  app.post("/groups/:groupId/images", async (c) => {
+    const result = await uploadImage(c.env, c.req.raw, c.req.param("groupId"));
+    return result.ok ? c.json(result.value, 201) : workflowError(result);
+  });
+
+  app.get("/groups/:groupId/images/:imageId", async (c) => {
+    const result = await fetchImage(
+      c.env,
+      c.req.raw,
+      c.req.param("groupId"),
+      c.req.param("imageId"),
+    );
+    if (!result.ok) return workflowError(result);
+    return new Response(result.value.object.body, {
+      headers: {
+        "Content-Type": result.value.contentType,
+        "Cache-Control": "private, max-age=3600",
+      },
     });
   });
 }

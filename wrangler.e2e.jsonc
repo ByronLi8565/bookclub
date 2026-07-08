@@ -48,6 +48,7 @@
   ],
   "r2_buckets": [
     { "binding": "BOOKS", "bucket_name": "bookclub-books" },
+    { "binding": "IMAGES", "bucket_name": "bookclub-images-e2e" },
     { "binding": "BACKUPS", "bucket_name": "bookclub-do-backups" },
   ],
   // A fake, e2e-only session secret so the suite is self-contained even without

@@ -110,8 +110,9 @@ test("reader stays interactive when the pdf.js text layer chunk fails to load", 
   await expect(page.locator(".reader-page-turn--next")).toBeVisible();
   expect(await readPage(page)).toBe(1);
 
+  const startZoom = (await readZoom(page))!;
   await page.getByTitle("Increase text size").click();
-  await expect.poll(() => readZoom(page)).toBeGreaterThan(100);
+  await expect.poll(() => readZoom(page)).toBeGreaterThan(startZoom);
 });
 
 const scrollTop = (page: Page) => page.locator(".pdf-scroller").evaluate((el) => el.scrollTop);

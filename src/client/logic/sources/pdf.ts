@@ -32,19 +32,14 @@ const TEXT_CAPABILITIES: SourceCapabilities = {
 const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 const LOW_COVERAGE = 0.8;
 const BAD_ENCODING = 0.02;
+const PDFJS_WASM_URL = new URL("/pdfjs-wasm/", globalThis.location?.href ?? import.meta.url).href;
 
 interface PdfInfo {
   Title?: string;
   Author?: string;
 }
 
-// pdf.js v6 calls `Promise.withResolvers()`, which only exists in Safari/iOS
-// 17.4+. On older mobile Safari it's `undefined`: the module worker fails to
-// initialize, pdf.js falls back to running the worker on the main thread, and
-// that path immediately calls the missing API — throwing "undefined is not a
-// function" while opening any document. Installing the (trivial) polyfill on
-// the main thread before pdf.js loads covers the fake-worker fallback, which is
-// where pdf.js routes every worker failure. No-op where the API is native.
+// Covers pdf.js fake-worker fallback on Safari/iOS before Promise.withResolvers exists.
 function installPromiseWithResolvers(): void {
   const ctor = Promise as PromiseConstructor & {
     withResolvers?: <T>() => {
@@ -76,10 +71,7 @@ function pdfjsLib(): Promise<typeof PdfjsModule> {
   return pdfjsPromise;
 }
 
-// The viewer components (TextLayerBuilder et al.) read their pdf.js primitives
-// from `globalThis.pdfjsLib` at import time, so we must publish the *same* core
-// instance there before importing the viewer. This keeps a single pdf.js copy,
-// so `viewport instanceof PageViewport` and the page-proxy APIs line up.
+// TextLayerBuilder reads pdfjsLib from globalThis at import time.
 export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilder> {
   const lib = await pdfjsLib();
   (globalThis as { pdfjsLib?: typeof PdfjsModule }).pdfjsLib = lib;
@@ -104,7 +96,7 @@ export interface PdfTextItem {
 
 export async function loadPdf(data: ArrayBuffer): Promise<PDFDocumentProxy> {
   const pdfjs = await pdfjsLib();
-  return pdfjs.getDocument({ data }).promise;
+  return pdfjs.getDocument({ data, wasmUrl: PDFJS_WASM_URL }).promise;
 }
 
 export async function destroyPdf(doc: PDFDocumentProxy): Promise<void> {
@@ -183,11 +175,7 @@ export function rectsForRange(
   return geometry.runs.flatMap((run) => {
     const runEnd = run.start + run.str.length;
     if (runEnd <= start || run.start >= end) return [];
-    // The range may cover only part of this run (e.g. a short search match
-    // inside a long line), so slice the run's rect to the overlapping chars
-    // rather than highlighting the whole line. Character widths are assumed
-    // uniform within the run — an approximation, but it keeps the highlight on
-    // the matched word instead of spanning the entire text item.
+    // Approximate per-character rects so matches inside long text runs don't highlight the whole run.
     const len = run.str.length || 1;
     const from = Math.max(0, start - run.start);
     const to = Math.min(len, end - run.start);

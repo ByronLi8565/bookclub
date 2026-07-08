@@ -1,18 +1,13 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 
-// Single shared IndexedDB connection for all local-first stores. Bumping the
-// version here must preserve every existing object store in `upgradeneeded`,
-// since the upgrade runs cumulatively from whatever version the user is on.
+// IndexedDB upgrades run cumulatively; preserve existing stores when bumping DB_VERSION.
 const DB_NAME = "bookclub";
 const DB_VERSION = 2;
 
 export const BOOKS_STORE = "books";
 export const NOTES_STORE = "notes";
 
-// Tagged so callers can distinguish "storage is unavailable/full" (degraded
-// durability — worth surfacing) from a transient/expected miss. We never
-// swallow these the way the old cache did.
 export class PersistError extends Data.TaggedError("PersistError")<{
   readonly op: string;
   readonly cause: unknown;
@@ -26,14 +21,12 @@ function open(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.addEventListener("upgradeneeded", () => {
       const db = req.result;
-      // v1 -> v2 is purely additive: keep the existing books blobs intact.
       if (!db.objectStoreNames.contains(BOOKS_STORE)) db.createObjectStore(BOOKS_STORE);
       if (!db.objectStoreNames.contains(NOTES_STORE)) db.createObjectStore(NOTES_STORE);
     });
     req.addEventListener("success", () => resolve(req.result));
     req.addEventListener("error", () => reject(req.error));
   });
-  // Let a failed open be retried on the next call rather than poisoning forever.
   dbPromise.catch(() => {
     dbPromise = null;
   });

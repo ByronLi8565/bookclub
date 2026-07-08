@@ -145,7 +145,7 @@ export function InviteModal({
         </form>
 
         <div className="invite-people">
-          <p className="invite-people-head">People with access</p>
+          <p className="invite-people-head label">People with access</p>
           {membersLoading ? (
             <Loading className="loading--invite-people" />
           ) : (
@@ -154,7 +154,7 @@ export function InviteModal({
                 <li key={m.id}>
                   <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
                   <span className="invite-person-name truncate">{m.name}</span>
-                  <span className="invite-person-role">{m.role}</span>
+                  <span className="invite-person-role label">{m.role}</span>
                 </li>
               ))}
             </ul>

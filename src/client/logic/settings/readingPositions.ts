@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import type { SourceKind } from "../../../shared/types/sources.ts";
+import { apiFetch } from "../net/api.ts";
+import { decode } from "../../../shared/schema.ts";
 import {
   ReadingPositionCache,
   ReadingPositionResponse,
@@ -15,34 +16,17 @@ function positionKey(userId: string, groupId: string, sourceId: string): string 
   return `${userId}:${groupId}:${sourceId}`;
 }
 
-function decode<S extends Schema.Top>(schema: S, value: unknown): Schema.Schema.Type<S> | null {
-  try {
-    return Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown, never>)(
-      value,
-    ) as Schema.Schema.Type<S>;
-  } catch {
-    return null;
-  }
-}
-
 function samePosition(a: StoredReadingPosition | null, b: StoredReadingPosition | null): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function loadAll(): Record<string, ReadingPositionRecord> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    return decode(ReadingPositionCache, JSON.parse(raw)) ?? {};
-  } catch {
-    return {};
-  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw ? (decode(ReadingPositionCache, JSON.parse(raw)) ?? {}) : {};
 }
 
 function saveAll(positions: Record<string, ReadingPositionRecord>): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
-  } catch {}
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
 }
 
 function getRecord(
@@ -167,7 +151,7 @@ export function fetchServerReadingPosition(
   sourceId: string,
 ): Effect.Effect<StoredReadingPosition | null> {
   return Effect.tryPromise(async () => {
-    const response = await fetch(
+    const response = await apiFetch(
       `/me/reading-position?groupId=${encodeURIComponent(groupId)}&sourceId=${encodeURIComponent(sourceId)}`,
     );
     if (!response.ok) throw new Error(`http_${response.status}`);
@@ -190,7 +174,7 @@ export function syncReadingPosition(
     if (!force && record.sync.status === "syncing") return false;
     markSyncing(userId, groupId, sourceId, record);
     const result = yield* Effect.tryPromise(async () => {
-      const response = await fetch("/me/reading-position", {
+      const response = await apiFetch("/me/reading-position", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ groupId, sourceId, position: record.position }),

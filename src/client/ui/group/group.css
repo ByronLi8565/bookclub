@@ -2,16 +2,16 @@
   display: flex;
   gap: 6px;
   align-items: stretch;
-}
 
-.invite-link input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: var(--font-xs);
-  border: var(--line);
-  padding: 4px 8px;
-  background: var(--white);
+  & input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: var(--font-xs);
+    border: var(--line);
+    padding: 4px 8px;
+    background: var(--white);
+  }
 }
 
 .invite-icon {
@@ -28,8 +28,6 @@
 .invite-people-head {
   margin: 0 0 8px;
   font-size: var(--font-xxs);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
   opacity: var(--muted-opacity);
 }
 
@@ -40,12 +38,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
 
-.invite-people-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  & li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
 }
 
 .invite-avatar {
@@ -94,8 +92,6 @@
 
 .invite-person-role {
   font-size: var(--font-xxs);
-  text-transform: uppercase;
-  letter-spacing: var(--letter-label);
   opacity: var(--muted-opacity);
 }
 
@@ -121,22 +117,22 @@
 
 .group-book-rename {
   opacity: var(--muted-opacity);
-}
 
-.group-book-rename:hover {
-  opacity: 1;
+  &:hover {
+    opacity: 1;
+  }
 }
 
 .group-book-edit {
   display: flex;
   gap: 6px;
-}
 
-.group-book-edit input {
-  font: inherit;
-  border: var(--line);
-  padding: 2px 8px;
-  background: var(--white);
+  & input {
+    font: inherit;
+    border: var(--line);
+    padding: 2px 8px;
+    background: var(--white);
+  }
 }
 
 .group-roster {

@@ -11,10 +11,12 @@ export function NotePanel({
   composeInitialBody,
   onComposeSave,
   onComposeCancel,
+  onPasteImage,
   actions,
   refs,
   viewer,
   context,
+  imageUrlBase,
 }: {
   conversation: Conversation;
   canWrite: boolean;
@@ -23,17 +25,19 @@ export function NotePanel({
   composeInitialBody: string;
   onComposeSave: (body: string) => void;
   onComposeCancel: () => void;
+  onPasteImage?: (file: File) => Promise<string | null>;
   actions: NoteActions;
   refs: NoteRefs;
   viewer: NoteViewer;
   context?: React.ReactNode;
+  imageUrlBase?: string;
 }) {
   const { roots } = conversation;
 
   return (
     <aside className="note-panel">
       {context}
-      <h2>Notes</h2>
+      <h2 className="label">Notes</h2>
       {loading && !composing && <Loading className="loading--note-panel" />}
       {!loading && roots.length === 0 && !composing && (
         <p className="empty">Select text to add a note.</p>
@@ -49,6 +53,8 @@ export function NotePanel({
               refs={refs}
               canWrite={canWrite}
               viewer={viewer}
+              imageUrlBase={imageUrlBase}
+              onPasteImage={onPasteImage}
             />
           ))}
         {composing && (
@@ -61,6 +67,7 @@ export function NotePanel({
               validSeqs={refs.validSeqs}
               canSubmit={canWrite}
               canReference={refs.canReference}
+              onPasteImage={onPasteImage}
             />
           </li>
         )}

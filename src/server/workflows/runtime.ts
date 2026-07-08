@@ -2,14 +2,34 @@ import * as Effect from "effect/Effect";
 import { currentIdentity } from "../auth/cookies.ts";
 import type { Env } from "../env.ts";
 import type { Identity } from "../state/GroupAgent.ts";
+import type { GroupFailureReason } from "../../shared/types/groups.ts";
+
+export const WorkflowError = {
+  InternalError: "internal_error",
+  Unauthenticated: "unauthenticated",
+  InvalidRequest: "invalid_request",
+  InvalidName: "invalid_name",
+  InvalidEmail: "invalid_email",
+  IdExhausted: "id_exhausted",
+  UnsupportedType: "unsupported_type",
+  NoBook: "no_book",
+  KindMismatch: "kind_mismatch",
+  TooLarge: "too_large",
+} as const;
+
+export type WorkflowError = (typeof WorkflowError)[keyof typeof WorkflowError] | GroupFailureReason;
+
+export const WorkflowReason = { Empty: "empty", TooLong: "too_long" } as const;
+
+export type WorkflowReason = (typeof WorkflowReason)[keyof typeof WorkflowReason];
 
 export type WorkflowResult<T> = { ok: true; value: T } | WorkflowFailure;
 
 export interface WorkflowFailure {
   ok: false;
   status: number;
-  error: string;
-  reason?: string;
+  error: WorkflowError;
+  reason?: WorkflowReason;
 }
 
 export type WorkflowEffect<T> = Effect.Effect<T, WorkflowFailure>;
@@ -21,7 +41,11 @@ export type Async<T> = {
     : T[K];
 };
 
-export function fail(status: number, error: string, reason?: string): WorkflowFailure {
+export function fail(
+  status: number,
+  error: WorkflowError,
+  reason?: WorkflowReason,
+): WorkflowFailure {
   return reason === undefined ? { ok: false, status, error } : { ok: false, status, error, reason };
 }
 
@@ -37,7 +61,7 @@ export const tryPromise = <T>(evaluate: () => T | PromiseLike<T>): WorkflowEffec
     try: () => Promise.resolve(evaluate()),
     catch: (cause) => {
       console.error("workflow step failed", cause);
-      return fail(500, "internal_error");
+      return fail(500, WorkflowError.InternalError);
     },
   });
 
@@ -49,6 +73,6 @@ export const runWorkflow = <T>(workflow: WorkflowEffect<T>): Promise<WorkflowRes
 export const requireIdentity = (env: Env, request: Request): WorkflowEffect<Identity> =>
   Effect.gen(function* () {
     const me = yield* tryPromise(() => currentIdentity(request, env));
-    if (!me) return yield* Effect.fail(fail(401, "unauthenticated"));
+    if (!me) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
     return me;
   });

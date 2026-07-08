@@ -8,15 +8,8 @@ import {
 import { loadNotes, saveNotes, type StoredNotes } from "./notesCache.ts";
 
 export interface NoteView {
-  // True once the local cache has been read, so the UI can show cached notes
-  // (offline) without waiting for the server.
   ready: boolean;
-  // Notes as the user should see them right now: the server snapshot with every
-  // unsynced local op replayed on top. Provisional seqs continue from the
-  // snapshot, so optimistic notes render with a stable (if not yet final) seq.
   notes: Note[];
-  // Note ids with an op still waiting to sync, and ids whose op the server
-  // refused — surfaced in the UI rather than dropped.
   pendingNoteIds: ReadonlySet<string>;
   failedNoteIds: ReadonlySet<string>;
   pendingCount: number;
@@ -29,14 +22,7 @@ interface Internal {
   failedOps: NoteOp[];
 }
 
-// In-memory op-log store for one group. React subscribes via useSyncExternal
-// store; persistence and conflict resolution are expressed as Effects. The two
-// load-bearing invariants live here:
-//   1. An incoming server snapshot only ever replaces `snapshot`; it never
-//      clears `pendingOps` except by confirmed opId. Unsynced authored work is
-//      therefore never lost to another user's update.
-//   2. The client never pushes state to the server from here — it only enqueues
-//      ops that useNoteAgent flushes via the applyOperations RPC.
+// Incoming server snapshots never clear pending ops except by confirmed opId.
 export class NoteStore {
   private state: Internal = {
     hydrated: false,
@@ -66,9 +52,6 @@ export class NoteStore {
 
   hasPending = (): boolean => this.state.pendingOps.length > 0;
 
-  // Load any persisted snapshot + queue so notes render (and stay editable)
-  // offline immediately. A queue authored by a different user is discarded
-  // rather than flushed under the current identity.
   hydrate(): Effect.Effect<void> {
     return loadNotes(this.groupId).pipe(
       Effect.tap((stored) =>
@@ -86,7 +69,6 @@ export class NoteStore {
           this.recompute();
         }),
       ),
-      // A read failure must not block the UI; we just start from empty state.
       Effect.catch(() =>
         Effect.sync(() => {
           this.state = { ...this.state, hydrated: true };
@@ -97,9 +79,6 @@ export class NoteStore {
     );
   }
 
-  // Authoritative state arrived over the socket. Replace the snapshot and prune
-  // any pending op the server reports as applied (the durable, reconnect-safe
-  // confirmation path). Pending is never cleared by mere arrival of an update.
   ingestServer(snapshot: NoteState): Effect.Effect<void> {
     return Effect.sync(() => {
       const applied = new Set(snapshot.appliedOpIds ?? []);
@@ -113,8 +92,6 @@ export class NoteStore {
     }).pipe(Effect.andThen(this.persist()));
   }
 
-  // Append a locally-authored op: write-ahead (persist before any flush) so a
-  // crash mid-sync still has the op durably queued for replay.
   enqueue(op: NoteOp): Effect.Effect<void> {
     return Effect.sync(() => {
       this.state = { ...this.state, pendingOps: [...this.state.pendingOps, op] };
@@ -122,8 +99,6 @@ export class NoteStore {
     }).pipe(Effect.andThen(this.persist()));
   }
 
-  // Apply the direct RPC result: prune confirmed ops and move refused ops to the
-  // failed list so their authors can see them instead of losing them silently.
   settle(result: ApplyOpsResult): Effect.Effect<void> {
     return Effect.sync(() => {
       const applied = new Set(result.appliedOpIds);
@@ -140,8 +115,6 @@ export class NoteStore {
     }).pipe(Effect.andThen(this.persist()));
   }
 
-  // Merge a sibling tab's queue (via BroadcastChannel). Union by opId keeps a
-  // just-authored op in one tab from being clobbered by another tab's persist.
   mergeForeign(pendingOps: NoteOp[]): Effect.Effect<void> {
     return Effect.sync(() => {
       const seen = new Set(this.state.pendingOps.map((op) => op.opId));
@@ -159,8 +132,6 @@ export class NoteStore {
       pendingOps: this.state.pendingOps,
       updatedAt: new Date().toISOString(),
     };
-    // Persistence failure (quota, private mode) degrades durability but must not
-    // crash the session; it is logged via the error channel by callers if needed.
     return saveNotes(this.groupId, record).pipe(Effect.ignore);
   }
 

@@ -136,7 +136,7 @@ export function AccountSettings(): React.ReactElement {
               <ul className="account-passkey-list">
                 {passkeys.map((pk) => (
                   <li key={pk.id} className="account-passkey">
-                    <span className="account-passkey-label">{pk.label}</span>
+                    <span className="account-passkey-label truncate">{pk.label}</span>
                     <button
                       type="button"
                       className="login-link plain-button"

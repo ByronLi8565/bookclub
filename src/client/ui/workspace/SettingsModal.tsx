@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { cachedSourceSize, downloadSourceCopy } from "../../logic/groups/sourceAccess.ts";
+import { isNative } from "../../logic/net/api.ts";
 import {
   setReaderPref,
   useReaderPrefs,
@@ -126,7 +127,14 @@ export function SettingsModal({
     const result = await downloadSourceCopy(book.groupRef, book.sourceId);
     setBusy(false);
     if (result.ok) {
-      spawnToast("Downloading book", "Saving a copy to your device.", { type: "info" });
+      if (isNative) {
+        spawnToast("Saved for offline", "This book now reads without a connection.", {
+          type: "info",
+        });
+        void cachedSourceSize(book.sourceId).then(setCachedSize);
+      } else {
+        spawnToast("Downloading book", "Saving a copy to your device.", { type: "info" });
+      }
     } else {
       spawnToast("Download failed", "Couldn't fetch the book from storage.", { type: "error" });
     }
@@ -140,13 +148,20 @@ export function SettingsModal({
           <>
             <section className="settings-item">
               <div className="settings-item-text">
-                <h2 className="settings-item-head">Local book copy</h2>
+                <h2 className="settings-item-head">
+                  {isNative ? "Offline copy" : "Local book copy"}
+                </h2>
                 {loading ? (
                   <Loading className="loading--settings-detail" />
                 ) : cachedSize === null ? (
-                  <p className="settings-item-desc">Not stored.</p>
+                  <p className="settings-item-desc">
+                    {isNative ? "Not downloaded yet." : "Not stored."}
+                  </p>
                 ) : (
-                  <p className="settings-item-desc">Browser storage · {formatBytes(cachedSize)}</p>
+                  <p className="settings-item-desc">
+                    {isNative ? "Saved on this device" : "Browser storage"} ·{" "}
+                    {formatBytes(cachedSize)}
+                  </p>
                 )}
               </div>
               <div className="settings-item-control">
@@ -154,10 +169,22 @@ export function SettingsModal({
                   type="button"
                   className="settings-action"
                   onClick={() => void onDownload()}
-                  disabled={busy || loading}
-                  title="Download a copy of the book to your device"
+                  disabled={busy || loading || (isNative && cachedSize !== null)}
+                  title={
+                    isNative
+                      ? "Save this book on your device for offline reading"
+                      : "Download a copy of the book to your device"
+                  }
                 >
-                  {busy ? "downloading…" : "Download"}
+                  {busy
+                    ? isNative
+                      ? "saving…"
+                      : "downloading…"
+                    : isNative && cachedSize !== null
+                      ? "Saved"
+                      : isNative
+                        ? "Save offline"
+                        : "Download"}
                 </button>
               </div>
             </section>

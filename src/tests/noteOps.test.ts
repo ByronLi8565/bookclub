@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { epubAnchor, type Highlight, type NoteOp } from "../shared/types/notes.ts";
+import {
+  epubAnchor,
+  NoteRejectionReason,
+  type Highlight,
+  type NoteOp,
+} from "../shared/types/notes.ts";
 import {
   applyOperations,
   emptyNoteState,
@@ -241,6 +246,24 @@ describe("applyOperations", () => {
       );
       expect(r.state.notes[0]?.highlights[0]?.anchor).toEqual(epubAnchor("cfi"));
       expect(r.appliedOpIds).toEqual(["op2"]);
+    });
+
+    it("only lets the author or a moderator rebind a highlight", () => {
+      const base = applyOperations(emptyNoteState(), [addOp("op1", "n1", "body")], alice).state;
+      base.notes[0]!.highlights = [highlight("h1")];
+      const op: NoteOp = {
+        opId: "op2",
+        kind: "rebind",
+        noteId: "n1",
+        highlightId: "h1",
+        anchor: epubAnchor("new"),
+      };
+
+      const refused = applyOperations(base, [op], bob);
+      expect(refused.rejectedOps).toEqual([{ opId: "op2", reason: NoteRejectionReason.Forbidden }]);
+
+      const moderated = applyOperations(base, [op], ownerBob);
+      expect(moderated.state.notes[0]?.highlights[0]?.anchor).toEqual(epubAnchor("new"));
     });
   });
 });

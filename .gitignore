@@ -25,3 +25,16 @@ e2e/runs
 
 # local data-recovery backup (do not commit)
 recovery/
+
+# capacitor native build artifacts (the ios/ and android/ project dirs
+# themselves are committed once `cap add` scaffolds them; only their generated
+# build output is ignored)
+ios/App/Pods
+ios/App/App/public
+ios/App/build
+ios/DerivedData
+android/.gradle
+android/app/build
+android/build
+android/app/src/main/assets/public
+android/capacitor-cordova-android-plugins

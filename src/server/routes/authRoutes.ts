@@ -11,7 +11,7 @@ import type { Hono } from "hono";
 import { normalizeEmail } from "../../shared/email.ts";
 import type { Env } from "../env.ts";
 import { readJson } from "../http.ts";
-import { currentIdentity, mintSessionCookie, publicUser } from "../auth/cookies.ts";
+import { currentIdentity, publicUser, sessionCredentials } from "../auth/cookies.ts";
 import { challengeCookie, clearedChallengeCookie, readChallenge } from "../auth/challenge.ts";
 import { RP_NAME, rpConfig, toStoredCredential, toWebAuthnCredential } from "../auth/webauthn.ts";
 
@@ -22,8 +22,6 @@ function str(value: unknown): string | null {
 }
 
 export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
-  // --- Password login ---
-
   app.post("/auth/password", async (c) => {
     const body = await readJson(c.req.raw);
     const email = normalizeEmail(body?.email);
@@ -36,11 +34,10 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
       const status = result.reason === "rate_limited" ? 429 : 400;
       return c.json({ error: result.reason }, status);
     }
-    c.header("Set-Cookie", await mintSessionCookie(c.env, result.user));
-    return c.json({ user: publicUser(result.user) });
+    const { cookie, token } = await sessionCredentials(c.env, result.user);
+    c.header("Set-Cookie", cookie);
+    return c.json({ user: publicUser(result.user), token });
   });
-
-  // --- Password management (authenticated) ---
 
   app.put("/me/password", async (c) => {
     const me = await currentIdentity(c.req.raw, c.env);
@@ -74,8 +71,6 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     return c.body(null, 204);
   });
-
-  // --- Passkey registration (authenticated) ---
 
   app.post("/auth/passkey/register/options", async (c) => {
     const me = await currentIdentity(c.req.raw, c.env);
@@ -129,8 +124,6 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
     await auth.addCredential(toStoredCredential(verification.registrationInfo.credential, label));
     return c.json({ ok: true });
   });
-
-  // --- Passkey login (email-first, unauthenticated) ---
 
   app.post("/auth/passkey/login/options", async (c) => {
     const body = await readJson(c.req.raw);
@@ -186,12 +179,11 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
     const user = await auth.getUser();
     if (!user) return c.json({ error: "no_user" }, 400);
 
+    const { cookie, token } = await sessionCredentials(c.env, user);
     c.header("Set-Cookie", clearedChallengeCookie(), { append: true });
-    c.header("Set-Cookie", await mintSessionCookie(c.env, user), { append: true });
-    return c.json({ user: publicUser(user) });
+    c.header("Set-Cookie", cookie, { append: true });
+    return c.json({ user: publicUser(user), token });
   });
-
-  // --- Passkey management (authenticated) ---
 
   app.get("/me/passkeys", async (c) => {
     const me = await currentIdentity(c.req.raw, c.env);

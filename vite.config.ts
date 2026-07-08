@@ -1,15 +1,52 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { VitePWA } from "vite-plugin-pwa";
 import { fixtureServer } from "./src/tests/harness/testServer.ts";
 
-// workerd cannot parse TC39 decorators, which the agents SDK uses via @callable.
-// Vite 8 transforms with oxc, and oxc only lowers *legacy* decorators — it leaves
-// the standard decorators agents uses raw, so the deployed worker fails at
-// startup ("Invalid or unexpected token"). esbuild lowers standard decorators
-// correctly, so pre-transform the agent sources with esbuild (target es2022)
-// before oxc runs. Only files that actually use @callable are touched.
+const PDFJS_WASM_PATH = "/pdfjs-wasm/";
+const PDFJS_WASM_FILES = [
+  "jbig2.wasm",
+  "jbig2_nowasm_fallback.js",
+  "openjpeg.wasm",
+  "openjpeg_nowasm_fallback.js",
+  "qcms_bg.wasm",
+] as const;
+
+function pdfjsWasm(): Plugin {
+  const files = new Map(
+    PDFJS_WASM_FILES.map((name) => [
+      name,
+      readFileSync(new URL(`./node_modules/pdfjs-dist/wasm/${name}`, import.meta.url)),
+    ]),
+  );
+  return {
+    name: "bookclub:pdfjs-wasm",
+    applyToEnvironment(environment) {
+      return environment.name === "client";
+    },
+    configureServer(server) {
+      server.middlewares.use(PDFJS_WASM_PATH, (request, response, next) => {
+        const name = request.url?.split("?", 1)[0]?.replace(/^\//u, "");
+        const source = name ? files.get(name as (typeof PDFJS_WASM_FILES)[number]) : undefined;
+        if (!source) return next();
+        response.setHeader(
+          "Content-Type",
+          name?.endsWith(".wasm") ? "application/wasm" : "text/javascript; charset=utf-8",
+        );
+        response.end(source);
+      });
+    },
+    generateBundle() {
+      for (const [name, source] of files) {
+        this.emitFile({ type: "asset", fileName: `${PDFJS_WASM_PATH.slice(1)}${name}`, source });
+      }
+    },
+  };
+}
+
+// workerd cannot parse the standard decorators used by @callable; esbuild can lower them.
 function lowerDecorators(): Plugin {
   return {
     name: "bookclub:lower-decorators",
@@ -24,18 +61,9 @@ function lowerDecorators(): Plugin {
 export default defineConfig(({ command }) => ({
   plugins: [
     lowerDecorators(),
+    pdfjsWasm(),
     react(),
-    // Reads wrangler.jsonc and runs the worker (Durable Objects, bindings) in
-    // workerd for both `vite dev` and the production build/deploy.
-    //
-    // Dev-only migration: the four DO classes are SQLite-backed (the agents SDK
-    // requires SQL), but `wrangler.jsonc` intentionally ships no `migrations`
-    // block (prod's classes were created by alchemy under a tag we must not
-    // re-declare — see the note there). A fresh local workerd namespace has no
-    // lineage, so without a migration it creates the classes as KV-backed and
-    // every DO op fails with "SQL is not enabled". Injecting the migration only
-    // for `vite dev` (command === "serve") gives local DOs SQL storage while
-    // leaving the production build/deploy config completely untouched.
+    // Local DOs need a dev-only migration for SQLite-backed agents; prod config stays untouched.
     command === "serve"
       ? cloudflare({
           config: (config) => {
@@ -49,11 +77,7 @@ export default defineConfig(({ command }) => ({
         })
       : cloudflare(),
     VitePWA({
-      // Auto-update: the plugin forces skipWaiting + clientsClaim and reloads
-      // open tabs once a new version activates, so the cached app shell always
-      // stays internally consistent (no stale hashed-asset references).
       registerType: "autoUpdate",
-      // Icons live in publicDir (`public/`) and are copied verbatim to the dist root.
       includeAssets: ["icon-192.png", "icon-512.png"],
       manifest: {
         name: "Bookclub",
@@ -70,16 +94,11 @@ export default defineConfig(({ command }) => ({
         ],
       },
       workbox: {
-        // Precache the built app shell so the app boots offline.
         globPatterns: ["**/*.{js,css,html,wasm}"],
-        // Offline navigations fall back to the SPA shell...
         navigateFallback: "/index.html",
-        // ...but never for API/agent traffic — let those hit the network and fail honestly.
         navigateFallbackDenylist: [/^\/(auth|groups|me|agents|admin)\//u],
-        // pdf.js worker + epub assets can be large; lift the precache size ceiling.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
-      // Keep the service worker out of `vite dev` to avoid HMR/caching confusion.
       devOptions: { enabled: false },
     }),
     fixtureServer(new URL("./assets", import.meta.url).pathname),

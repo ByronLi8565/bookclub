@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HIGHLIGHT_TAG, type Note, type NoteAuthor } from "../../shared/types/notes.ts";
 import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
-import { renameGroup, type RosterEntry } from "../logic/groups/groupClient.ts";
+import { renameGroup, uploadNoteImage, type RosterEntry } from "../logic/groups/groupClient.ts";
 import { useNoteAgent } from "../logic/notes/useNoteAgent.ts";
 import { buildConversation, referenceSpace, selectNotes } from "../logic/notes/conversation.ts";
 import { blockquote, highlightMark } from "../logic/notes/format.ts";
@@ -115,10 +115,9 @@ export function Workspace({
     () => selectNotes(agent.notes, { sources: [sourceId] }),
     [agent.notes, sourceId],
   );
-  // Notes are local-first: writing works offline (it queues). Only cross-note
-  // @references need the live socket, since their target seq is server-assigned.
   const canWriteNotes = agent.notesReady;
   const canReference = agent.syncStatus !== "offline";
+  const canUploadImages = agent.syncStatus !== "offline";
   const [composing, setComposing] = useState<Highlight | null>(null);
   const composingRef = useRef<Highlight | null>(null);
   composingRef.current = composing;
@@ -161,7 +160,6 @@ export function Workspace({
     return () => window.clearTimeout(timeout);
   }, [desktopExpandedPane]);
 
-  // While a modal is open it owns the keyboard; reader hotkeys are suppressed.
   const modalOpen = useAnyModalOpen();
   const readerKeys = view.ready && !modalOpen;
   const { pdfPageLayout } = useReaderPrefs();
@@ -179,7 +177,6 @@ export function Workspace({
     enabled: readerKeys && !isMobile,
     preventDefault: true,
   });
-  // Toggle single ⇄ two-page (book) layout for PDFs and EPUBs alike.
   useHotkey(
     "D",
     () => setReaderPref("pdfPageLayout", pdfPageLayout === "auto" ? "single" : "auto"),
@@ -222,9 +219,6 @@ export function Workspace({
     const sid = sourceIdRef.current;
     if (!sid) return;
     Effect.runPromise(captureHighlight(sid, anchor, range)).then((highlight) => {
-      // A highlight skips the composer: post it straight away as a note whose
-      // body is the quoted passage, tagged so it reads "highlighted". The
-      // highlight reconciler paints it once it lands in `notes`.
       if (intent === "highlight") {
         agent.addNote(sid, highlightMark(highlight.quote.exact), [highlight], [HIGHLIGHT_TAG]);
         setPane("notes");
@@ -255,6 +249,25 @@ export function Workspace({
       drawnRef.current.delete(highlight.id);
     }
     setComposing(null);
+  }
+
+  async function onPasteImage(image: File): Promise<string | null> {
+    if (!canUploadImages) {
+      spawnToast("Image upload unavailable", "Reconnect before pasting images into notes.", {
+        type: "error",
+      });
+      return null;
+    }
+    const result = await uploadNoteImage(groupRef, image);
+    if (result.ok) return result.value;
+    const message =
+      result.error === "too_large"
+        ? "That image is still too large after compression. Try a smaller image."
+        : result.error === "image_processing_failed"
+          ? "This browser couldn't compress that image. Try a different image."
+          : result.error;
+    spawnToast("Image upload failed", message, { type: "error" });
+    return null;
   }
 
   function onEditSave(note: Note, body: string) {
@@ -456,8 +469,10 @@ export function Workspace({
             composeInitialBody={composeInitialBody}
             onComposeSave={onComposeSave}
             onComposeCancel={onComposeCancel}
+            onPasteImage={onPasteImage}
             refs={noteRefs}
             viewer={viewer}
+            imageUrlBase={`/groups/${groupRef}/images`}
             actions={{
               editingId,
               replyingTo,

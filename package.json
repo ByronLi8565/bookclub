@@ -17,10 +17,18 @@
     "test:visual": "playwright test src/tests/playwright/visual.pw.ts",
     "test:visual:update": "playwright test src/tests/playwright/visual.pw.ts --update-snapshots",
     "info:template": "node scripts/new-info-card.mjs",
+    "cap:sync": "vite build && cap sync",
+    "cap:ios": "vite build && cap sync ios && cap open ios",
+    "cap:android": "vite build && cap sync android && cap open android",
     "check": "oxfmt --check && oxlint && tsc --noEmit",
     "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/ios": "^8.4.1",
+    "@capacitor/preferences": "^8.0.1",
     "@lexical/markdown": "^0.45.0",
     "@lexical/react": "^0.45.0",
     "@lexical/rich-text": "^0.45.0",
@@ -41,6 +49,7 @@
   },
   "devDependencies": {
     "@antithesishq/bombadil": "^0.5.0",
+    "@capacitor/cli": "^8.4.1",
     "@cloudflare/vite-plugin": "^1.42.4",
     "@cloudflare/workers-types": "^4.20260630.1",
     "@playwright/test": "^1.61.1",

@@ -3,9 +3,7 @@ import editIcon from "@assets/edit.svg";
 import type { Note } from "../../../shared/types/notes.ts";
 import { effectiveHighlight } from "../../logic/notes/conversation.ts";
 import { noteTitle } from "../../logic/notes/format.ts";
-import { canDeleteNote } from "../../logic/notes/permissions.ts";
-import { canEditNote } from "../../logic/notes/permissions.ts";
-import { type NoteViewer } from "../../logic/notes/permissions.ts";
+import { canDeleteNote, canEditNote, type NoteViewer } from "../../logic/notes/permissions.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";
 
@@ -17,11 +15,7 @@ export interface NoteRefs {
   validSeqs: Set<number>;
   byId: Map<string, Note>;
   refs: Map<number, string>;
-  // Cross-note references need the live socket (server-assigned seq); gated off
-  // while disconnected.
   canReference: boolean;
-  // Note ids with an unsynced (pending) or server-refused (failed) local op, so
-  // authors can see the sync state of their own writes.
   pendingNoteIds: ReadonlySet<string>;
   failedNoteIds: ReadonlySet<string>;
 }
@@ -46,6 +40,7 @@ export function NoteCardView({
   body,
   refs,
   onReference,
+  imageUrlBase,
   id,
   deleted = false,
   jump,
@@ -56,6 +51,7 @@ export function NoteCardView({
   body: string;
   refs: Map<number, string>;
   onReference: (seq: number) => void;
+  imageUrlBase?: string;
   id?: string;
   deleted?: boolean;
   jump?: { onClick: () => void; disabled: boolean; title?: string };
@@ -80,7 +76,14 @@ export function NoteCardView({
         )}
         {actions}
       </div>
-      {body && <NoteBodyView body={body} refs={refs} onReference={onReference} />}
+      {body && (
+        <NoteBodyView
+          body={body}
+          refs={refs}
+          onReference={onReference}
+          imageUrlBase={imageUrlBase}
+        />
+      )}
     </div>
   );
 }
@@ -91,12 +94,16 @@ function NoteRow({
   refs,
   canWrite,
   viewer,
+  imageUrlBase,
+  onPasteImage,
 }: {
   note: Note;
   actions: NoteActions;
   refs: NoteRefs;
   canWrite: boolean;
   viewer: NoteViewer;
+  imageUrlBase?: string;
+  onPasteImage?: (file: File) => Promise<string | null>;
 }) {
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
@@ -139,6 +146,7 @@ function NoteRow({
           validSeqs={refs.validSeqs}
           canSubmit={canWrite}
           canReference={refs.canReference}
+          onPasteImage={onPasteImage}
         />
       </div>
     );
@@ -152,6 +160,7 @@ function NoteRow({
         body={note.body}
         refs={refs.refs}
         onReference={actions.onReference}
+        imageUrlBase={imageUrlBase}
         id={`note-${note.seq}`}
         deleted={deleted}
         jump={{
@@ -251,6 +260,7 @@ function NoteRow({
             validSeqs={refs.validSeqs}
             canSubmit={canWrite}
             canReference={refs.canReference}
+            onPasteImage={onPasteImage}
           />
         </div>
       )}
@@ -265,6 +275,8 @@ function Replies({
   refs,
   canWrite,
   viewer,
+  imageUrlBase,
+  onPasteImage,
   depth,
 }: {
   parent: Note;
@@ -273,6 +285,8 @@ function Replies({
   refs: NoteRefs;
   canWrite: boolean;
   viewer: NoteViewer;
+  imageUrlBase?: string;
+  onPasteImage?: (file: File) => Promise<string | null>;
   depth: number;
 }) {
   const children = childrenOf(parent.id);
@@ -280,7 +294,15 @@ function Replies({
 
   const content = children.map((child) => (
     <Fragment key={child.id}>
-      <NoteRow note={child} actions={actions} refs={refs} canWrite={canWrite} viewer={viewer} />
+      <NoteRow
+        note={child}
+        actions={actions}
+        refs={refs}
+        canWrite={canWrite}
+        viewer={viewer}
+        imageUrlBase={imageUrlBase}
+        onPasteImage={onPasteImage}
+      />
       <Replies
         parent={child}
         childrenOf={childrenOf}
@@ -288,6 +310,8 @@ function Replies({
         refs={refs}
         canWrite={canWrite}
         viewer={viewer}
+        imageUrlBase={imageUrlBase}
+        onPasteImage={onPasteImage}
         depth={depth + 1}
       />
     </Fragment>
@@ -303,6 +327,8 @@ export function NoteThread({
   refs,
   canWrite,
   viewer,
+  imageUrlBase,
+  onPasteImage,
 }: {
   root: Note;
   childrenOf: (id: string) => Note[];
@@ -310,10 +336,20 @@ export function NoteThread({
   refs: NoteRefs;
   canWrite: boolean;
   viewer: NoteViewer;
+  imageUrlBase?: string;
+  onPasteImage?: (file: File) => Promise<string | null>;
 }) {
   return (
     <li className="note-thread">
-      <NoteRow note={root} actions={actions} refs={refs} canWrite={canWrite} viewer={viewer} />
+      <NoteRow
+        note={root}
+        actions={actions}
+        refs={refs}
+        canWrite={canWrite}
+        viewer={viewer}
+        imageUrlBase={imageUrlBase}
+        onPasteImage={onPasteImage}
+      />
       <Replies
         parent={root}
         childrenOf={childrenOf}
@@ -321,6 +357,8 @@ export function NoteThread({
         refs={refs}
         canWrite={canWrite}
         viewer={viewer}
+        imageUrlBase={imageUrlBase}
+        onPasteImage={onPasteImage}
         depth={1}
       />
     </li>

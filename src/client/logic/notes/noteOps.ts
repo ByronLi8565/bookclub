@@ -1,9 +1,6 @@
 import { monotonicFactory } from "ulidx";
 import type { Highlight, HighlightAnchor, NoteOp } from "../../../shared/types/notes.ts";
 
-// Monotonic ULIDs give every op and every note a stable, sortable, globally
-// unique id generated on the client — the precondition for authoring and
-// replaying mutations while offline.
 const ulid = monotonicFactory();
 
 const now = (): string => new Date().toISOString();

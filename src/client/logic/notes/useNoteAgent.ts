@@ -11,6 +11,7 @@ import type { Highlight, HighlightAnchor } from "./highlights.ts";
 import { addNoteOp, addReplyOp, editNoteOp, rebindOp, removeNoteOp } from "./noteOps.ts";
 import { NoteStore } from "./noteStore.ts";
 import { spawnToast } from "../../ui/shared/toast/toastStore.ts";
+import { apiOrigin, isNative, loadSessionToken } from "../net/api.ts";
 
 export type { OnlinePeer } from "../../../server/state/NoteAgent.ts";
 
@@ -31,9 +32,6 @@ export interface NoteSync {
 
 class FlushError extends Data.TaggedError("FlushError")<{ readonly cause: unknown }> {}
 
-// Bounded, jittered backoff for transient transport failures. Offline is *not*
-// modeled as a retry — flush short-circuits while the socket is closed and the
-// reconnect re-triggers it, so we never burn attempts against a dead link.
 const retrySchedule = Schedule.exponential("300 millis").pipe(
   Schedule.jittered,
   Schedule.both(Schedule.recurs(4)),
@@ -50,8 +48,6 @@ export function useNoteAgent(
   });
   if (presence.groupId !== groupId) setPresence({ groupId, online: [] });
 
-  // One store per (group, identity). Recreated synchronously when either
-  // changes so a stale queue never leaks across groups or users.
   const storeKey = groupId && author ? `${groupId}:${author.id}` : null;
   const storeRef = useRef<{ key: string; store: NoteStore } | null>(null);
   if (storeKey && groupId && author && storeRef.current?.key !== storeKey) {
@@ -63,25 +59,27 @@ export function useNoteAgent(
   const agent = useAgent<NoteAgent, NoteState>({
     agent: "note-agent",
     name: groupId ?? "idle",
+    ...(isNative
+      ? {
+          host: new URL(apiOrigin).host,
+          // null tokens are dropped by partysocket's query serializer, so an
+          // unauthenticated socket simply omits the param (and the gate 401s).
+          query: async () => ({ token: await loadSessionToken() }),
+        }
+      : {}),
     onStateUpdate: (state, source) => {
-      // Only the authoritative server snapshot updates our baseline. Pending
-      // local ops are preserved and pruned by confirmed opId inside ingestServer.
       if (source === "server" && store) void Effect.runPromise(store.ingestServer(state));
     },
     onMessage: (event) => {
-      try {
-        const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
-        if (msg.type === "presence" && msg.users) setPresence({ groupId, online: msg.users });
-      } catch {}
+      const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
+      if (msg.type === "presence" && msg.users) setPresence({ groupId, online: msg.users });
     },
   });
 
-  // Keep a live handle to the agent for the flush effect without re-creating it.
   const agentRef = useRef(agent);
   agentRef.current = agent;
   const flushingRef = useRef(false);
 
-  // Hydrate the local cache once per store so notes render offline immediately.
   useEffect(() => {
     if (!store) return;
     void Effect.runPromise(store.hydrate());
@@ -111,19 +109,14 @@ export function useNoteAgent(
           : Effect.void,
       ),
       Effect.retry(retrySchedule),
-      // Out of retries (still failing) or offline: leave ops queued for the next
-      // reconnect. Never drop them.
       Effect.catch(() => Effect.void),
       Effect.ensuring(Effect.sync(() => (flushingRef.current = false))),
     );
     void Effect.runPromise(program).then(() => {
-      // Drain anything appended during the flight.
       if (store.hasPending()) flush();
     });
   };
 
-  // Flush whenever we are connected and have unsynced work (covers initial
-  // connect, reconnect, and freshly-enqueued ops).
   const view = useSyncExternalStore(
     store ? store.subscribe : noopSubscribe,
     store ? store.getView : emptyGetView,
