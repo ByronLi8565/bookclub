@@ -3,18 +3,37 @@ import { Effect } from "effect";
 import { monotonicFactory } from "ulidx";
 import { groupUrlName, publicIdFromGroupUrl } from "../../shared/groupUrls.ts";
 import {
+  BookclubArchiveError,
+  BOOKCLUB_ARCHIVE_EXTENSION,
+  createBookclubArchive,
+  decodeBookclubArchive,
+  MAX_BOOKCLUB_ARCHIVE_BYTES,
+} from "../../shared/backups/bookclubArchive.ts";
+import { noteImageIds } from "../../shared/notes/images.ts";
+import {
   GroupFailureReason,
   isGroupRole,
   type GroupSummary,
   type Membership,
   type RosterEntry,
+  type BookMetadataPatch,
 } from "../../shared/types/groups.ts";
 import { currentSource, sourceById } from "../../shared/sources.ts";
-import { deleteImagesForScope, getImage, storeImage, validImageId } from "../services/images.ts";
+import {
+  deleteImages,
+  deleteImagesForScope,
+  getImage,
+  imageKey,
+  listImages,
+  restoreImage,
+  storeImage,
+  validImageId,
+} from "../services/images.ts";
 import { getSource, storeSource } from "../services/sources.ts";
 import { sendInvite } from "../services/email.ts";
 import type { Env } from "../env.ts";
 import type {
+  AddSourceResult,
   DeleteGroupResult,
   DeleteSourceResult,
   GroupAgent,
@@ -231,7 +250,16 @@ export function resolveGroupView(
       const membership = yield* tryPromise(() => group.membership(me.id));
       // Self-heal the caller's club index if it drifted out of sync (e.g. a
       // club created while their AuthAgent record was missing).
-      if (membership.isMember) yield* tryPromise(() => group.reindexMember(me));
+      if (membership.isMember) {
+        yield* tryPromise(() => group.reindexMember(me));
+        const auth = yield* tryPromise(() => getAgentByName(env.AuthAgent, me.email));
+        const profile = yield* tryPromise(() => auth.getClubProfile(summary.groupId));
+        if (profile) {
+          yield* tryPromise(() =>
+            group.setMemberProfile(me.id, profile.displayName, profile.avatarImageId),
+          );
+        }
+      }
       const members = membership.isMember ? yield* tryPromise(() => group.roster()) : [];
       return { group: summary, membership, members };
     }),
@@ -381,17 +409,25 @@ export function uploadSource(
       const title = rawTitle ? decodeURIComponent(rawTitle).trim() || null : null;
       const rawAuthor = request.headers.get("X-Source-Author");
       const author = rawAuthor ? decodeURIComponent(rawAuthor).trim() || null : null;
+      const rawWordCount = request.headers.get("X-Source-Word-Count");
+      const parsedWordCount = rawWordCount === null ? null : Number(rawWordCount);
+      const wordCount =
+        parsedWordCount !== null && Number.isSafeInteger(parsedWordCount) && parsedWordCount >= 0
+          ? parsedWordCount
+          : null;
       const { id, kind, contentType: storedType, size } = stored.source;
-      yield* tryPromise(() =>
+      const added: AddSourceResult = yield* tryPromise(() =>
         group.addSource(me.id, id, {
           kind,
           contentType: storedType,
           size,
           title,
           author,
+          wordCount,
           addedBy: me.id,
         }),
       );
+      if (!added.ok) return yield* Effect.fail(failReason(added.reason));
       return { hash: id };
     }),
   );
@@ -445,6 +481,51 @@ export function deleteBook(
         getAgentByName(env.NoteAgent, summary.groupId),
       )) as unknown as Async<NoteAgent>;
       yield* tryPromise(() => notes.removeSource(sourceId));
+      return { group: result.summary };
+    }),
+  );
+}
+
+export function updateBookMetadata(
+  env: Env,
+  request: Request,
+  groupId: string,
+  sourceId: string,
+  body: unknown,
+): Promise<WorkflowResult<{ group: GroupSummary }>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      if (!body || typeof body !== "object") {
+        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+      }
+      const input = body as Record<string, unknown>;
+      const patch: BookMetadataPatch = {};
+      if (Object.hasOwn(input, "author")) {
+        if (input.author !== null && typeof input.author !== "string") {
+          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        }
+        const author = typeof input.author === "string" ? input.author.trim() : null;
+        patch.author = author ? author.slice(0, 200) : null;
+      }
+      if (Object.hasOwn(input, "wordCount")) {
+        if (
+          input.wordCount !== null &&
+          (!Number.isSafeInteger(input.wordCount) || (input.wordCount as number) < 0)
+        ) {
+          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        }
+        patch.wordCount = input.wordCount as number | null;
+      }
+      if (!Object.hasOwn(patch, "author") && !Object.hasOwn(patch, "wordCount")) {
+        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+      }
+
+      const { group } = yield* requireGroup(env, groupId);
+      const result: RenameResult = yield* tryPromise(() =>
+        group.updateBookMetadata(me.id, sourceId, patch),
+      );
+      if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
     }),
   );
@@ -515,13 +596,88 @@ export function uploadImage(
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.UploadNoteImage);
       const bytes = yield* tryPromise(() => request.arrayBuffer());
       const stored = yield* tryPromise(() =>
-        storeImage(env, summary.groupId, bytes, request.headers.get("Content-Type")),
+        storeImage(env, summary.groupId, bytes, request.headers.get("Content-Type"), me.id),
       );
       if (!stored.ok) {
         const status = stored.reason === "too_large" ? 413 : 400;
         return yield* Effect.fail(fail(status, stored.reason));
       }
       return stored.image;
+    }),
+  );
+}
+
+export interface GroupImageSummary {
+  id: string;
+  size: number;
+  contentType: string;
+  uploadedAt: string;
+  uploadedBy: string | null;
+  uploaderName: string;
+}
+
+export function listGroupImages(
+  env: Env,
+  request: Request,
+  groupId: string,
+): Promise<WorkflowResult<{ images: GroupImageSummary[]; totalSize: number }>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      const { group, summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ViewClub);
+      const [objects, roster] = yield* Effect.all([
+        tryPromise(() => listImages(env, summary.groupId)),
+        tryPromise(() => group.roster()),
+      ]);
+      const names = new Map(roster.map((member) => [member.id, member.name]));
+      return {
+        images: objects.map((image) => ({
+          ...image,
+          uploaderName: image.uploadedBy
+            ? (names.get(image.uploadedBy) ?? "Unknown member")
+            : "Unknown member",
+        })),
+        totalSize: objects.reduce((total, image) => total + image.size, 0),
+      };
+    }),
+  );
+}
+
+export function deleteImageUpload(
+  env: Env,
+  request: Request,
+  groupId: string,
+  imageId: string,
+): Promise<WorkflowResult<null>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      const { group, summary } = yield* requireGroupAction(
+        env,
+        me,
+        groupId,
+        GroupAction.UploadNoteImage,
+      );
+      if (!validImageId(imageId)) {
+        return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
+      }
+      const object = yield* tryPromise(() => env.IMAGES.head(imageKey(summary.groupId, imageId)));
+      if (!object) return null;
+      const notes = (yield* tryPromise(() =>
+        getAgentByName(env.NoteAgent, summary.groupId),
+      )) as unknown as Async<NoteAgent>;
+      const membership = yield* tryPromise(() => group.membership(me.id));
+      if (membership.role && permits(membership.role, GroupAction.DeleteAnyImage)) {
+        yield* tryPromise(() => notes.deleteImage(imageId));
+        return null;
+      }
+      if (object.customMetadata?.uploadedBy !== me.id) {
+        return yield* Effect.fail(fail(403, GroupFailureReason.Forbidden));
+      }
+      const referenced = yield* tryPromise(() => notes.referencesImage(imageId));
+      if (referenced) return yield* Effect.fail(fail(409, WorkflowError.InvalidRequest));
+      yield* tryPromise(() => deleteImages(env, summary.groupId, [imageId]));
+      return null;
     }),
   );
 }
@@ -544,6 +700,128 @@ export function fetchImage(
       return {
         object,
         contentType: object.httpMetadata?.contentType ?? "application/octet-stream",
+      };
+    }),
+  );
+}
+
+export function exportGroupBackup(
+  env: Env,
+  request: Request,
+  groupId: string,
+): Promise<WorkflowResult<{ bytes: Uint8Array; filename: string }>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ManageBackups);
+      const notesAgent = (yield* tryPromise(() =>
+        getAgentByName(env.NoteAgent, summary.groupId),
+      )) as unknown as Async<NoteAgent>;
+      const state = yield* tryPromise(() => notesAgent.exportState());
+      const imageIds = new Set(state.notes.flatMap((note) => [...noteImageIds(note.body)]));
+      const images = yield* Effect.forEach(
+        [...imageIds],
+        (imageId) =>
+          Effect.gen(function* () {
+            const object = yield* tryPromise(() => getImage(env, summary.groupId, imageId));
+            if (!object) return yield* Effect.fail(fail(500, WorkflowError.InternalError));
+            const bytes = new Uint8Array(yield* tryPromise(() => object.arrayBuffer()));
+            return {
+              id: imageId,
+              contentType: object.httpMetadata?.contentType ?? "application/octet-stream",
+              uploadedBy: object.customMetadata?.uploadedBy ?? null,
+              bytes,
+            };
+          }),
+        { concurrency: 8 },
+      );
+      const createdAt = new Date().toISOString();
+      const bytes = yield* tryPromise(() =>
+        createBookclubArchive({
+          createdAt,
+          club: { id: summary.groupId, name: summary.displayName, publicId: summary.publicId },
+          nextSeq: state.nextSeq,
+          books: summary.sources.map((sourceId) => ({
+            sourceId,
+            title: summary.bookTitles[sourceId] ?? summary.sourceMeta[sourceId]?.title ?? null,
+            meta: summary.sourceMeta[sourceId],
+          })),
+          notes: state.notes,
+          images,
+        }),
+      );
+      if (bytes.byteLength > MAX_BOOKCLUB_ARCHIVE_BYTES) {
+        return yield* Effect.fail(fail(413, WorkflowError.TooLarge));
+      }
+      const timestamp = createdAt.replaceAll(":", "-").replace(".", "-");
+      return { bytes, filename: `${summary.slug}-${timestamp}${BOOKCLUB_ARCHIVE_EXTENSION}` };
+    }),
+  );
+}
+
+export function restoreGroupBackup(
+  env: Env,
+  request: Request,
+  groupId: string,
+): Promise<WorkflowResult<{ notes: number; images: number; createdAt: string }>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ManageBackups);
+      const contentLength = Number(request.headers.get("Content-Length"));
+      if (Number.isFinite(contentLength) && contentLength > MAX_BOOKCLUB_ARCHIVE_BYTES) {
+        return yield* Effect.fail(fail(413, WorkflowError.TooLarge));
+      }
+      const raw = new Uint8Array(yield* tryPromise(() => request.arrayBuffer()));
+      const decoded = yield* tryPromise(() => decodeBookclubArchive(raw));
+      if (!decoded.ok) {
+        const status = decoded.error === BookclubArchiveError.TooLarge ? 413 : 400;
+        const error =
+          decoded.error === BookclubArchiveError.TooLarge
+            ? WorkflowError.TooLarge
+            : WorkflowError.InvalidBackup;
+        return yield* Effect.fail(fail(status, error));
+      }
+      const backup = decoded.value;
+      if (backup.manifest.club.id !== summary.groupId) {
+        return yield* Effect.fail(fail(409, WorkflowError.BackupClubMismatch));
+      }
+
+      const existingImages = yield* tryPromise(() => listImages(env, summary.groupId));
+      yield* Effect.forEach(
+        backup.images,
+        (image) =>
+          tryPromise(() =>
+            restoreImage(
+              env,
+              summary.groupId,
+              image.id,
+              image.bytes,
+              image.contentType,
+              image.uploadedBy,
+            ),
+          ),
+        { concurrency: 8, discard: true },
+      );
+      const notesAgent = (yield* tryPromise(() =>
+        getAgentByName(env.NoteAgent, summary.groupId),
+      )) as unknown as Async<NoteAgent>;
+      yield* tryPromise(() =>
+        notesAgent.importState({
+          notes: backup.notes,
+          nextSeq: backup.manifest.nextSeq,
+          appliedOpIds: [],
+        }),
+      );
+      const restoredIds = new Set(backup.images.map((image) => image.id));
+      const obsoleteIds = existingImages
+        .map((image) => image.id)
+        .filter((imageId) => !restoredIds.has(imageId));
+      yield* tryPromise(() => deleteImages(env, summary.groupId, obsoleteIds));
+      return {
+        notes: backup.notes.length,
+        images: backup.images.length,
+        createdAt: backup.manifest.createdAt,
       };
     }),
   );

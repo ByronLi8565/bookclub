@@ -15,6 +15,8 @@ export const WorkflowError = {
   NoBook: "no_book",
   KindMismatch: "kind_mismatch",
   TooLarge: "too_large",
+  InvalidBackup: "invalid_backup",
+  BackupClubMismatch: "backup_club_mismatch",
 } as const;
 
 export type WorkflowError = (typeof WorkflowError)[keyof typeof WorkflowError] | GroupFailureReason;

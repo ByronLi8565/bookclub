@@ -1,6 +1,4 @@
-import { useEffect, useState } from "react";
-import { cachedSourceSize, downloadSourceCopy } from "../../logic/groups/sourceAccess.ts";
-import { isNative } from "../../logic/net/api.ts";
+import { useState } from "react";
 import {
   setReaderPref,
   useReaderPrefs,
@@ -9,11 +7,10 @@ import {
   type SmartArrows,
 } from "../../logic/settings/userPrefs.ts";
 import { AccountSettings } from "../shared/AccountSettings.tsx";
-import { Loading } from "../shared/Loading.tsx";
 import { DropdownMenu, type DropdownTriggerProps } from "../shared/DropdownMenu.tsx";
 import { Modal, ModalPagerTabs } from "../shared/Modal.tsx";
-import { spawnToast } from "../shared/toast/toastStore.ts";
-import { formatBytes } from "../../../shared/format.ts";
+import type { ClubProfile } from "../../../shared/types/profiles.ts";
+import { UserSettings } from "./UserSettings.tsx";
 
 function SettingDropdown<T extends string>({
   value,
@@ -70,21 +67,22 @@ function SettingDropdownTrigger({
 }
 
 export interface SettingsBook {
-  sourceId: string;
-  groupRef: string;
+  groupId: string;
+  profile: ClubProfile;
+  onProfileChange: (profile: ClubProfile) => void;
 }
 
-type Category = "account" | "info" | "pdf";
+type Category = "account" | "user" | "info" | "pdf";
 
-// Categories are contextual. Account settings belong to the person, not a club,
-// so they surface only from the homepage (no book) — the per-club settings a
-// reader opens are strictly about the book (Info, PDF), never the account.
+// Account security is global and belongs on the homepage. Reader settings mix
+// a club-specific profile with controls for the currently open book.
 function categoriesFor(
   book: SettingsBook | undefined,
   signedIn: boolean,
 ): { id: Category; label: string }[] {
   if (book)
     return [
+      { id: "user", label: "User" },
       { id: "info", label: "Info" },
       { id: "pdf", label: "PDF" },
     ];
@@ -103,111 +101,37 @@ export function SettingsModal({
   const categories = categoriesFor(book, signedIn);
   const [category, setCategory] = useState<Category>(categories[0]?.id ?? "account");
 
-  const [cachedSize, setCachedSize] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const { readingPositionOpenPolicy, smartArrows, pdfPageLayout } = useReaderPrefs();
-
-  useEffect(() => {
-    if (!book) return;
-    let cancelled = false;
-    void cachedSourceSize(book.sourceId).then((size) => {
-      if (cancelled) return;
-      setCachedSize(size);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [book]);
-
-  async function onDownload(): Promise<void> {
-    if (!book) return;
-    setBusy(true);
-    const result = await downloadSourceCopy(book.groupRef, book.sourceId);
-    setBusy(false);
-    if (result.ok) {
-      if (isNative) {
-        spawnToast("Saved for offline", "This book now reads without a connection.", {
-          type: "info",
-        });
-        void cachedSourceSize(book.sourceId).then(setCachedSize);
-      } else {
-        spawnToast("Downloading book", "Saving a copy to your device.", { type: "info" });
-      }
-    } else {
-      spawnToast("Download failed", "Couldn't fetch the book from storage.", { type: "error" });
-    }
-  }
 
   return (
     <Modal title={book ? "settings" : "account settings"} onClose={onClose}>
       <div className="modal-body settings-body">
         {category === "account" && <AccountSettings />}
+        {category === "user" && book && (
+          <UserSettings
+            groupId={book.groupId}
+            profile={book.profile}
+            onChange={book.onProfileChange}
+          />
+        )}
         {category === "info" && book && (
-          <>
-            <section className="settings-item">
-              <div className="settings-item-text">
-                <h2 className="settings-item-head">
-                  {isNative ? "Offline copy" : "Local book copy"}
-                </h2>
-                {loading ? (
-                  <Loading className="loading--settings-detail" />
-                ) : cachedSize === null ? (
-                  <p className="settings-item-desc">
-                    {isNative ? "Not downloaded yet." : "Not stored."}
-                  </p>
-                ) : (
-                  <p className="settings-item-desc">
-                    {isNative ? "Saved on this device" : "Browser storage"} ·{" "}
-                    {formatBytes(cachedSize)}
-                  </p>
-                )}
-              </div>
-              <div className="settings-item-control">
-                <button
-                  type="button"
-                  className="settings-action"
-                  onClick={() => void onDownload()}
-                  disabled={busy || loading || (isNative && cachedSize !== null)}
-                  title={
-                    isNative
-                      ? "Save this book on your device for offline reading"
-                      : "Download a copy of the book to your device"
-                  }
-                >
-                  {busy
-                    ? isNative
-                      ? "saving…"
-                      : "downloading…"
-                    : isNative && cachedSize !== null
-                      ? "Saved"
-                      : isNative
-                        ? "Save offline"
-                        : "Download"}
-                </button>
-              </div>
-            </section>
-            <section className="settings-item">
-              <div className="settings-item-text">
-                <h2 className="settings-item-head">Opening position</h2>
-                <p className="settings-item-desc">
-                  Whether to sync reading position across browsers
-                </p>
-              </div>
-              <div className="settings-item-control">
-                <SettingDropdown<ReadingPositionOpenPolicy>
-                  value={readingPositionOpenPolicy}
-                  onChange={(v) => setReaderPref("readingPositionOpenPolicy", v)}
-                  ariaLabel="Opening reading position"
-                  options={[
-                    { value: "prefer-sync", label: "Sync" },
-                    { value: "prefer-local", label: "Local" },
-                  ]}
-                />
-              </div>
-            </section>
-          </>
+          <section className="settings-item">
+            <div className="settings-item-text">
+              <h2 className="settings-item-head">Opening position</h2>
+              <p className="settings-item-desc">Whether to sync reading position across browsers</p>
+            </div>
+            <div className="settings-item-control">
+              <SettingDropdown<ReadingPositionOpenPolicy>
+                value={readingPositionOpenPolicy}
+                onChange={(v) => setReaderPref("readingPositionOpenPolicy", v)}
+                ariaLabel="Opening reading position"
+                options={[
+                  { value: "prefer-sync", label: "Sync" },
+                  { value: "prefer-local", label: "Local" },
+                ]}
+              />
+            </div>
+          </section>
         )}
         {category === "pdf" && (
           <>

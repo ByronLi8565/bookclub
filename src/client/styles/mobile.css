@@ -15,8 +15,7 @@
     white-space: nowrap;
   }
 
-  .reader-bar .page-count,
-  .sync-badge {
+  .reader-bar .page-count {
     display: none;
   }
 

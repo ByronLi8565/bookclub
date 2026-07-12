@@ -1,10 +1,5 @@
 import { useEffect, useReducer, useRef } from "react";
-import {
-  fetchGroup,
-  getInviteLink,
-  inviteToGroup,
-  type RosterEntry,
-} from "../../logic/groups/groupClient.ts";
+import { getInviteLink, inviteToGroup } from "../../logic/groups/groupClient.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { Modal } from "../shared/Modal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
@@ -12,8 +7,6 @@ import { spawnToast } from "../shared/toast/toastStore.ts";
 interface InviteState {
   link: string | null;
   linkLoading: boolean;
-  members: RosterEntry[];
-  membersLoading: boolean;
   email: string;
   busy: boolean;
   copied: boolean;
@@ -22,7 +15,6 @@ interface InviteState {
 type InviteAction =
   | { type: "reset" }
   | { type: "linkLoaded"; link: string | null }
-  | { type: "membersLoaded"; members: RosterEntry[] }
   | { type: "email"; email: string }
   | { type: "busy"; busy: boolean }
   | { type: "sent" }
@@ -31,8 +23,6 @@ type InviteAction =
 const initialInviteState: InviteState = {
   link: null,
   linkLoading: true,
-  members: [],
-  membersLoading: true,
   email: "",
   busy: false,
   copied: false,
@@ -44,8 +34,6 @@ function inviteReducer(state: InviteState, action: InviteAction): InviteState {
       return initialInviteState;
     case "linkLoaded":
       return { ...state, link: action.link, linkLoading: false, busy: false };
-    case "membersLoaded":
-      return { ...state, members: action.members, membersLoading: false };
     case "email":
       return { ...state, email: action.email };
     case "busy":
@@ -66,9 +54,25 @@ export function InviteModal({
   displayName: string;
   onClose: () => void;
 }): React.ReactElement {
+  return (
+    <Modal title={`invite to ${displayName}`} className="modal--invite" onClose={onClose}>
+      <div className="modal-body">
+        <InviteControls groupRef={groupRef} />
+      </div>
+    </Modal>
+  );
+}
+
+export function InviteControls({
+  groupRef,
+  children,
+}: {
+  groupRef: string;
+  children?: React.ReactNode;
+}): React.ReactElement {
   const [state, dispatch] = useReducer(inviteReducer, initialInviteState);
   const loadedGroupRef = useRef(groupRef);
-  const { link, linkLoading, members, membersLoading, email, busy, copied } = state;
+  const { link, linkLoading, email, busy, copied } = state;
 
   if (loadedGroupRef.current !== groupRef) {
     loadedGroupRef.current = groupRef;
@@ -78,12 +82,7 @@ export function InviteModal({
   useEffect(() => {
     let cancelled = false;
     void getInviteLink(groupRef).then((r) => {
-      if (cancelled) return;
-      dispatch({ type: "linkLoaded", link: r.ok ? r.value.link : null });
-    });
-    void fetchGroup(groupRef).then((g) => {
-      if (cancelled) return;
-      dispatch({ type: "membersLoaded", members: g.status === "ok" ? g.members : [] });
+      if (!cancelled) dispatch({ type: "linkLoaded", link: r.ok ? r.value.link : null });
     });
     return () => {
       cancelled = true;
@@ -124,75 +123,58 @@ export function InviteModal({
   const shownLink = link ? link.replace(/^https?:\/\//u, "") : "";
 
   return (
-    <Modal title={`invite to ${displayName}`} className="modal--invite" onClose={onClose}>
-      <div className="modal-body">
-        <form onSubmit={(e) => void onSendEmail(e)}>
-          <input
-            type="email"
-            aria-label="Invitee email"
-            placeholder="invite by email"
-            value={email}
-            onChange={(e) => dispatch({ type: "email", email: e.target.value })}
-          />
-          <button
-            type="submit"
-            className="primary"
-            disabled={busy || email === ""}
-            title="Send invite"
-          >
-            send invite
-          </button>
-        </form>
+    <>
+      <form onSubmit={(e) => void onSendEmail(e)}>
+        <input
+          type="email"
+          aria-label="Invitee email"
+          placeholder="invite by email"
+          value={email}
+          onChange={(e) => dispatch({ type: "email", email: e.target.value })}
+        />
+        <button
+          type="submit"
+          className="primary"
+          disabled={busy || email === ""}
+          title="Send invite"
+        >
+          send invite
+        </button>
+      </form>
 
-        <div className="invite-people">
-          <p className="invite-people-head label">People with access</p>
-          {membersLoading ? (
-            <Loading className="loading--invite-people" />
-          ) : (
-            <ul className="invite-people-list">
-              {members.map((m) => (
-                <li key={m.id}>
-                  <span className="invite-avatar">{m.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="invite-person-name truncate">{m.name}</span>
-                  <span className="invite-person-role label">{m.role}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {children}
 
-        <div className="invite-share">
-          <p className="modal-note">Or share a link anyone can use to join:</p>
-          {linkLoading ? (
-            <Loading className="loading--invite-link" />
-          ) : (
-            <div className="invite-link">
-              <input type="text" readOnly value={shownLink} aria-label="invite link" />
-              <button
-                type="button"
-                className="invite-icon icon-button"
-                onClick={() => void onCopy()}
-                disabled={!link}
-                aria-label="copy link"
-                title={copied ? "Copied" : "Copy link"}
-              >
-                {copied ? <CheckIcon /> : <CopyIcon />}
-              </button>
-              <button
-                type="button"
-                className="invite-icon icon-button"
-                onClick={() => void onRotate()}
-                disabled={busy}
-                aria-label="regenerate link"
-                title="Regenerate link"
-              >
-                <RotateIcon />
-              </button>
-            </div>
-          )}
-        </div>
+      <div className="invite-share">
+        <p className="modal-note">Invite with link:</p>
+        {linkLoading ? (
+          <Loading className="loading--invite-link" />
+        ) : (
+          <div className="invite-link">
+            <input type="text" readOnly value={shownLink} aria-label="invite link" />
+            <button
+              type="button"
+              className="invite-icon icon-button"
+              onClick={() => void onCopy()}
+              disabled={!link}
+              aria-label="copy link"
+              title={copied ? "Copied" : "Copy link"}
+            >
+              {copied ? <CheckIcon /> : <CopyIcon />}
+            </button>
+            <button
+              type="button"
+              className="invite-icon icon-button"
+              onClick={() => void onRotate()}
+              disabled={busy}
+              aria-label="regenerate link"
+              title="Regenerate link"
+            >
+              <RotateIcon />
+            </button>
+          </div>
+        )}
       </div>
-    </Modal>
+    </>
   );
 }
 

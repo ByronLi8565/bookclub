@@ -33,7 +33,13 @@ export interface SourceMeta {
   size: number;
   title?: string | null;
   author?: string | null;
+  wordCount?: number | null;
   addedBy: string;
+}
+
+export interface BookMetadataPatch {
+  author?: string | null;
+  wordCount?: number | null;
 }
 
 export interface GroupSummary {
@@ -58,4 +64,5 @@ export interface RosterEntry {
   name: string;
   email: string;
   role: GroupRole;
+  avatarImageId?: string;
 }

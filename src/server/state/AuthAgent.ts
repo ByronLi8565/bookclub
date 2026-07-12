@@ -19,6 +19,7 @@ export interface User {
   avatarImageId?: string;
   createdAt: string;
   groupIds: string[];
+  clubDisplayNames?: Record<string, string>;
 }
 
 function positionKey(groupId: string, sourceId: string): string {
@@ -67,13 +68,28 @@ export const AuthFailureReason = {
 
 export type AuthFailureReason = (typeof AuthFailureReason)[keyof typeof AuthFailureReason];
 
-export type VerifyResult = { ok: true; user: User } | { ok: false; reason: AuthFailureReason };
+type AuthFailure<R extends AuthFailureReason> = { ok: false; reason: R };
+
+export type VerifyResult =
+  | { ok: true; user: User }
+  | AuthFailure<
+      | typeof AuthFailureReason.NoPending
+      | typeof AuthFailureReason.Expired
+      | typeof AuthFailureReason.TooManyAttempts
+      | typeof AuthFailureReason.BadCode
+    >;
 
 export type PasswordLoginResult =
   | { ok: true; user: User }
-  | { ok: false; reason: AuthFailureReason };
+  | AuthFailure<
+      | typeof AuthFailureReason.NoPassword
+      | typeof AuthFailureReason.RateLimited
+      | typeof AuthFailureReason.BadPassword
+    >;
 
-export type SetPasswordResult = { ok: true } | { ok: false; reason: AuthFailureReason };
+export type SetPasswordResult =
+  | { ok: true }
+  | AuthFailure<typeof AuthFailureReason.NoUser | typeof AuthFailureReason.BadCurrent>;
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -159,6 +175,26 @@ export class AuthAgent extends Agent<Env, AuthState> {
     const user = { ...this.state.user, avatarImageId: imageId };
     this.setState({ ...this.state, user });
     return user;
+  }
+
+  getClubProfile(groupId: string): { displayName: string; avatarImageId?: string } | null {
+    const user = this.state.user;
+    if (!user) return null;
+    return {
+      displayName: user.clubDisplayNames?.[groupId] ?? user.displayName,
+      ...(user.avatarImageId ? { avatarImageId: user.avatarImageId } : {}),
+    };
+  }
+
+  setClubDisplayName(groupId: string, displayName: string): User | null {
+    const user = this.state.user;
+    if (!user) return null;
+    const next = {
+      ...user,
+      clubDisplayNames: { ...user.clubDisplayNames, [groupId]: displayName },
+    };
+    this.setState({ ...this.state, user: next });
+    return next;
   }
 
   hasPassword(): boolean {
@@ -304,9 +340,10 @@ export class AuthAgent extends Agent<Env, AuthState> {
     const user = this.state.user;
     if (!user || !user.groupIds.includes(groupId)) return;
     const prefix = `${groupId}:`;
+    const { [groupId]: _removedName, ...clubDisplayNames } = user.clubDisplayNames ?? {};
     this.setState({
       ...this.state,
-      user: { ...user, groupIds: user.groupIds.filter((id) => id !== groupId) },
+      user: { ...user, groupIds: user.groupIds.filter((id) => id !== groupId), clubDisplayNames },
       readingPositions: Object.fromEntries(
         Object.entries(this.state.readingPositions ?? {}).filter(
           ([key]) => !key.startsWith(prefix),

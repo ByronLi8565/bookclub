@@ -98,6 +98,7 @@ export function useBookUpload(
       inspected.health,
       inspected.metadata.title,
       inspected.metadata.author,
+      inspected.metadata.wordCount,
     );
     if (result.ok) {
       onUploaded(result.value.source.id);

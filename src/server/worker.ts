@@ -9,6 +9,7 @@ import { normalizeEmail } from "../shared/email.ts";
 import { readJson } from "./http.ts";
 import { backupAll, listBackups, pruneBackups, restoreFrom } from "./backup.ts";
 import { constantTimeEqual } from "../shared/crypto.ts";
+import { isDevAuth } from "./auth/devAuth.ts";
 
 export { NoteAgent } from "./state/NoteAgent.ts";
 export { AuthAgent } from "./state/AuthAgent.ts";
@@ -44,10 +45,6 @@ app.use("*", async (c, next) => {
     c.res.headers.append("Vary", "Origin");
   }
 });
-
-function isDevAuth(env: Env): boolean {
-  return !env.EMAIL || !env.EMAIL_FROM;
-}
 
 app.post("/auth/start", async (c) => {
   const body = await readJson(c.req.raw);

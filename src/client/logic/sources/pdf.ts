@@ -244,13 +244,15 @@ export async function inspectPdf(
         const page = await doc.getPage(index + 1);
         try {
           const items = await pageTextItems(page);
-          const text = items.map((i) => i.str).join("");
+          const text = items.map((i) => i.str).join(" ");
+          const trimmed = text.trim();
           return {
-            hasText: text.trim() !== "",
+            hasText: trimmed !== "",
             hasGeometry: items.some(
               (i) => i.transform.length >= 6 && (i.width > 0 || i.height > 0),
             ),
             chars: text.length,
+            words: trimmed === "" ? 0 : trimmed.split(/\s+/u).length,
             replacementChars: (text.match(/\uFFFD/gu) ?? []).length,
           };
         } finally {
@@ -264,6 +266,7 @@ export async function inspectPdf(
     const pagesWithText = pageStats.filter((page) => page.hasText).length;
     const pagesWithGeometry = pageStats.filter((page) => page.hasGeometry).length;
     const totalChars = pageStats.reduce((total, page) => total + page.chars, 0);
+    metadata.wordCount = pageStats.reduce((total, page) => total + page.words, 0);
     const replacementChars = pageStats.reduce((total, page) => total + page.replacementChars, 0);
 
     if (pagesWithText === 0) {

@@ -1,7 +1,14 @@
 import type { Conversation } from "../../logic/notes/conversation.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
-import { NoteThread, type NoteActions, type NoteRefs, type NoteViewer } from "./NoteThread.tsx";
+import type { UploadedNoteImage } from "./editor/NoteImageNode.tsx";
+import {
+  NoteThread,
+  type AvatarResolver,
+  type NoteActions,
+  type NoteRefs,
+  type NoteViewer,
+} from "./NoteThread.tsx";
 
 export function NotePanel({
   conversation,
@@ -17,6 +24,7 @@ export function NotePanel({
   viewer,
   context,
   imageUrlBase,
+  avatarFor,
 }: {
   conversation: Conversation;
   canWrite: boolean;
@@ -25,12 +33,13 @@ export function NotePanel({
   composeInitialBody: string;
   onComposeSave: (body: string) => void;
   onComposeCancel: () => void;
-  onPasteImage?: (file: File) => Promise<string | null>;
+  onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   actions: NoteActions;
   refs: NoteRefs;
   viewer: NoteViewer;
   context?: React.ReactNode;
   imageUrlBase?: string;
+  avatarFor?: AvatarResolver;
 }) {
   const { roots } = conversation;
 
@@ -55,6 +64,7 @@ export function NotePanel({
               viewer={viewer}
               imageUrlBase={imageUrlBase}
               onPasteImage={onPasteImage}
+              avatarFor={avatarFor}
             />
           ))}
         {composing && (
@@ -68,6 +78,7 @@ export function NotePanel({
               canSubmit={canWrite}
               canReference={refs.canReference}
               onPasteImage={onPasteImage}
+              imageUrlBase={imageUrlBase}
             />
           </li>
         )}

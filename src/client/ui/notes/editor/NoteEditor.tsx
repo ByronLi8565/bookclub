@@ -12,15 +12,33 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { $isQuoteNode, QuoteNode } from "@lexical/rich-text";
-import { $createParagraphNode, $createTextNode, $getRoot, FORMAT_TEXT_COMMAND } from "lexical";
+import {
+  $getNodeByKey,
+  $getRoot,
+  $insertNodes,
+  $nodesOfType,
+  $createParagraphNode,
+  CLEAR_HISTORY_COMMAND,
+  FORMAT_TEXT_COMMAND,
+  type NodeKey,
+} from "lexical";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NOTE_TRANSFORMERS } from "../../../logic/notes/renderHtml.ts";
+import { noteImageIds } from "../../../../shared/notes/images.ts";
+import {
+  $createNoteImageNode,
+  $isNoteImageNode,
+  NOTE_IMAGE_TRANSFORMER,
+  NoteImageActionsContext,
+  NoteImageNode,
+  type UploadedNoteImage,
+} from "./NoteImageNode.tsx";
 import { ReferenceNode } from "./ReferenceNode.ts";
 import { createReferenceTransformer } from "./referenceTransformer.ts";
 
 const editorConfig = {
   namespace: "note",
-  nodes: [QuoteNode, ReferenceNode],
+  nodes: [QuoteNode, ReferenceNode, NoteImageNode],
   onError: (error: Error) => console.error("lexical error", error),
   theme: { text: { bold: "bc-bold", italic: "bc-italic" }, quote: "bc-quote" },
 };
@@ -47,6 +65,7 @@ function Chrome({
   onSubmit,
   onCancel,
   onPasteImage,
+  imageUrlBase,
   transformers,
   referenceTransformer,
 }: {
@@ -55,18 +74,129 @@ function Chrome({
   canSubmit: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
-  onPasteImage?: (file: File) => Promise<string | null>;
+  onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
+  imageUrlBase?: string;
   transformers: Transformer[];
   referenceTransformer: Transformer;
 }) {
   const [editor] = useLexicalComposerContext();
-  const [pasteStatus, setPasteStatus] = useState<string | null>(null);
+  const [unresolvedImages, setUnresolvedImages] = useState(0);
+  const uploadedRef = useRef(new Map<string, () => Promise<void>>());
+  const previewUrlsRef = useRef(new Set<string>());
+  const disposedRef = useRef(false);
+  const committedRef = useRef(false);
+
+  const releasePreviewUrls = useCallback(() => {
+    for (const url of previewUrlsRef.current) URL.revokeObjectURL(url);
+    previewUrlsRef.current.clear();
+  }, []);
+
+  const discardUploads = useCallback(() => {
+    for (const discard of uploadedRef.current.values()) void discard();
+    uploadedRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+      releasePreviewUrls();
+      if (!committedRef.current) discardUploads();
+    };
+  }, [discardUploads, releasePreviewUrls]);
+
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState }) => {
+        const unresolved = editorState.read(
+          () => $nodesOfType(NoteImageNode).filter((node) => !node.getImageId()).length,
+        );
+        setUnresolvedImages(unresolved);
+      }),
+    [editor],
+  );
+
+  const beginUpload = useCallback(
+    (key: NodeKey, file: File) => {
+      if (!onPasteImage) return;
+      editor.update(() => {
+        const node = $getNodeByKey(key);
+        if ($isNoteImageNode(node)) node.setStatus("uploading");
+      });
+      void onPasteImage(file)
+        .then((uploaded) => {
+          if (!uploaded) {
+            editor.update(() => {
+              const node = $getNodeByKey(key);
+              if ($isNoteImageNode(node)) node.setStatus("failed");
+            });
+            return;
+          }
+          if (disposedRef.current) {
+            void uploaded.discard();
+            return;
+          }
+          let retained = false;
+          editor.update(() => {
+            const node = $getNodeByKey(key);
+            if (!$isNoteImageNode(node)) return;
+            node.setUploaded(uploaded.id);
+            retained = true;
+          });
+          if (retained) uploadedRef.current.set(uploaded.id, uploaded.discard);
+          else void uploaded.discard();
+        })
+        .catch(() => {
+          editor.update(() => {
+            const node = $getNodeByKey(key);
+            if ($isNoteImageNode(node)) node.setStatus("failed");
+          });
+        });
+    },
+    [editor, onPasteImage],
+  );
+
+  const removeImage = useCallback(
+    (key: NodeKey) => {
+      let imageId: string | null = null;
+      let previewUrl: string | null = null;
+      editor.update(() => {
+        const node = $getNodeByKey(key);
+        if (!$isNoteImageNode(node)) return;
+        imageId = node.getImageId();
+        previewUrl = node.getPreviewUrl();
+        node.remove();
+      });
+      // The removed upload is deleted immediately, so it must not be restored by undo.
+      // oxlint-disable-next-line unicorn/no-useless-undefined
+      editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        previewUrlsRef.current.delete(previewUrl);
+      }
+      if (imageId) {
+        const discard = uploadedRef.current.get(imageId);
+        if (discard) {
+          uploadedRef.current.delete(imageId);
+          void discard();
+        }
+      }
+    },
+    [editor],
+  );
 
   const submit = useCallback(() => {
-    if (!canSubmit) return;
+    if (!canSubmit || unresolvedImages > 0) return;
     const body = editor.getEditorState().read(() => $convertToMarkdownString(transformers));
+    const retainedImageIds = noteImageIds(body);
+    for (const [imageId, discard] of uploadedRef.current) {
+      if (!retainedImageIds.has(imageId)) void discard();
+    }
+    committedRef.current = true;
+    uploadedRef.current.clear();
+    releasePreviewUrls();
     onSubmit(body.trim());
-  }, [canSubmit, editor, onSubmit, transformers]);
+  }, [canSubmit, editor, onSubmit, releasePreviewUrls, transformers, unresolvedImages]);
 
   useHotkey("Mod+B", () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold"), {
     target: containerRef,
@@ -87,49 +217,56 @@ function Chrome({
         ?.getAsFile();
       if (!image) return;
       event.preventDefault();
-      setPasteStatus("uploading image...");
-      void onPasteImage(image).then((imageId) => {
-        if (!imageId) {
-          setPasteStatus("image upload failed");
-          return;
-        }
-        editor.update(() => {
-          const paragraph = $createParagraphNode();
-          paragraph.append($createTextNode(`[[image:${imageId}]]`));
-          $getRoot().append(paragraph);
-          paragraph.selectEnd();
-        });
-        setPasteStatus(null);
+      const previewUrl = URL.createObjectURL(image);
+      previewUrlsRef.current.add(previewUrl);
+      let key: NodeKey | null = null;
+      editor.update(() => {
+        const node = $createNoteImageNode({ file: image, previewUrl, status: "uploading" });
+        $insertNodes([node]);
+        key = node.getKey();
       });
+      if (key) beginUpload(key, image);
     };
     container.addEventListener("paste", onPaste);
     return () => container.removeEventListener("paste", onPaste);
-  }, [containerRef, editor, onPasteImage]);
+  }, [beginUpload, containerRef, editor, onPasteImage]);
+
+  const imageActions = { imageUrlBase, retry: beginUpload, remove: removeImage };
 
   return (
-    <>
+    <NoteImageActionsContext value={imageActions}>
       <RichTextPlugin
         contentEditable={<ContentEditable className="note-editor-input" />}
         ErrorBoundary={LexicalErrorBoundary}
       />
       <HistoryPlugin />
-      <MarkdownShortcutPlugin transformers={[referenceTransformer]} />
-      {pasteStatus && <p className="note-editor-hint">{pasteStatus}</p>}
+      <MarkdownShortcutPlugin transformers={[NOTE_IMAGE_TRANSFORMER, referenceTransformer]} />
+      {unresolvedImages > 0 && (
+        <p className="note-editor-hint">Finish or remove image uploads before saving.</p>
+      )}
       <div className="note-editor-actions">
         <button
           type="button"
           className="primary"
           onClick={submit}
-          disabled={!canSubmit}
+          disabled={!canSubmit || unresolvedImages > 0}
           title={`${submitLabel} (⌘↵)`}
         >
           {submitLabel}
         </button>
-        <button type="button" onClick={onCancel} title="Cancel">
+        <button
+          type="button"
+          onClick={() => {
+            discardUploads();
+            releasePreviewUrls();
+            onCancel();
+          }}
+          title="Cancel"
+        >
           Cancel
         </button>
       </div>
-    </>
+    </NoteImageActionsContext>
   );
 }
 
@@ -141,6 +278,7 @@ export function NoteEditor({
   onSave,
   onCancel,
   onPasteImage,
+  imageUrlBase,
   validSeqs,
   canSubmit = true,
   canReference = true,
@@ -149,7 +287,8 @@ export function NoteEditor({
   submitLabel: string;
   onSave: (body: string) => void;
   onCancel: () => void;
-  onPasteImage?: (file: File) => Promise<string | null>;
+  onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
+  imageUrlBase?: string;
   validSeqs: Set<number>;
   canSubmit?: boolean;
   canReference?: boolean;
@@ -165,7 +304,7 @@ export function NoteEditor({
     [],
   );
   const transformers = useMemo<Transformer[]>(
-    () => [...NOTE_TRANSFORMERS, referenceTransformer],
+    () => [NOTE_IMAGE_TRANSFORMER, ...NOTE_TRANSFORMERS, referenceTransformer],
     [referenceTransformer],
   );
   const initialConfig = {
@@ -182,6 +321,7 @@ export function NoteEditor({
           onSubmit={onSave}
           onCancel={onCancel}
           onPasteImage={onPasteImage}
+          imageUrlBase={imageUrlBase}
           transformers={transformers}
           referenceTransformer={referenceTransformer}
         />

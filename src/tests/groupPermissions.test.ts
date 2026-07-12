@@ -20,13 +20,20 @@ describe("group permissions", () => {
     expect(permits(GroupRole.Member, GroupAction.CreateNote)).toBe(true);
     expect(permits(GroupRole.Member, GroupAction.UploadBook)).toBe(true);
     expect(permits(GroupRole.Member, GroupAction.DeleteOwnBook)).toBe(true);
+    expect(permits(GroupRole.Member, GroupAction.EditOwnBookMetadata)).toBe(true);
     expect(permits(GroupRole.Member, GroupAction.DeleteAnyBook)).toBe(false);
+    expect(permits(GroupRole.Member, GroupAction.EditAnyBookMetadata)).toBe(false);
+    expect(permits(GroupRole.Member, GroupAction.DeleteAnyImage)).toBe(false);
+    expect(permits(GroupRole.Member, GroupAction.RenameBook)).toBe(false);
     expect(permits(GroupRole.Member, GroupAction.RenameClub)).toBe(false);
   });
 
   it("lets admins do everything except owner-level actions", () => {
     for (const action of Object.values(GroupAction)) {
-      const expected = action !== GroupAction.ChangeAdminRole && action !== GroupAction.DeleteClub;
+      const expected =
+        action !== GroupAction.ChangeAdminRole &&
+        action !== GroupAction.ManageBackups &&
+        action !== GroupAction.DeleteClub;
       expect(permits(GroupRole.Admin, action), action).toBe(expected);
     }
   });

@@ -67,6 +67,7 @@ export default defineConfig(({ command }) => ({
     command === "serve"
       ? cloudflare({
           config: (config) => {
+            config.vars = { ...config.vars, DEV_AUTH: "true" };
             config.migrations = [
               {
                 tag: "dev-sqlite-v1",

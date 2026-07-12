@@ -2,11 +2,16 @@ import * as Effect from "effect/Effect";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "../../app/useSession.ts";
 import {
+  changeMemberRole,
+  deleteBook as deleteGroupBook,
   fetchGroup,
   redeemInvite,
   renameBook,
   resolveBookTitle,
+  updateBookMetadata,
+  type BookMetadataPatch,
   type GroupSummary,
+  type GroupRole,
   type RosterEntry,
 } from "../../logic/groups/groupClient.ts";
 import { useOnline } from "../../logic/net/online.ts";
@@ -21,6 +26,8 @@ import {
   syncReadingPosition,
 } from "../../logic/settings/readingPositions.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
+import type { ClubProfile } from "../../../shared/types/profiles.ts";
+import { GroupRole as GroupRoles } from "../../../shared/types/groups.ts";
 import { Workspace } from "../../app/Workspace.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { useIsMobile } from "../shared/hooks/useIsMobile.ts";
@@ -34,10 +41,11 @@ type Resolved =
   | { k: "notfound" }
   | { k: "refused" }
   | { k: "offline" }
-  | { k: "member"; group: GroupSummary; isOwner: boolean; members: RosterEntry[] };
+  | { k: "member"; group: GroupSummary; role: GroupRole; isOwner: boolean; members: RosterEntry[] };
 
 interface CachedGroupView {
   group: GroupSummary;
+  role: GroupRole;
   isOwner: boolean;
   members: RosterEntry[];
 }
@@ -161,6 +169,7 @@ export function GroupView({
       setResolved({
         k: "member",
         group: refreshed.group,
+        role: refreshed.membership.role ?? GroupRoles.Visitor,
         isOwner: refreshed.group.ownerId === userId,
         members: refreshed.members,
       });
@@ -205,6 +214,73 @@ export function GroupView({
     });
   }
 
+  async function onDeleteBook(sourceId: string): Promise<boolean> {
+    const result = await deleteGroupBook(groupRef, sourceId);
+    if (!result.ok) {
+      spawnToast("Delete failed", "Couldn't delete that book.", { type: "error" });
+      return false;
+    }
+    const nextGroup = result.value;
+    setResolved((current) => (current.k === "member" ? { ...current, group: nextGroup } : current));
+    setLoadedFiles((current) => {
+      const { [sourceId]: _deleted, ...remaining } = current;
+      return remaining;
+    });
+    if (effectiveId === sourceId) {
+      const nextId = currentSourceId(nextGroup);
+      setSelectedId(nextId);
+      if (nextId) localStorage.setItem(selectedSourceKey(nextGroup.groupId), nextId);
+      else localStorage.removeItem(selectedSourceKey(nextGroup.groupId));
+    }
+    return true;
+  }
+
+  async function onChangeMemberRole(memberId: string, role: GroupRole): Promise<boolean> {
+    const result = await changeMemberRole(groupRef, memberId, role);
+    if (!result.ok) {
+      spawnToast("Role change failed", "Couldn't change that member's role.", { type: "error" });
+      return false;
+    }
+    setResolved((current) =>
+      current.k === "member" ? { ...current, members: result.value } : current,
+    );
+    return true;
+  }
+
+  async function onUpdateBookMetadata(
+    sourceId: string,
+    patch: BookMetadataPatch,
+  ): Promise<boolean> {
+    const result = await updateBookMetadata(groupRef, sourceId, patch);
+    if (!result.ok) {
+      spawnToast("Update failed", "Couldn't update that book's metadata.", { type: "error" });
+      return false;
+    }
+    setResolved((current) =>
+      current.k === "member" ? { ...current, group: result.value } : current,
+    );
+    return true;
+  }
+
+  function onProfileChange(profile: ClubProfile): void {
+    setResolved((current) =>
+      current.k === "member"
+        ? {
+            ...current,
+            members: current.members.map((member) =>
+              member.id === profile.id
+                ? {
+                    ...member,
+                    name: profile.displayName,
+                    ...(profile.avatarImageId ? { avatarImageId: profile.avatarImageId } : {}),
+                  }
+                : member,
+            ),
+          }
+        : current,
+    );
+  }
+
   const wasOnlineRef = useRef(online);
   useEffect(() => {
     if (online && !wasOnlineRef.current) setReloadTick((t) => t + 1);
@@ -229,7 +305,7 @@ export function GroupView({
           : null;
         if (cached) {
           setSelectedId(storedSelectedSource(cached.group));
-          setResolved({ k: "member", ...cached });
+          setResolved({ k: "member", ...cached, role: cached.role ?? GroupRoles.Visitor });
         } else {
           setResolved({ k: "offline" });
         }
@@ -254,12 +330,13 @@ export function GroupView({
       }
       const resolvedView: CachedGroupView = {
         group: view.group,
+        role: view.membership.role ?? GroupRoles.Visitor,
         isOwner: view.group.ownerId === userId,
         members: view.members,
       };
       if (userId) writeLocal(groupViewCacheKey(userId, groupRef), resolvedView);
       setSelectedId(storedSelectedSource(view.group));
-      setResolved({ k: "member", ...resolvedView });
+      setResolved({ k: "member", ...resolvedView, role: resolvedView.role ?? GroupRoles.Visitor });
     })();
     return () => {
       cancelled = true;
@@ -354,6 +431,7 @@ export function GroupView({
       <NoBook group={resolved.group} onUpload={() => setUploadOpen(true)} />
     ) : (
       <Workspace
+        group={group}
         groupName={group.displayName}
         groupRef={groupRef}
         groupId={group.groupId}
@@ -372,7 +450,12 @@ export function GroupView({
         onRenameBook={onRenameBook}
         onAddBook={() => setUploadOpen(true)}
         members={resolved.members}
+        viewerRole={resolved.role}
         viewer={{ userId: userId ?? "", isOwner: resolved.isOwner }}
+        onChangeMemberRole={onChangeMemberRole}
+        onDeleteBook={onDeleteBook}
+        onUpdateBookMetadata={onUpdateBookMetadata}
+        onProfileChange={onProfileChange}
       />
     );
 

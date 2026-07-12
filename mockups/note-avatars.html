@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bookclub — note avatar mockups</title>
+    <style>
+      /* Design tokens lifted from src/client/styles/base.css so these mockups
+         read exactly like the real app (neo-brutalist: hard black borders,
+         offset shadows, monospace, yellow highlight). */
+      :root {
+        --black: #000;
+        --white: #fff;
+        --gray: #777;
+        --highlight: #ffe600;
+        --line: 3px solid var(--black);
+        --line-thin: 2px solid var(--black);
+        --font-xxs: 11px;
+        --font-xs: 12px;
+        --font-sm: 14px;
+        --font-md: 16px;
+        --shadow-sm: 4px 4px 0 var(--black);
+        --muted-opacity: 0.6;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px 20px 80px;
+        background: repeating-linear-gradient(
+          135deg,
+          #f4f4f4,
+          #f4f4f4 10px,
+          #efefef 10px,
+          #efefef 20px
+        );
+        color: var(--black);
+      }
+
+      .page {
+        max-width: 560px;
+        margin: 0 auto;
+      }
+
+      header.intro {
+        margin-bottom: 40px;
+      }
+
+      header.intro h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      header.intro p {
+        margin: 0;
+        font-size: var(--font-sm);
+        line-height: 1.5;
+        opacity: 0.75;
+      }
+
+      section.option {
+        margin-bottom: 44px;
+      }
+
+      .option-label {
+        display: inline-block;
+        margin-bottom: 12px;
+        padding: 4px 10px;
+        border: var(--line);
+        background: var(--black);
+        color: var(--white);
+        font-size: var(--font-xs);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .option-label.baseline {
+        background: var(--highlight);
+        color: var(--black);
+      }
+
+      .option-note {
+        margin: 0 0 14px;
+        font-size: var(--font-xs);
+        line-height: 1.5;
+        opacity: 0.7;
+      }
+
+      /* ---- shared note styles (mirrors notes.css) ---- */
+      .notes {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .note {
+        display: flex;
+        flex-direction: column;
+        border: var(--line);
+        background: var(--white);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .note-head {
+        display: flex;
+      }
+
+      .note-seq {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        align-self: stretch;
+        min-width: 34px;
+        padding: 0 6px;
+        background: var(--white);
+        color: var(--black);
+        font-weight: 700;
+        border-right: var(--line);
+      }
+
+      .quote {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        padding: 4px 10px;
+        text-align: left;
+        font-size: var(--font-sm);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .note-head-actions {
+        display: flex;
+      }
+
+      .act {
+        display: grid;
+        place-items: center;
+        min-width: 30px;
+        padding: 0 8px;
+        border: none;
+        border-left: var(--line);
+        background: var(--white);
+        color: var(--black);
+        cursor: pointer;
+        font-size: var(--font-sm);
+      }
+
+      .note-body {
+        padding: 8px 10px;
+        font-size: var(--font-sm);
+        line-height: 1.5;
+        border-top: var(--line);
+      }
+
+      .note-body p {
+        margin: 0;
+      }
+
+      /* ---- avatar primitive (mirrors .invite-avatar) ---- */
+      .avatar {
+        position: relative;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        border: var(--line);
+        background: var(--black);
+        color: var(--white);
+        font-weight: 700;
+        overflow: hidden;
+      }
+
+      .avatar img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+      }
+
+      .avatar.sz-sm {
+        width: 24px;
+        height: 24px;
+        font-size: 11px;
+      }
+      .avatar.sz-md {
+        width: 34px;
+        height: 34px;
+        font-size: 13px;
+      }
+      .avatar.sz-lg {
+        width: 44px;
+        height: 44px;
+        font-size: 15px;
+      }
+
+      /* Author name pulled out of the timestamp line for the options that
+         want to emphasise it next to the picture. */
+      .author-name {
+        font-weight: 700;
+      }
+      .author-meta {
+        opacity: var(--muted-opacity);
+      }
+
+      /* ---------- Option A: avatar column left of the seq ---------- */
+      .a .note-seq {
+        min-width: 0;
+        padding: 0;
+        border-right: none;
+      }
+      .a .lead {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        border-right: var(--line);
+      }
+      .a .lead .avatar {
+        border: none;
+        border-radius: 0;
+        width: 40px;
+        height: 40px;
+      }
+      .a .lead .note-seq {
+        border-top: var(--line);
+        min-width: 40px;
+        font-size: var(--font-xs);
+        padding: 2px 0;
+      }
+
+      /* ---------- Option B: small avatar inline before title ---------- */
+      .b .note-head {
+        align-items: center;
+        gap: 8px;
+        padding-left: 8px;
+      }
+      .b .note-seq {
+        border-right: none;
+        min-width: 26px;
+        padding: 0;
+      }
+      .b .quote {
+        padding-left: 0;
+      }
+
+      /* ---------- Option C: avatar replaces seq box, seq as badge ---------- */
+      .c .lead-avatar {
+        position: relative;
+        flex: 0 0 auto;
+        align-self: stretch;
+        border-right: var(--line);
+      }
+      .c .lead-avatar .avatar {
+        border: none;
+        width: 46px;
+        height: 100%;
+        border-radius: 0;
+      }
+      .c .seq-badge {
+        position: absolute;
+        left: -3px;
+        bottom: -3px;
+        padding: 1px 5px;
+        border: var(--line-thin);
+        background: var(--highlight);
+        color: var(--black);
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      /* ---------- Option D: chat-bubble, avatar outside the card ---------- */
+      .d .notes {
+        gap: 18px;
+      }
+      .d .row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      .d .row .avatar {
+        margin-top: 2px;
+        box-shadow: var(--shadow-sm);
+      }
+      .d .note {
+        flex: 1;
+        min-width: 0;
+      }
+      .d .note-seq {
+        min-width: 30px;
+      }
+
+      /* ---------- Option E: byline header strip above body ---------- */
+      .e .note-head {
+        align-items: stretch;
+      }
+      .e .byline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+        padding: 6px 10px;
+      }
+      .e .byline .text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        line-height: 1.25;
+      }
+      .e .byline .text .author-name {
+        font-size: var(--font-sm);
+      }
+      .e .byline .text .author-meta {
+        font-size: var(--font-xxs);
+      }
+
+      /* ---------- reply indent, shared ---------- */
+      .replies {
+        margin-left: 16px;
+        padding-left: 12px;
+        border-left: var(--line);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="intro">
+        <h1>Note avatars</h1>
+        <p>
+          Top card is how notes look today. Below are ways to fold a user's profile picture in, all
+          using the existing square / black-border avatar (initials as fallback) so nothing fights
+          the design language.
+        </p>
+      </header>
+
+      <!-- ================= BASELINE ================= -->
+      <section class="option">
+        <span class="option-label baseline">Current — no avatar</span>
+        <p class="option-note">
+          Seq number box, a title line ("author posted / replied &lt;time&gt;"), then the body.
+          Actions live on the right of the head.
+        </p>
+        <ul class="notes">
+          <li>
+            <div class="note">
+              <div class="note-head">
+                <span class="note-seq">7</span>
+                <div class="quote">Ada posted Jul 12, 4:32 PM</div>
+                <div class="note-head-actions">
+                  <button class="act" title="Reply">↩</button>
+                  <button class="act" title="Delete">✕</button>
+                </div>
+              </div>
+              <div class="note-body">
+                <p>The bit about the lighthouse keeper really stuck with me.</p>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= OPTION A ================= -->
+      <section class="option a">
+        <span class="option-label">Option A — avatar stacked over the seq</span>
+        <p class="option-note">
+          The left rail becomes a small square photo with the seq number tucked beneath it. Zero
+          horizontal space cost, keeps the number discoverable.
+        </p>
+        <ul class="notes">
+          <li>
+            <div class="note">
+              <div class="note-head">
+                <div class="lead">
+                  <span class="avatar"><img src="https://i.pravatar.cc/80?img=47" alt="" /></span>
+                  <span class="note-seq">7</span>
+                </div>
+                <div class="quote">Ada posted Jul 12, 4:32 PM</div>
+                <div class="note-head-actions">
+                  <button class="act" title="Reply">↩</button>
+                  <button class="act" title="Delete">✕</button>
+                </div>
+              </div>
+              <div class="note-body">
+                <p>The bit about the lighthouse keeper really stuck with me.</p>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= OPTION B ================= -->
+      <section class="option b">
+        <span class="option-label">Option B — inline chip before the title</span>
+        <p class="option-note">
+          A little 24px avatar sits inline in the head, right after the seq, before the "author
+          posted…" line. Lightest possible touch.
+        </p>
+        <ul class="notes">
+          <li>
+            <div class="note">
+              <div class="note-head">
+                <span class="note-seq">7</span>
+                <span class="avatar sz-sm"
+                  ><img src="https://i.pravatar.cc/80?img=47" alt=""
+                /></span>
+                <div class="quote">
+                  <span class="author-name">Ada</span>
+                  <span class="author-meta">posted Jul 12, 4:32 PM</span>
+                </div>
+                <div class="note-head-actions">
+                  <button class="act" title="Reply">↩</button>
+                  <button class="act" title="Delete">✕</button>
+                </div>
+              </div>
+              <div class="note-body">
+                <p>The bit about the lighthouse keeper really stuck with me.</p>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= OPTION C ================= -->
+      <section class="option c">
+        <span class="option-label">Option C — photo rail, seq as a badge</span>
+        <p class="option-note">
+          The avatar becomes the full-height left rail (most prominent), with the seq number as a
+          small yellow badge pinned in its corner.
+        </p>
+        <ul class="notes">
+          <li>
+            <div class="note">
+              <div class="note-head">
+                <div class="lead-avatar">
+                  <span class="avatar"><img src="https://i.pravatar.cc/80?img=47" alt="" /></span>
+                  <span class="seq-badge">7</span>
+                </div>
+                <div class="quote">Ada posted Jul 12, 4:32 PM</div>
+                <div class="note-head-actions">
+                  <button class="act" title="Reply">↩</button>
+                  <button class="act" title="Delete">✕</button>
+                </div>
+              </div>
+              <div class="note-body">
+                <p>The bit about the lighthouse keeper really stuck with me.</p>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= OPTION D ================= -->
+      <section class="option d">
+        <span class="option-label">Option D — avatar outside the card (chat style)</span>
+        <p class="option-note">
+          Avatar floats to the left of the whole card, like a chat message. Reads most "social", and
+          threaded replies get a smaller avatar so the indent hierarchy still shows who's talking.
+        </p>
+        <ul class="notes">
+          <li>
+            <div class="row">
+              <span class="avatar sz-lg"><img src="https://i.pravatar.cc/80?img=47" alt="" /></span>
+              <div class="note">
+                <div class="note-head">
+                  <span class="note-seq">7</span>
+                  <div class="quote">Ada posted Jul 12, 4:32 PM</div>
+                  <div class="note-head-actions">
+                    <button class="act" title="Reply">↩</button>
+                  </div>
+                </div>
+                <div class="note-body">
+                  <p>The bit about the lighthouse keeper really stuck with me.</p>
+                </div>
+              </div>
+            </div>
+            <div class="replies">
+              <div class="row">
+                <span class="avatar sz-md">BJ</span>
+                <div class="note">
+                  <div class="note-head">
+                    <span class="note-seq">8</span>
+                    <div class="quote">Bjorn replied Jul 12, 4:40 PM</div>
+                  </div>
+                  <div class="note-body">
+                    <p>Same — the fog imagery pays off later too.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- ================= OPTION E ================= -->
+      <section class="option e">
+        <span class="option-label">Option E — full byline (name + avatar)</span>
+        <p class="option-note">
+          The head splits the author name (bold) from the timestamp and pairs them with the avatar.
+          Most legible attribution; nice if you want the name to read stronger than the timestamp.
+        </p>
+        <ul class="notes">
+          <li>
+            <div class="note">
+              <div class="note-head">
+                <span class="note-seq">7</span>
+                <div class="byline">
+                  <span class="avatar sz-md"
+                    ><img src="https://i.pravatar.cc/80?img=47" alt=""
+                  /></span>
+                  <span class="text">
+                    <span class="author-name">Ada Lovelace</span>
+                    <span class="author-meta">posted · Jul 12, 4:32 PM</span>
+                  </span>
+                </div>
+                <div class="note-head-actions">
+                  <button class="act" title="Reply">↩</button>
+                  <button class="act" title="Delete">✕</button>
+                </div>
+              </div>
+              <div class="note-body">
+                <p>The bit about the lighthouse keeper really stuck with me.</p>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </div>
+  </body>
+</html>

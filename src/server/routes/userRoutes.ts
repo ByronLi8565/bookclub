@@ -6,6 +6,7 @@ import {
   getReadingPosition,
   getUserPrefs,
   setReadingPosition,
+  setClubProfile,
   setUserPrefs,
   uploadAvatar,
   type WorkflowFailure,
@@ -49,6 +50,17 @@ export function registerUserRoutes(app: Hono<{ Bindings: Env }>): void {
   app.put("/me/avatar", async (c) => {
     const result = await uploadAvatar(c.env, c.req.raw);
     return result.ok ? c.json(result.value, 201) : workflowError(result);
+  });
+
+  app.put("/me/clubs/:groupId/profile", async (c) => {
+    const body = await readJson(c.req.raw);
+    const result = await setClubProfile(
+      c.env,
+      c.req.raw,
+      c.req.param("groupId"),
+      body?.displayName,
+    );
+    return result.ok ? c.json(result.value) : workflowError(result);
   });
 
   app.get("/users/:userId/avatar/:imageId", async (c) => {

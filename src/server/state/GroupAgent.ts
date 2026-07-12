@@ -2,6 +2,7 @@ import { Agent, getAgentByName } from "agents";
 import {
   GroupFailureReason,
   GroupRole,
+  type BookMetadataPatch,
   type GroupSummary,
   type RosterEntry,
   type SourceMeta,
@@ -17,6 +18,7 @@ export interface Member {
   name: string;
   email: string;
   joinedAt: string;
+  avatarImageId?: string;
 }
 
 interface Invite {
@@ -45,34 +47,44 @@ export interface Identity {
   email: string;
 }
 
+type GroupFailure<R extends GroupFailureReason> = { ok: false; reason: R };
+type AccessFailureReason =
+  | typeof GroupFailureReason.NotMember
+  | typeof GroupFailureReason.NotFound
+  | typeof GroupFailureReason.Forbidden;
+
 export type CreateResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: GroupFailureReason };
-export type InviteResult = { ok: true; token: string } | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<typeof GroupFailureReason.Exists | typeof GroupFailureReason.Empty>;
+export type InviteResult = { ok: true; token: string } | GroupFailure<AccessFailureReason>;
 export type RedeemResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<
+      | typeof GroupFailureReason.NotFound
+      | typeof GroupFailureReason.BadInvite
+      | typeof GroupFailureReason.WrongEmail
+    >;
 export type AddSourceResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: GroupFailureReason };
-export type InviteLinkResult =
-  | { ok: true; token: string }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<AccessFailureReason>;
+export type InviteLinkResult = { ok: true; token: string } | GroupFailure<AccessFailureReason>;
 export type RenameResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<
+      AccessFailureReason | typeof GroupFailureReason.BadSource | typeof GroupFailureReason.Empty
+    >;
 export type RenameGroupResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<AccessFailureReason | typeof GroupFailureReason.Empty>;
 export type SetRoleResult =
   | { ok: true; roster: RosterEntry[] }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<AccessFailureReason | typeof GroupFailureReason.BadMember>;
 export type DeleteSourceResult =
   | { ok: true; summary: GroupSummary }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<AccessFailureReason | typeof GroupFailureReason.BadSource>;
 export type DeleteGroupResult =
   | { ok: true; groupId: string; publicId: string; members: Identity[] }
-  | { ok: false; reason: GroupFailureReason };
+  | GroupFailure<AccessFailureReason>;
 
 const MAX_TITLE_LENGTH = 100;
 
@@ -127,7 +139,9 @@ export class GroupAgent extends Agent<Env, GroupState> {
   // directly lets callers `if (!guard.ok) return guard;`.
   private requireMember(
     callerId: string,
-  ): { ok: true; role: GroupRole } | { ok: false; reason: GroupFailureReason } {
+  ):
+    | { ok: true; role: GroupRole }
+    | GroupFailure<typeof GroupFailureReason.NotFound | typeof GroupFailureReason.NotMember> {
     if (this.state.groupId === "") return { ok: false, reason: GroupFailureReason.NotFound };
     const member = this.state.members[callerId];
     if (!member) return { ok: false, reason: GroupFailureReason.NotMember };
@@ -200,7 +214,37 @@ export class GroupAgent extends Agent<Env, GroupState> {
       name: m.name,
       email: m.email,
       role: m.role,
+      ...(m.avatarImageId ? { avatarImageId: m.avatarImageId } : {}),
     }));
+  }
+
+  memberProfile(userId: string): RosterEntry | null {
+    const member = this.state.members[userId];
+    if (!member) return null;
+    return {
+      id: userId,
+      name: member.name,
+      email: member.email,
+      role: member.role,
+      ...(member.avatarImageId ? { avatarImageId: member.avatarImageId } : {}),
+    };
+  }
+
+  setMemberProfile(userId: string, name: string, avatarImageId?: string): RosterEntry | null {
+    const member = this.state.members[userId];
+    if (!member) return null;
+    const { avatarImageId: _oldAvatar, ...base } = member;
+    const next = { ...base, name, ...(avatarImageId ? { avatarImageId } : {}) };
+    if (next.name !== member.name || next.avatarImageId !== member.avatarImageId) {
+      this.setState({ ...this.state, members: { ...this.state.members, [userId]: next } });
+    }
+    return {
+      id: userId,
+      name: next.name,
+      email: next.email,
+      role: next.role,
+      ...(next.avatarImageId ? { avatarImageId: next.avatarImageId } : {}),
+    };
   }
 
   renameGroup(callerId: string, rawTitle: string): RenameGroupResult {
@@ -344,6 +388,27 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
+  updateBookMetadata(callerId: string, sourceId: string, patch: BookMetadataPatch): RenameResult {
+    const guard = this.requireMember(callerId);
+    if (!guard.ok) return guard;
+    const meta = this.state.sourceMeta[sourceId];
+    if (!meta || !this.state.sources.includes(sourceId)) {
+      return { ok: false, reason: GroupFailureReason.BadSource };
+    }
+    const action =
+      callerId === (meta.addedBy || this.state.ownerId)
+        ? GroupAction.EditOwnBookMetadata
+        : GroupAction.EditAnyBookMetadata;
+    if (!permits(guard.role, action)) {
+      return { ok: false, reason: GroupFailureReason.Forbidden };
+    }
+    this.setState({
+      ...this.state,
+      sourceMeta: { ...this.state.sourceMeta, [sourceId]: { ...meta, ...patch } },
+    });
+    return { ok: true, summary: this.summary() };
+  }
+
   deleteGroup(callerId: string): DeleteGroupResult {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
@@ -376,7 +441,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   exportState(): GroupState {
-    return this.state;
+    return { ...this.state, sourceMeta: this.normalizedSourceMeta() };
   }
 
   importState(state: GroupState): void {
@@ -400,14 +465,18 @@ export class GroupAgent extends Agent<Env, GroupState> {
       ownerId: this.state.ownerId,
       sources: this.state.sources ?? [],
       bookTitles: this.state.bookTitles ?? {},
-      sourceMeta: Object.fromEntries(
-        Object.entries(this.state.sourceMeta ?? {}).map(([id, meta]) => [
-          id,
-          { ...meta, addedBy: meta.addedBy || this.state.ownerId },
-        ]),
-      ),
+      sourceMeta: this.normalizedSourceMeta(),
       memberCount: Object.keys(this.state.members).length,
     };
+  }
+
+  private normalizedSourceMeta(): Record<string, SourceMeta> {
+    return Object.fromEntries(
+      Object.entries(this.state.sourceMeta ?? {}).map(([id, meta]) => [
+        id,
+        { ...meta, addedBy: meta.addedBy || this.state.ownerId },
+      ]),
+    );
   }
 
   // Re-link this group into a member's account index. Safe to call repeatedly

@@ -23,7 +23,7 @@ export function Reader({
   books = EMPTY_BOOKS,
   selectedSourceId = "",
   onSelectBook = () => {},
-  onRenameBook = () => {},
+  onRenameBook = null,
   onAddBook = null,
   chromeHidden = false,
 }: {
@@ -35,7 +35,7 @@ export function Reader({
   books?: SourceSummary[];
   selectedSourceId?: string;
   onSelectBook?: (sourceId: string) => void;
-  onRenameBook?: (sourceId: string, title: string) => void;
+  onRenameBook?: ((sourceId: string, title: string) => void) | null;
   onAddBook?: (() => void) | null;
   chromeHidden?: boolean;
 }) {
@@ -264,7 +264,7 @@ function BookMenu({
   books: SourceSummary[];
   selectedSourceId: string;
   onSelectBook: (sourceId: string) => void;
-  onRenameBook: (sourceId: string, title: string) => void;
+  onRenameBook: ((sourceId: string, title: string) => void) | null;
   onAddBook: (() => void) | null;
 }): React.ReactElement {
   const active = books.find((b) => b.id === selectedSourceId) ?? null;
@@ -276,20 +276,21 @@ function BookMenu({
   const [openSignal, setOpenSignal] = useState(0);
   useHotkey("S", () => setOpenSignal((n) => n + 1), { enabled: interactive && !modalOpen });
 
-  const title = label ? (
-    <RenamableText
-      value={label}
-      onRename={(nextTitle) => {
-        if (active) onRenameBook(active.id, nextTitle);
-      }}
-      className="reader-title"
-      title="Double-click to rename the book"
-      ariaLabel="book title"
-      inputClassName="reader-title-edit"
-    />
-  ) : (
-    <span className="reader-title" />
-  );
+  const title =
+    label && onRenameBook ? (
+      <RenamableText
+        value={label}
+        onRename={(nextTitle) => {
+          if (active) onRenameBook(active.id, nextTitle);
+        }}
+        className="reader-title"
+        title="Double-click to rename the book"
+        ariaLabel="book title"
+        inputClassName="reader-title-edit"
+      />
+    ) : (
+      <span className="reader-title">{label}</span>
+    );
 
   if (!interactive) return title;
 

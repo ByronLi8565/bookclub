@@ -34,7 +34,6 @@ export function WorkspaceLoadingShell({ isMobile }: { isMobile: boolean }): Reac
           <span className="presence-count">0</span>
           <span className="presence-dot" />
         </span>
-        <span className="sync-badge sync-badge--syncing">syncing</span>
       </header>
       {isMobile ? (
         <MobilePager

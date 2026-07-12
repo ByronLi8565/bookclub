@@ -13,6 +13,9 @@ import { extractReferences } from "../references.ts";
 export interface NoteState {
   notes: Note[];
   nextSeq: number;
+  // R2 cleanup is retried with the originating local-first operation if the
+  // object store is temporarily unavailable.
+  pendingImageDeletes?: string[];
   // Bounded ring of op ids the server has already applied. This is *defense in
   // depth* for idempotent replay — the primary guarantee comes from structural
   // checks (a note id that already exists is never re-added; edits are gated by
@@ -117,6 +120,10 @@ export function removeNote(
         : note,
     ),
   );
+}
+
+export function removeSourceNotes(state: NoteState, sourceId: string): NoteState {
+  return { ...state, notes: state.notes.filter((note) => note.sourceId !== sourceId) };
 }
 
 export function rebindHighlight(

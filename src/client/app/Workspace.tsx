@@ -3,9 +3,21 @@ import { useAnyModalOpen } from "../ui/shared/modalLayer.ts";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HIGHLIGHT_TAG, type Note, type NoteAuthor } from "../../shared/types/notes.ts";
+import { GroupAction, permits } from "../../shared/groupPermissions.ts";
 import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceRef, SourceSummary } from "../../shared/types/sources.ts";
-import { renameGroup, uploadNoteImage, type RosterEntry } from "../logic/groups/groupClient.ts";
+import type { ClubProfile } from "../../shared/types/profiles.ts";
+import {
+  avatarImagePath,
+  avatarInitial,
+  deleteNoteImage,
+  renameGroup,
+  uploadNoteImage,
+  type GroupRole,
+  type GroupSummary,
+  type BookMetadataPatch,
+  type RosterEntry,
+} from "../logic/groups/groupClient.ts";
 import { useNoteAgent } from "../logic/notes/useNoteAgent.ts";
 import { buildConversation, referenceSpace, selectNotes } from "../logic/notes/conversation.ts";
 import { blockquote, highlightMark } from "../logic/notes/format.ts";
@@ -16,17 +28,17 @@ import {
 } from "../logic/notes/highlights.ts";
 import { effectiveHighlight } from "../logic/notes/conversation.ts";
 import { type NoteViewer } from "../logic/notes/permissions.ts";
-import { InviteModal } from "../ui/group/InviteModal.tsx";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
+import { InfoScreen } from "../ui/shared/InfoScreen.tsx";
 import { MobilePager, type Pane } from "../ui/shared/MobilePager.tsx";
 import { SplitPane } from "../ui/shared/SplitPane.tsx";
-import { spawnToast, showSyncStatusToast } from "../ui/shared/toast/toastStore.ts";
+import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { useDelayedFlag } from "../ui/shared/hooks/useDelayedFlag.ts";
 import { useIsMobile } from "../ui/shared/hooks/useIsMobile.ts";
 import { setReaderPref, useReaderPrefs } from "../logic/settings/userPrefs.ts";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
-import type { NoteRefs } from "../ui/notes/NoteThread.tsx";
+import type { AvatarResolver, NoteRefs } from "../ui/notes/NoteThread.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
 import {
   updateHighlights,
@@ -35,8 +47,10 @@ import {
 } from "../ui/reader/engine/highlightReconciler.ts";
 import { useSourceView, type SelectIntent } from "../ui/reader/useSourceView.ts";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
+import { SettingsModal } from "../ui/workspace/SettingsModal.tsx";
 
 export interface WorkspaceProps {
+  group: GroupSummary;
   groupName: string;
   groupRef: string;
   groupId: string;
@@ -53,7 +67,12 @@ export interface WorkspaceProps {
   onRenameBook: (sourceId: string, title: string) => void;
   onAddBook: () => void;
   members: RosterEntry[];
+  viewerRole: GroupRole;
   viewer: NoteViewer;
+  onChangeMemberRole: (memberId: string, role: GroupRole) => Promise<boolean>;
+  onDeleteBook: (sourceId: string) => Promise<boolean>;
+  onUpdateBookMetadata: (sourceId: string, patch: BookMetadataPatch) => Promise<boolean>;
+  onProfileChange: (profile: ClubProfile) => void;
 }
 
 function afterReaderPaint(): Promise<void> {
@@ -71,8 +90,11 @@ function scrollNoteIntoView(seq: number): void {
 const FIT_AFTER_CHROME_TOGGLE_MS = 140;
 const FIT_AFTER_SPLIT_EXPAND_MS = 240;
 type DesktopExpandedPane = "left" | "right" | null;
+type WorkspaceModal = "group" | "settings" | "info";
+const WORKSPACE_MODALS: WorkspaceModal[] = ["group", "settings", "info"];
 
 export function Workspace({
+  group,
   groupName,
   groupRef,
   groupId,
@@ -89,11 +111,16 @@ export function Workspace({
   onRenameBook,
   onAddBook,
   members,
+  viewerRole,
   viewer,
+  onChangeMemberRole,
+  onDeleteBook,
+  onUpdateBookMetadata,
+  onProfileChange,
 }: WorkspaceProps) {
   const sourceId = source.id;
-  const [inviting, setInviting] = useState(false);
-  const [showingPresence, setShowingPresence] = useState(false);
+  const canRenameBooks = permits(viewerRole, GroupAction.RenameBook);
+  const [activeModal, setActiveModal] = useState<WorkspaceModal | null>(null);
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
   const [desktopExpandedPane, setDesktopExpandedPane] = useState<DesktopExpandedPane>(null);
@@ -110,6 +137,28 @@ export function Workspace({
     const me = members.find((m) => m.id === viewer.userId);
     return { id: viewer.userId, name: me?.name ?? "You" };
   }, [viewer.userId, members]);
+  const memberProfile = useMemo<ClubProfile>(() => {
+    const me = members.find((member) => member.id === viewer.userId);
+    return {
+      id: viewer.userId,
+      displayName: me?.name ?? "You",
+      ...(me?.avatarImageId ? { avatarImageId: me.avatarImageId } : {}),
+    };
+  }, [members, viewer.userId]);
+  // Resolve a note author to their picture by joining against the roster (which
+  // carries avatarImageId). Notes only store {id, name}, so the roster is the
+  // source of truth for avatars and this stays live as members update theirs.
+  const avatarFor = useMemo<AvatarResolver>(() => {
+    const byId = new Map(members.map((member) => [member.id, member]));
+    return (noteAuthor) => {
+      const member = byId.get(noteAuthor.id);
+      return {
+        url: member?.avatarImageId ? avatarImagePath(noteAuthor.id, member.avatarImageId) : null,
+        initials: avatarInitial(noteAuthor.name),
+        name: noteAuthor.name,
+      };
+    };
+  }, [members]);
   const agent = useNoteAgent(groupId, author, viewer.isOwner);
   const notes = useMemo(
     () => selectNotes(agent.notes, { sources: [sourceId] }),
@@ -162,6 +211,23 @@ export function Workspace({
 
   const modalOpen = useAnyModalOpen();
   const readerKeys = view.ready && !modalOpen;
+  const stepModal = (delta: number) => {
+    if (!activeModal) return;
+    const index = WORKSPACE_MODALS.indexOf(activeModal);
+    setActiveModal(
+      WORKSPACE_MODALS[(index + delta + WORKSPACE_MODALS.length) % WORKSPACE_MODALS.length],
+    );
+  };
+  useHotkey("Shift+ArrowLeft", () => stepModal(-1), {
+    enabled: activeModal !== null,
+    preventDefault: true,
+    conflictBehavior: "allow",
+  });
+  useHotkey("Shift+ArrowRight", () => stepModal(1), {
+    enabled: activeModal !== null,
+    preventDefault: true,
+    conflictBehavior: "allow",
+  });
   const { pdfPageLayout } = useReaderPrefs();
   useHotkey("ArrowLeft", () => view.prev(), { enabled: readerKeys });
   useHotkey("ArrowRight", () => view.next(), { enabled: readerKeys });
@@ -251,7 +317,7 @@ export function Workspace({
     setComposing(null);
   }
 
-  async function onPasteImage(image: File): Promise<string | null> {
+  async function onPasteImage(image: File) {
     if (!canUploadImages) {
       spawnToast("Image upload unavailable", "Reconnect before pasting images into notes.", {
         type: "error",
@@ -259,7 +325,15 @@ export function Workspace({
       return null;
     }
     const result = await uploadNoteImage(groupRef, image);
-    if (result.ok) return result.value;
+    if (result.ok) {
+      const imageId = result.value;
+      return {
+        id: imageId,
+        discard: async () => {
+          await deleteNoteImage(groupRef, imageId);
+        },
+      };
+    }
     const message =
       result.error === "too_large"
         ? "That image is still too large after compression. Try a smaller image."
@@ -437,13 +511,10 @@ export function Workspace({
       <WorkspaceHeader
         displayName={displayName}
         onRename={(t) => void onRenameGroup(t)}
-        canInvite
-        onInvite={() => setInviting(true)}
         onlineCount={agent.online.length}
-        onShowPresence={() => setShowingPresence(true)}
-        syncStatus={agent.syncStatus}
-        onSyncClick={() => showSyncStatusToast(agent.syncStatus, sourceId)}
-        book={{ sourceId, groupRef }}
+        onShowPeople={() => setActiveModal("group")}
+        onShowSettings={() => setActiveModal("settings")}
+        onShowInfo={() => setActiveModal("info")}
       />
       {(() => {
         const reader = (
@@ -455,7 +526,7 @@ export function Workspace({
             books={books}
             selectedSourceId={selectedSourceId}
             onSelectBook={onSelectBook}
-            onRenameBook={onRenameBook}
+            onRenameBook={canRenameBooks ? onRenameBook : null}
             onAddBook={onAddBook}
             chromeHidden={chromeHidden && isMobile}
           />
@@ -472,6 +543,7 @@ export function Workspace({
             onPasteImage={onPasteImage}
             refs={noteRefs}
             viewer={viewer}
+            avatarFor={avatarFor}
             imageUrlBase={`/groups/${groupRef}/images`}
             actions={{
               editingId,
@@ -508,20 +580,27 @@ export function Workspace({
           />
         );
       })()}
-      {inviting && (
-        <InviteModal
-          groupRef={groupRef}
-          displayName={displayName}
-          onClose={() => setInviting(false)}
-        />
-      )}
-      {showingPresence && (
+      {activeModal === "group" && (
         <PresenceModal
+          groupRef={groupRef}
+          group={group}
           members={members}
           online={agent.online}
-          onClose={() => setShowingPresence(false)}
+          viewerId={viewer.userId}
+          viewerRole={viewerRole}
+          onChangeMemberRole={onChangeMemberRole}
+          onDeleteBook={onDeleteBook}
+          onUpdateBookMetadata={onUpdateBookMetadata}
+          onClose={() => setActiveModal(null)}
         />
       )}
+      {activeModal === "settings" && (
+        <SettingsModal
+          book={{ groupId, profile: memberProfile, onProfileChange }}
+          onClose={() => setActiveModal(null)}
+        />
+      )}
+      {activeModal === "info" && <InfoScreen onClose={() => setActiveModal(null)} />}
       <ToastViewport />
     </div>
   );

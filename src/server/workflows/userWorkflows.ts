@@ -6,10 +6,12 @@ import {
 } from "../../shared/types/readingPositions.ts";
 import { SetUserPrefsRequest, type UserPrefs } from "../../shared/types/userPrefs.ts";
 import { decode } from "../../shared/schema.ts";
-import { getImage, storeImage, validImageId } from "../services/images.ts";
+import { MAX_DISPLAY_NAME_LENGTH, type ClubProfile } from "../../shared/types/profiles.ts";
+import { deleteImages, getImage, storeImage, validImageId } from "../services/images.ts";
 import type { Env } from "../env.ts";
 import type { GroupAgent, Identity } from "../state/GroupAgent.ts";
 import type { AuthAgent } from "../state/AuthAgent.ts";
+import type { NoteAgent } from "../state/NoteAgent.ts";
 import {
   fail,
   requireIdentity,
@@ -27,6 +29,7 @@ export type { WorkflowFailure } from "./runtime.ts";
 
 type Auth = Async<AuthAgent>;
 type Group = Async<GroupAgent>;
+type Notes = Async<NoteAgent>;
 
 function avatarScope(userId: string): string {
   return `avatars/${userId}`;
@@ -139,6 +142,8 @@ export function uploadAvatar(
   return runWorkflow(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
+      const auth = yield* authFor(env, me);
+      const previous = yield* tryPromise(() => auth.getUser());
       const bytes = yield* tryPromise(() => request.arrayBuffer());
       const stored = yield* tryPromise(() =>
         storeImage(env, avatarScope(me.id), bytes, request.headers.get("Content-Type")),
@@ -147,9 +152,78 @@ export function uploadAvatar(
         const status = stored.reason === "too_large" ? 413 : 400;
         return yield* Effect.fail(fail(status, stored.reason));
       }
-      const auth = yield* authFor(env, me);
-      yield* tryPromise(() => auth.setAvatarImageId(stored.image.id));
+      const user = yield* tryPromise(() => auth.setAvatarImageId(stored.image.id));
+      if (!user) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
+      yield* Effect.forEach(
+        user.groupIds,
+        (groupId) =>
+          Effect.gen(function* () {
+            const group = (yield* tryPromise(() =>
+              getAgentByName(env.GroupAgent, groupId),
+            )) as unknown as Group;
+            const displayName = user.clubDisplayNames?.[groupId] ?? user.displayName;
+            const profile = yield* tryPromise(() =>
+              group.setMemberProfile(user.id, displayName, stored.image.id),
+            );
+            if (!profile) return;
+            const notes = (yield* tryPromise(() =>
+              getAgentByName(env.NoteAgent, groupId),
+            )) as unknown as Notes;
+            yield* tryPromise(() =>
+              notes.updateMemberProfile(user.id, displayName, stored.image.id),
+            );
+          }),
+        { concurrency: "unbounded", discard: true },
+      );
+      const previousAvatarImageId = previous?.avatarImageId;
+      if (previousAvatarImageId && previousAvatarImageId !== stored.image.id) {
+        yield* tryPromise(() => deleteImages(env, avatarScope(me.id), [previousAvatarImageId]));
+      }
       return stored.image;
+    }),
+  );
+}
+
+export function setClubProfile(
+  env: Env,
+  request: Request,
+  groupId: string,
+  rawDisplayName: unknown,
+): Promise<WorkflowResult<{ profile: ClubProfile }>> {
+  return runWorkflow(
+    Effect.gen(function* () {
+      const me = yield* requireIdentity(env, request);
+      if (typeof rawDisplayName !== "string") {
+        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+      }
+      const displayName = rawDisplayName.trim();
+      if (!displayName) return yield* Effect.fail(fail(400, WorkflowError.InvalidName));
+      const name = displayName.slice(0, MAX_DISPLAY_NAME_LENGTH);
+      const group = (yield* tryPromise(() =>
+        getAgentByName(env.GroupAgent, groupId),
+      )) as unknown as Group;
+      const membership = yield* tryPromise(() => group.membership(me.id));
+      if (!membership.isMember) {
+        return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
+      }
+      const auth = yield* authFor(env, me);
+      const user = yield* tryPromise(() => auth.setClubDisplayName(groupId, name));
+      if (!user) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
+      const member = yield* tryPromise(() =>
+        group.setMemberProfile(me.id, name, user.avatarImageId),
+      );
+      if (!member) return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
+      const notes = (yield* tryPromise(() =>
+        getAgentByName(env.NoteAgent, groupId),
+      )) as unknown as Notes;
+      yield* tryPromise(() => notes.updateMemberProfile(me.id, name, user.avatarImageId));
+      return {
+        profile: {
+          id: me.id,
+          displayName: name,
+          ...(user.avatarImageId ? { avatarImageId: user.avatarImageId } : {}),
+        },
+      };
     }),
   );
 }

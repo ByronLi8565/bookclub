@@ -16,8 +16,14 @@ import {
 } from "../../shared/types/notes.ts";
 import type { GroupRole } from "../../shared/types/groups.ts";
 import { GroupAction, permits } from "../../shared/groupPermissions.ts";
+import {
+  noteImageIds,
+  removeNoteImageReferences,
+  unreferencedImageIds,
+} from "../../shared/notes/images.ts";
 import type { Env } from "../env.ts";
 import { currentIdentity } from "../auth/cookies.ts";
+import { deleteImages } from "../services/images.ts";
 import {
   addNote,
   addReply,
@@ -26,6 +32,7 @@ import {
   emptyNoteState,
   rebindHighlight,
   removeNote,
+  removeSourceNotes,
   type NoteStamp,
   type NoteState,
 } from "./noteState.ts";
@@ -38,12 +45,14 @@ export interface ConnIdentity {
   userId: string;
   name: string;
   role: GroupRole;
+  avatarImageId?: string;
 }
 
 export interface OnlinePeer {
   id: string;
   name: string;
   role: GroupRole;
+  avatarImageId?: string;
 }
 
 export class NoteAgent extends Agent<Env, NoteState> {
@@ -51,13 +60,36 @@ export class NoteAgent extends Agent<Env, NoteState> {
 
   private stamp: NoteStamp = { id: () => ulid(), now: () => new Date().toISOString() };
 
+  private async commit(next: NoteState, forcedImageDeletes: string[] = []): Promise<void> {
+    const removed = [
+      ...new Set([...unreferencedImageIds(this.state.notes, next.notes), ...forcedImageDeletes]),
+    ];
+    const pending = [...new Set([...(this.state.pendingImageDeletes ?? []), ...removed])];
+    this.setState(pending.length > 0 ? { ...next, pendingImageDeletes: pending } : next);
+    if (pending.length === 0) return;
+
+    await deleteImages(this.env, this.name, pending);
+    const remaining = (this.state.pendingImageDeletes ?? []).filter((id) => !pending.includes(id));
+    if (remaining.length > 0) {
+      this.setState({ ...this.state, pendingImageDeletes: remaining });
+    } else {
+      const { pendingImageDeletes: _, ...state } = this.state;
+      this.setState(state);
+    }
+  }
+
   async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     const me = await currentIdentity(ctx.request, this.env);
     if (!me) return connection.close(1008, "unauthenticated");
     const group = await getAgentByName(this.env.GroupAgent, this.name);
-    const { isMember, role } = await group.membership(me.id);
-    if (!isMember || role === null) return connection.close(1008, "forbidden");
-    connection.setState({ userId: me.id, name: me.name, role } satisfies ConnIdentity);
+    const profile = await group.memberProfile(me.id);
+    if (!profile) return connection.close(1008, "forbidden");
+    connection.setState({
+      userId: me.id,
+      name: profile.name,
+      role: profile.role,
+      ...(profile.avatarImageId ? { avatarImageId: profile.avatarImageId } : {}),
+    } satisfies ConnIdentity);
     this.broadcastPresence();
   }
 
@@ -70,7 +102,14 @@ export class NoteAgent extends Agent<Env, NoteState> {
     for (const conn of this.getConnections<ConnIdentity>()) {
       if (conn.id === excludeId) continue;
       const s = conn.state;
-      if (s?.userId) seen.set(s.userId, { id: s.userId, name: s.name, role: s.role });
+      if (s?.userId) {
+        seen.set(s.userId, {
+          id: s.userId,
+          name: s.name,
+          role: s.role,
+          ...(s.avatarImageId ? { avatarImageId: s.avatarImageId } : {}),
+        });
+      }
     }
     this.broadcast(JSON.stringify({ type: "presence", users: [...seen.values()] }));
   }
@@ -98,16 +137,16 @@ export class NoteAgent extends Agent<Env, NoteState> {
   }
 
   @callable()
-  editNote(id: string, body: string): void {
+  async editNote(id: string, body: string): Promise<void> {
     if (!permits(this.me.role, GroupAction.EditOwnNote)) return;
-    this.setState(editNote(this.state, id, body, this.stamp.now(), this.me.userId));
+    await this.commit(editNote(this.state, id, body, this.stamp.now(), this.me.userId));
   }
 
   @callable()
-  removeNote(id: string): void {
+  async removeNote(id: string): Promise<void> {
     const { userId, role } = this.me;
     if (!permits(role, GroupAction.DeleteOwnNote)) return;
-    this.setState(
+    await this.commit(
       removeNote(
         this.state,
         id,
@@ -137,7 +176,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
   // content. Reads `this.state` fresh: Durable Objects serialize RPC calls, so
   // each batch sees the previous batch's committed state.
   @callable()
-  applyOperations(ops: NoteOp[]): ApplyOpsResult {
+  async applyOperations(ops: NoteOp[]): Promise<ApplyOpsResult> {
     const { userId, name, role } = this.me;
     if (!permits(role, GroupAction.CreateNote)) {
       return {
@@ -149,7 +188,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
       author: { id: userId, name },
       isOwner: permits(role, GroupAction.ModerateNotes),
     });
-    this.setState(result.state);
+    await this.commit(result.state);
     return { appliedOpIds: result.appliedOpIds, rejectedOps: result.rejectedOps };
   }
 
@@ -157,15 +196,31 @@ export class NoteAgent extends Agent<Env, NoteState> {
     return this.state;
   }
 
+  referencesImage(imageId: string): boolean {
+    return this.state.notes.some((note) => noteImageIds(note.body).has(imageId));
+  }
+
+  async deleteImage(imageId: string): Promise<void> {
+    await this.commit(
+      {
+        ...this.state,
+        notes: this.state.notes.map((note) => {
+          const body = removeNoteImageReferences(note.body, imageId);
+          return body === note.body
+            ? note
+            : { ...note, body, editedAt: this.stamp.now(), version: note.version + 1 };
+        }),
+      },
+      [imageId],
+    );
+  }
+
   importState(state: NoteState): void {
     this.setState(state);
   }
 
-  removeSource(sourceId: string): void {
-    this.setState({
-      ...this.state,
-      notes: this.state.notes.filter((note) => note.sourceId !== sourceId),
-    });
+  async removeSource(sourceId: string): Promise<void> {
+    await this.commit(removeSourceNotes(this.state, sourceId));
   }
 
   clear(): void {
@@ -176,6 +231,27 @@ export class NoteAgent extends Agent<Env, NoteState> {
     for (const connection of this.getConnections<ConnIdentity>()) {
       if (connection.state?.userId === userId) {
         connection.setState({ ...connection.state, role });
+      }
+    }
+    this.broadcastPresence();
+  }
+
+  updateMemberProfile(userId: string, name: string, avatarImageId?: string): void {
+    const needsNoteUpdate = this.state.notes.some(
+      (note) => note.author.id === userId && note.author.name !== name,
+    );
+    if (needsNoteUpdate) {
+      this.setState({
+        ...this.state,
+        notes: this.state.notes.map((note) =>
+          note.author.id === userId ? { ...note, author: { ...note.author, name } } : note,
+        ),
+      });
+    }
+    for (const connection of this.getConnections<ConnIdentity>()) {
+      if (connection.state?.userId === userId) {
+        const { avatarImageId: _oldAvatar, ...current } = connection.state;
+        connection.setState({ ...current, name, ...(avatarImageId ? { avatarImageId } : {}) });
       }
     }
     this.broadcastPresence();

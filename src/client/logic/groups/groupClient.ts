@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { apiFetch } from "../net/api.ts";
 import {
   GroupRole,
+  type BookMetadataPatch,
   type GroupSummary,
   type Membership,
   type RosterEntry,
@@ -10,8 +11,10 @@ import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../../shared/types/sources.ts";
 import { parseHttpError } from "../../http.ts";
 import { decode } from "../../../shared/schema.ts";
+import type { ClubProfile } from "../../../shared/types/profiles.ts";
 
 export type {
+  BookMetadataPatch,
   GroupRole,
   GroupSummary,
   Membership,
@@ -39,6 +42,7 @@ const SourceMeta = Schema.Struct({
   size: Schema.Number,
   title: Schema.optionalKey(Schema.NullOr(Schema.String)),
   author: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   addedBy: Schema.String,
 });
 
@@ -64,6 +68,15 @@ const RosterEntry = Schema.Struct({
   name: Schema.String,
   email: Schema.String,
   role: GroupRoleSchema,
+  avatarImageId: Schema.optionalKey(Schema.String),
+});
+
+const ClubProfileResponse = Schema.Struct({
+  profile: Schema.Struct({
+    id: Schema.String,
+    displayName: Schema.String,
+    avatarImageId: Schema.optionalKey(Schema.String),
+  }),
 });
 
 const ErrorBody = Schema.Struct({
@@ -89,6 +102,25 @@ const UploadImageResponse = Schema.Struct({
   contentType: Schema.String,
   size: Schema.Number,
 });
+const GroupImage = Schema.Struct({
+  id: Schema.String,
+  size: Schema.Number,
+  contentType: Schema.String,
+  uploadedAt: Schema.String,
+  uploadedBy: Schema.NullOr(Schema.String),
+  uploaderName: Schema.String,
+});
+const GroupImagesResponse = Schema.Struct({
+  images: Schema.mutable(Schema.Array(GroupImage)),
+  totalSize: Schema.Number,
+});
+const RestoreBackupResponse = Schema.Struct({
+  notes: Schema.Number,
+  images: Schema.Number,
+  createdAt: Schema.String,
+});
+
+export type GroupImage = Schema.Schema.Type<typeof GroupImage>;
 
 const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
 
@@ -296,6 +328,7 @@ export async function uploadSource(
   health: SourceHealth,
   title: string | null,
   author: string | null,
+  wordCount: number | null,
 ): Promise<ApiResult<string>> {
   const headers: Record<string, string> = {
     "Content-Type": file.type || EPUB_CONTENT_TYPE,
@@ -303,6 +336,7 @@ export async function uploadSource(
   };
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
   if (author) headers["X-Source-Author"] = encodeURIComponent(author);
+  if (wordCount !== null) headers["X-Source-Word-Count"] = String(wordCount);
   const r = await apiFetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadBookResponse);
@@ -315,6 +349,21 @@ export async function deleteBook(
 ): Promise<ApiResult<GroupSummary>> {
   const r = await apiFetch(`/groups/${groupRef}/book/${encodeURIComponent(sourceId)}`, {
     method: "DELETE",
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, GroupResponse);
+  return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
+}
+
+export async function updateBookMetadata(
+  groupRef: string,
+  sourceId: string,
+  patch: BookMetadataPatch,
+): Promise<ApiResult<GroupSummary>> {
+  const r = await apiFetch(`/groups/${groupRef}/book/${encodeURIComponent(sourceId)}/metadata`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
   });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, GroupResponse);
@@ -340,6 +389,49 @@ export async function uploadNoteImage(groupRef: string, file: File): Promise<Api
   return body ? { ok: true, value: body.id } : { ok: false, error: "bad_response" };
 }
 
+export async function deleteNoteImage(groupRef: string, imageId: string): Promise<ApiResult<null>> {
+  const r = await apiFetch(`/groups/${groupRef}/images/${encodeURIComponent(imageId)}`, {
+    method: "DELETE",
+  });
+  return r.ok ? { ok: true, value: null } : { ok: false, error: await parseHttpError(r) };
+}
+
+export async function listGroupImages(
+  groupRef: string,
+): Promise<ApiResult<{ images: GroupImage[]; totalSize: number }>> {
+  const r = await apiFetch(`/groups/${groupRef}/images`);
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, GroupImagesResponse);
+  return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
+}
+
+export async function fetchGroupBackup(groupRef: string): Promise<ApiResult<File>> {
+  const r = await apiFetch(`/groups/${groupRef}/backup`);
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const disposition = r.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="([^"]+)"/u.exec(disposition)?.[1] ?? "notes.bookclub";
+  return {
+    ok: true,
+    value: new File([await r.blob()], filename, {
+      type: r.headers.get("Content-Type") ?? "application/octet-stream",
+    }),
+  };
+}
+
+export async function restoreGroupBackup(
+  groupRef: string,
+  file: File,
+): Promise<ApiResult<{ notes: number; images: number; createdAt: string }>> {
+  const r = await apiFetch(`/groups/${groupRef}/backup`, {
+    method: "PUT",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, RestoreBackupResponse);
+  return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
+}
+
 export async function uploadAvatarImage(file: File): Promise<ApiResult<string>> {
   const compressed = await compressedImage(file, "avatar");
   if (!compressed.ok) return compressed;
@@ -354,8 +446,29 @@ export async function uploadAvatarImage(file: File): Promise<ApiResult<string>> 
   return body ? { ok: true, value: body.id } : { ok: false, error: "bad_response" };
 }
 
+export async function updateClubProfile(
+  groupId: string,
+  displayName: string,
+): Promise<ApiResult<ClubProfile>> {
+  const r = await apiFetch(`/me/clubs/${encodeURIComponent(groupId)}/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName }),
+  });
+  if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+  const body = await parseJson(r, ClubProfileResponse);
+  return body ? { ok: true, value: body.profile } : { ok: false, error: "bad_response" };
+}
+
 export function avatarImagePath(userId: string, imageId: string): string {
   return `/users/${encodeURIComponent(userId)}/avatar/${encodeURIComponent(imageId)}`;
+}
+
+// The glyph shown in an avatar slot when a member has no picture: their first
+// initial on black. Shared so the roster, account settings, and note avatars
+// all fall back identically.
+export function avatarInitial(name: string): string {
+  return name.slice(0, 1).toUpperCase();
 }
 
 export async function fetchSource(

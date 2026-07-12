@@ -5,21 +5,27 @@ import {
   createGroup,
   deleteBook,
   deleteGroup,
+  deleteImageUpload,
   fetchSource,
   fetchImage,
+  exportGroupBackup,
   inviteByEmail,
   inviteLink,
+  listGroupImages,
   listMyGroups,
   redeemInvite,
   renameBookTitle,
   renameGroupTitle,
   resolveBookTitle,
   resolveGroupView,
+  restoreGroupBackup,
   uploadImage,
   uploadSource,
+  updateBookMetadata,
   type WorkflowFailure,
 } from "../workflows/groupWorkflows.ts";
 import { readJson } from "../http.ts";
+import { BOOKCLUB_ARCHIVE_CONTENT_TYPE } from "../../shared/backups/bookclubArchive.ts";
 
 function workflowError(result: WorkflowFailure): Response {
   const body = result.reason
@@ -136,6 +142,18 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
     return result.ok ? c.json(result.value) : workflowError(result);
   });
 
+  app.put("/groups/:groupId/book/:sourceId/metadata", async (c) => {
+    const body = await readJson(c.req.raw);
+    const result = await updateBookMetadata(
+      c.env,
+      c.req.raw,
+      c.req.param("groupId"),
+      c.req.param("sourceId"),
+      body,
+    );
+    return result.ok ? c.json(result.value) : workflowError(result);
+  });
+
   app.delete("/groups/:groupId", async (c) => {
     const result = await deleteGroup(c.env, c.req.raw, c.req.param("groupId"));
     return result.ok ? c.body(null, 204) : workflowError(result);
@@ -144,6 +162,21 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
   app.post("/groups/:groupId/images", async (c) => {
     const result = await uploadImage(c.env, c.req.raw, c.req.param("groupId"));
     return result.ok ? c.json(result.value, 201) : workflowError(result);
+  });
+
+  app.get("/groups/:groupId/images", async (c) => {
+    const result = await listGroupImages(c.env, c.req.raw, c.req.param("groupId"));
+    return result.ok ? c.json(result.value) : workflowError(result);
+  });
+
+  app.delete("/groups/:groupId/images/:imageId", async (c) => {
+    const result = await deleteImageUpload(
+      c.env,
+      c.req.raw,
+      c.req.param("groupId"),
+      c.req.param("imageId"),
+    );
+    return result.ok ? c.body(null, 204) : workflowError(result);
   });
 
   app.get("/groups/:groupId/images/:imageId", async (c) => {
@@ -160,5 +193,23 @@ export function registerGroupRoutes(app: Hono<{ Bindings: Env }>): void {
         "Cache-Control": "private, max-age=3600",
       },
     });
+  });
+
+  app.get("/groups/:groupId/backup", async (c) => {
+    const result = await exportGroupBackup(c.env, c.req.raw, c.req.param("groupId"));
+    if (!result.ok) return workflowError(result);
+    return new Response(Uint8Array.from(result.value.bytes).buffer, {
+      headers: {
+        "Content-Type": BOOKCLUB_ARCHIVE_CONTENT_TYPE,
+        "Content-Disposition": `attachment; filename="${result.value.filename}"`,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  });
+
+  app.put("/groups/:groupId/backup", async (c) => {
+    const result = await restoreGroupBackup(c.env, c.req.raw, c.req.param("groupId"));
+    return result.ok ? c.json(result.value) : workflowError(result);
   });
 }

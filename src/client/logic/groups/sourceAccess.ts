@@ -49,8 +49,9 @@ export async function uploadCurrentSource(
   health: SourceHealth,
   title: string | null,
   author: string | null,
+  wordCount: number | null,
 ): Promise<ApiResult<LoadedSource>> {
-  const uploaded = await uploadSource(groupUrlName(group), file, health, title, author);
+  const uploaded = await uploadSource(groupUrlName(group), file, health, title, author, wordCount);
   if (!uploaded.ok) return uploaded;
   await putCachedSource(uploaded.value, file);
   return {

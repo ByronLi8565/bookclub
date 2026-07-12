@@ -8,6 +8,7 @@ import {
   emptyNoteState,
   rebindHighlight,
   removeNote,
+  removeSourceNotes,
   type NoteStamp,
   type NoteState,
 } from "../server/state/noteState.ts";
@@ -176,5 +177,19 @@ describe("removeNote", () => {
 
     expect(next.notes).toHaveLength(2);
     expect((next.notes[0] as Note).deletedAt).toBe(at);
+  });
+});
+
+describe("removeSourceNotes", () => {
+  it("removes every note for the deleted book and preserves notes for other books", () => {
+    const stamp = fakeStamp();
+    let state = addNote(emptyNoteState(), "deleted-book", ALICE, "root", [], stamp);
+    state = addReply(state, "deleted-book", BOB, "id-1", "reply", stamp);
+    state = addNote(state, "kept-book", ALICE, "keep", [], stamp);
+
+    const next = removeSourceNotes(state, "deleted-book");
+
+    expect(next.notes.map((note) => note.body)).toEqual(["keep"]);
+    expect(next.nextSeq).toBe(state.nextSeq);
   });
 });

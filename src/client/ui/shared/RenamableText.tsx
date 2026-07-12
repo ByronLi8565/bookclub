@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function RenamableText({
   value,
@@ -23,6 +23,17 @@ export function RenamableText({
 }): React.ReactElement {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    const blurOnOutsidePointer = (event: PointerEvent): void => {
+      const input = inputRef.current;
+      if (input && event.target instanceof Node && !input.contains(event.target)) input.blur();
+    };
+    document.addEventListener("pointerdown", blurOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", blurOnOutsidePointer, true);
+  }, [editing]);
 
   function save(): void {
     const next = draft.trim();
@@ -33,6 +44,8 @@ export function RenamableText({
   if (editing) {
     return (
       <input
+        ref={inputRef}
+        autoFocus
         className={inputClassName}
         value={draft}
         aria-label={ariaLabel}

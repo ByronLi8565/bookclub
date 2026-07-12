@@ -1,15 +1,39 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import editIcon from "@assets/edit.svg";
-import type { Note } from "../../../shared/types/notes.ts";
+import type { Note, NoteAuthor } from "../../../shared/types/notes.ts";
 import { effectiveHighlight } from "../../logic/notes/conversation.ts";
 import { noteTitle } from "../../logic/notes/format.ts";
 import { canDeleteNote, canEditNote, type NoteViewer } from "../../logic/notes/permissions.ts";
 import { NoteEditor } from "./editor/NoteEditor.tsx";
+import type { UploadedNoteImage } from "./editor/NoteImageNode.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";
 
 export type { NoteViewer } from "../../logic/notes/permissions.ts";
 
 const MAX_INDENT = 4;
+
+// A note author's picture, already resolved to a URL (or null when they have no
+// avatar, in which case `initials` is shown on black). Kept pre-resolved so the
+// note tree stays ignorant of how avatars are stored/addressed.
+export interface AuthorAvatar {
+  url: string | null;
+  initials: string;
+  name: string;
+}
+
+export type AvatarResolver = (author: NoteAuthor) => AuthorAvatar;
+
+function AuthorPic({ avatar }: { avatar: AuthorAvatar }) {
+  return (
+    <span className="note-avatar" title={avatar.name}>
+      {avatar.url ? (
+        <img src={avatar.url} alt="" />
+      ) : (
+        <span aria-hidden="true">{avatar.initials}</span>
+      )}
+    </span>
+  );
+}
 
 export interface NoteRefs {
   validSeqs: Set<number>;
@@ -96,6 +120,7 @@ function NoteRow({
   viewer,
   imageUrlBase,
   onPasteImage,
+  avatarFor,
 }: {
   note: Note;
   actions: NoteActions;
@@ -103,8 +128,24 @@ function NoteRow({
   canWrite: boolean;
   viewer: NoteViewer;
   imageUrlBase?: string;
-  onPasteImage?: (file: File) => Promise<string | null>;
+  onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
+  avatarFor?: AvatarResolver;
 }) {
+  // Chat-style layout: the author's picture floats to the left of the card and
+  // all of the row's content (card + any inline editor) shares one column so
+  // it stays aligned to the avatar's gutter. When no resolver is supplied
+  // (e.g. info cards) we fall through to the plain, avatar-less markup.
+  const avatar = avatarFor?.(note.author) ?? null;
+  const withAvatar = (content: ReactNode): ReactNode =>
+    avatar ? (
+      <div className="note-row">
+        <AuthorPic avatar={avatar} />
+        <div className="note-row-body">{content}</div>
+      </div>
+    ) : (
+      content
+    );
+
   const anchored = effectiveHighlight(note, refs.byId) !== null;
   const deleted = note.deletedAt !== null;
   const syncState = refs.failedNoteIds.has(note.id)
@@ -130,7 +171,7 @@ function NoteRow({
   }, [confirmingDelete]);
 
   if (!deleted && actions.editingId === note.id) {
-    return (
+    return withAvatar(
       <div className="note editing" id={`note-${note.seq}`}>
         <div className="note-head">
           <span className="note-seq">{note.seq}</span>
@@ -147,12 +188,13 @@ function NoteRow({
           canSubmit={canWrite}
           canReference={refs.canReference}
           onPasteImage={onPasteImage}
+          imageUrlBase={imageUrlBase}
         />
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return withAvatar(
     <>
       <NoteCardView
         seq={note.seq}
@@ -219,7 +261,7 @@ function NoteRow({
                 </button>
                 {confirmingDelete && (
                   <dialog className="delete-confirm" open aria-label="Confirm delete">
-                    <p>really delete?</p>
+                    <p>Really delete?</p>
                     <div className="delete-confirm-actions">
                       <button
                         type="button"
@@ -261,10 +303,11 @@ function NoteRow({
             canSubmit={canWrite}
             canReference={refs.canReference}
             onPasteImage={onPasteImage}
+            imageUrlBase={imageUrlBase}
           />
         </div>
       )}
-    </>
+    </>,
   );
 }
 
@@ -277,6 +320,7 @@ function Replies({
   viewer,
   imageUrlBase,
   onPasteImage,
+  avatarFor,
   depth,
 }: {
   parent: Note;
@@ -286,7 +330,8 @@ function Replies({
   canWrite: boolean;
   viewer: NoteViewer;
   imageUrlBase?: string;
-  onPasteImage?: (file: File) => Promise<string | null>;
+  onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
+  avatarFor?: AvatarResolver;
   depth: number;
 }) {
   const children = childrenOf(parent.id);
@@ -302,6 +347,7 @@ function Replies({
         viewer={viewer}
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
+        avatarFor={avatarFor}
       />
       <Replies
         parent={child}
@@ -312,6 +358,7 @@ function Replies({
         viewer={viewer}
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
+        avatarFor={avatarFor}
         depth={depth + 1}
       />
     </Fragment>
@@ -329,6 +376,7 @@ export function NoteThread({
   viewer,
   imageUrlBase,
   onPasteImage,
+  avatarFor,
 }: {
   root: Note;
   childrenOf: (id: string) => Note[];
@@ -337,7 +385,8 @@ export function NoteThread({
   canWrite: boolean;
   viewer: NoteViewer;
   imageUrlBase?: string;
-  onPasteImage?: (file: File) => Promise<string | null>;
+  onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
+  avatarFor?: AvatarResolver;
 }) {
   return (
     <li className="note-thread">
@@ -349,6 +398,7 @@ export function NoteThread({
         viewer={viewer}
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
+        avatarFor={avatarFor}
       />
       <Replies
         parent={root}
@@ -359,6 +409,7 @@ export function NoteThread({
         viewer={viewer}
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
+        avatarFor={avatarFor}
         depth={1}
       />
     </li>

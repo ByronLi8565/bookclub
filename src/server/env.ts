@@ -12,6 +12,7 @@ export interface Env {
   IMAGES: R2Bucket;
   BACKUPS: R2Bucket;
   SESSION_HMAC_SECRET: string;
+  DEV_AUTH?: string;
   // Email allowed to trigger manual backup/restore admin endpoints. Empty
   // disables them (scheduled backups still run regardless).
   ADMIN_EMAIL?: string;
