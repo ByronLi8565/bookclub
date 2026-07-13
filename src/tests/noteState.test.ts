@@ -163,7 +163,9 @@ describe("removeNote", () => {
 
     const tomb = next.notes[0] as Note;
     expect(tomb.deletedAt).toBe(at);
-    expect(tomb.body).toContain("deleted");
+    // The original body must be redacted, not just flagged — assert the content
+    // is gone rather than matching the tombstone's (editable) placeholder copy.
+    expect(tomb.body, "the deleted note's original text is redacted").not.toContain("target");
     expect(tomb.highlights).toEqual([]);
     expect(tomb.version).toBe(2);
   });

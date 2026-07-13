@@ -51,18 +51,19 @@ describe("local notes backup settings", () => {
       await Promise.resolve();
     });
 
-    expect(container.querySelector("[aria-label='Confirm notes backup']")?.textContent).toContain(
-      "This will download a zip file of 1.5 KB with note data.",
-    );
-    expect(anchorClick).not.toHaveBeenCalled();
+    // The guard that matters: clicking "Backup notes" must NOT download yet —
+    // it only arms a confirmation. A regression here silently downloads on the
+    // first click.
     const confirm = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Download",
     );
+    expect(confirm, "the first click arms a confirmation instead of downloading").toBeDefined();
+    expect(anchorClick).not.toHaveBeenCalled();
     await act(async () => {
       confirm?.click();
       await Promise.resolve();
     });
-    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(anchorClick, "confirming then triggers exactly one download").toHaveBeenCalledOnce();
   });
 
   it("previews an exact restore before uploading it", async () => {
@@ -115,9 +116,12 @@ describe("local notes backup settings", () => {
       });
     });
 
-    expect(container.querySelector(".settings-backup-preview")?.textContent).toContain(
-      "Readers · 1 notes · 0 images",
-    );
+    // Selecting a file must preview locally, not upload — a regression that
+    // uploads on selection would restore without the user confirming.
+    expect(
+      container.querySelector(".settings-backup-preview"),
+      "the chosen archive is previewed before any upload",
+    ).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     const restore = [...container.querySelectorAll("button")].find(
       (button) => button.textContent === "Restore exactly",

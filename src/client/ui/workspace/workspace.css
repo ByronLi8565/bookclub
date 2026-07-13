@@ -56,6 +56,30 @@
   gap: 12px;
 }
 
+/* Clicking anywhere on the row toggles the box, so the whole item is the label. */
+.settings-item--checkbox {
+  align-items: center;
+  cursor: pointer;
+}
+
+/* Extra class in the selector to outrank `.modal-body input { width: 100% }`.
+   Filled black = on, empty = off — no glyph. */
+.settings-item--checkbox .settings-checkbox {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: var(--line);
+  background: var(--white);
+  cursor: pointer;
+}
+
+.settings-item--checkbox .settings-checkbox:checked {
+  background: var(--black);
+}
+
 .settings-user-profile {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr) auto;

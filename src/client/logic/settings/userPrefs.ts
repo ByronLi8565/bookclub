@@ -48,6 +48,14 @@ export function setReaderPref<K extends keyof UserPrefs["reader"]>(
   void Effect.runPromise(syncUserPrefs()).catch(() => {});
 }
 
+export function setNotesPref<K extends keyof UserPrefs["notes"]>(
+  key: K,
+  value: UserPrefs["notes"][K],
+): void {
+  publish({ ...prefs, notes: { ...prefs.notes, [key]: value } });
+  void Effect.runPromise(syncUserPrefs()).catch(() => {});
+}
+
 export function hydrateUserPrefs(): Effect.Effect<UserPrefs> {
   return Effect.tryPromise(async () => {
     const response = await apiFetch("/me/prefs");
@@ -87,4 +95,8 @@ function useUserPrefs(): UserPrefs {
 
 export function useReaderPrefs(): UserPrefs["reader"] {
   return useUserPrefs().reader;
+}
+
+export function useNotesPrefs(): UserPrefs["notes"] {
+  return useUserPrefs().notes;
 }

@@ -21,6 +21,7 @@ export const UserPrefs = Schema.Struct({
     readingPositionOpenPolicy: ReadingPositionOpenPolicy,
     pdfPageLayout: PdfPageLayout,
   }),
+  notes: Schema.Struct({ showAvatars: Schema.Boolean }),
 });
 
 export const UserPrefsResponse = Schema.Struct({ prefs: UserPrefs });
@@ -37,8 +38,12 @@ export const DEFAULT_USER_PREFS: UserPrefs = {
     readingPositionOpenPolicy: "prefer-sync",
     pdfPageLayout: "single",
   },
+  notes: { showAvatars: true },
 };
 
 export function mergeUserPrefs(raw: Partial<UserPrefs> | null | undefined): UserPrefs {
-  return { reader: { ...DEFAULT_USER_PREFS.reader, ...raw?.reader } };
+  return {
+    reader: { ...DEFAULT_USER_PREFS.reader, ...raw?.reader },
+    notes: { ...DEFAULT_USER_PREFS.notes, ...raw?.notes },
+  };
 }

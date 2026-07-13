@@ -36,7 +36,7 @@ import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { useDelayedFlag } from "../ui/shared/hooks/useDelayedFlag.ts";
 import { useIsMobile } from "../ui/shared/hooks/useIsMobile.ts";
-import { setReaderPref, useReaderPrefs } from "../logic/settings/userPrefs.ts";
+import { setReaderPref, useNotesPrefs, useReaderPrefs } from "../logic/settings/userPrefs.ts";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
 import type { AvatarResolver, NoteRefs } from "../ui/notes/NoteThread.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
@@ -145,6 +145,7 @@ export function Workspace({
       ...(me?.avatarImageId ? { avatarImageId: me.avatarImageId } : {}),
     };
   }, [members, viewer.userId]);
+  const { showAvatars } = useNotesPrefs();
   // Resolve a note author to their picture by joining against the roster (which
   // carries avatarImageId). Notes only store {id, name}, so the roster is the
   // source of truth for avatars and this stays live as members update theirs.
@@ -543,7 +544,7 @@ export function Workspace({
             onPasteImage={onPasteImage}
             refs={noteRefs}
             viewer={viewer}
-            avatarFor={avatarFor}
+            avatarFor={showAvatars ? avatarFor : undefined}
             imageUrlBase={`/groups/${groupRef}/images`}
             actions={{
               editingId,

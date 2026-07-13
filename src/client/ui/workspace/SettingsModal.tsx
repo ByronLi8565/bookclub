@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
+  setNotesPref,
   setReaderPref,
+  useNotesPrefs,
   useReaderPrefs,
   type PdfPageLayout,
   type ReadingPositionOpenPolicy,
@@ -66,13 +68,37 @@ function SettingDropdownTrigger({
   );
 }
 
+function SettingCheckbox({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}): React.ReactElement {
+  return (
+    <label className="settings-item settings-item--checkbox">
+      <div className="settings-item-text">
+        <h2 className="settings-item-head">{label}</h2>
+      </div>
+      <input
+        type="checkbox"
+        className="settings-checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
+  );
+}
+
 export interface SettingsBook {
   groupId: string;
   profile: ClubProfile;
   onProfileChange: (profile: ClubProfile) => void;
 }
 
-type Category = "account" | "user" | "info" | "pdf";
+type Category = "account" | "user" | "general" | "pdf";
 
 // Account security is global and belongs on the homepage. Reader settings mix
 // a club-specific profile with controls for the currently open book.
@@ -83,7 +109,7 @@ function categoriesFor(
   if (book)
     return [
       { id: "user", label: "User" },
-      { id: "info", label: "Info" },
+      { id: "general", label: "General" },
       { id: "pdf", label: "PDF" },
     ];
   return signedIn ? [{ id: "account", label: "Account" }] : [];
@@ -102,6 +128,7 @@ export function SettingsModal({
   const [category, setCategory] = useState<Category>(categories[0]?.id ?? "account");
 
   const { readingPositionOpenPolicy, smartArrows, pdfPageLayout } = useReaderPrefs();
+  const { showAvatars } = useNotesPrefs();
 
   return (
     <Modal title={book ? "settings" : "account settings"} onClose={onClose}>
@@ -114,24 +141,33 @@ export function SettingsModal({
             onChange={book.onProfileChange}
           />
         )}
-        {category === "info" && book && (
-          <section className="settings-item">
-            <div className="settings-item-text">
-              <h2 className="settings-item-head">Opening position</h2>
-              <p className="settings-item-desc">Whether to sync reading position across browsers</p>
-            </div>
-            <div className="settings-item-control">
-              <SettingDropdown<ReadingPositionOpenPolicy>
-                value={readingPositionOpenPolicy}
-                onChange={(v) => setReaderPref("readingPositionOpenPolicy", v)}
-                ariaLabel="Opening reading position"
-                options={[
-                  { value: "prefer-sync", label: "Sync" },
-                  { value: "prefer-local", label: "Local" },
-                ]}
-              />
-            </div>
-          </section>
+        {category === "general" && book && (
+          <>
+            <section className="settings-item">
+              <div className="settings-item-text">
+                <h2 className="settings-item-head">Opening position</h2>
+                <p className="settings-item-desc">
+                  Whether to sync reading position across browsers
+                </p>
+              </div>
+              <div className="settings-item-control">
+                <SettingDropdown<ReadingPositionOpenPolicy>
+                  value={readingPositionOpenPolicy}
+                  onChange={(v) => setReaderPref("readingPositionOpenPolicy", v)}
+                  ariaLabel="Opening reading position"
+                  options={[
+                    { value: "prefer-sync", label: "Sync" },
+                    { value: "prefer-local", label: "Local" },
+                  ]}
+                />
+              </div>
+            </section>
+            <SettingCheckbox
+              label="Show profile pics"
+              checked={showAvatars}
+              onChange={(v) => setNotesPref("showAvatars", v)}
+            />
+          </>
         )}
         {category === "pdf" && (
           <>
