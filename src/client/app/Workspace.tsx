@@ -31,7 +31,7 @@ import { type NoteViewer } from "../logic/notes/permissions.ts";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
 import { InfoScreen } from "../ui/shared/InfoScreen.tsx";
 import { MobilePager, type Pane } from "../ui/shared/MobilePager.tsx";
-import { SplitPane } from "../ui/shared/SplitPane.tsx";
+import { SplitPane, stepExpandedPane, type ExpandedPane } from "../ui/shared/SplitPane.tsx";
 import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { useDelayedFlag } from "../ui/shared/hooks/useDelayedFlag.ts";
@@ -48,6 +48,10 @@ import {
 import { useSourceView, type SelectIntent } from "../ui/reader/useSourceView.ts";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
 import { SettingsModal } from "../ui/workspace/SettingsModal.tsx";
+import {
+  stepChromeVisibility,
+  type ChromeVisibilityLevel,
+} from "../ui/workspace/chromeVisibility.ts";
 
 export interface WorkspaceProps {
   group: GroupSummary;
@@ -89,7 +93,6 @@ function scrollNoteIntoView(seq: number): void {
 
 const FIT_AFTER_CHROME_TOGGLE_MS = 140;
 const FIT_AFTER_SPLIT_EXPAND_MS = 240;
-type DesktopExpandedPane = "left" | "right" | null;
 type WorkspaceModal = "group" | "settings" | "info";
 const WORKSPACE_MODALS: WorkspaceModal[] = ["group", "settings", "info"];
 
@@ -123,10 +126,11 @@ export function Workspace({
   const [activeModal, setActiveModal] = useState<WorkspaceModal | null>(null);
   const isMobile = useIsMobile();
   const [pane, setPane] = useState<Pane>("reader");
-  const [desktopExpandedPane, setDesktopExpandedPane] = useState<DesktopExpandedPane>(null);
-  const [chromeHidden, setChromeHidden] = useState(false);
+  const [desktopExpandedPane, setDesktopExpandedPane] = useState<ExpandedPane>(null);
+  const [chromeLevel, setChromeLevel] = useState<ChromeVisibilityLevel>(0);
   const fitToTextRef = useRef<(() => void) | null>(null);
   const chromeMountedRef = useRef(false);
+  const chromeToggleFrameRef = useRef<number | null>(null);
   const [renamedDisplayName, setRenamedDisplayName] = useState<{
     base: string;
     value: string;
@@ -186,7 +190,7 @@ export function Workspace({
     (dir) => {
       if (dir === "left") setPane("notes");
       else if (dir === "right") setPane("reader");
-      else setChromeHidden(dir === "up");
+      else setChromeLevel((level) => stepChromeVisibility(level, dir === "up" ? "hide" : "show"));
     },
     () => restoreAfterSearchClearRef.current(),
     initialReadingPosition,
@@ -202,7 +206,16 @@ export function Workspace({
     }
     const timeout = window.setTimeout(() => fitToTextRef.current?.(), FIT_AFTER_CHROME_TOGGLE_MS);
     return () => window.clearTimeout(timeout);
-  }, [chromeHidden]);
+  }, [chromeLevel]);
+
+  useEffect(
+    () => () => {
+      if (chromeToggleFrameRef.current !== null) {
+        cancelAnimationFrame(chromeToggleFrameRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (desktopExpandedPane !== "left") return;
@@ -232,18 +245,25 @@ export function Workspace({
   const { pdfPageLayout } = useReaderPrefs();
   useHotkey("ArrowLeft", () => view.prev(), { enabled: readerKeys });
   useHotkey("ArrowRight", () => view.next(), { enabled: readerKeys });
-  useHotkey("Shift+ArrowLeft", () => setDesktopExpandedPane("right"), {
+  useHotkey(
+    "Shift+ArrowLeft",
+    () => setDesktopExpandedPane((expanded) => stepExpandedPane(expanded, "left")),
+    { enabled: readerKeys && !isMobile, preventDefault: true },
+  );
+  useHotkey(
+    "Shift+ArrowRight",
+    () => setDesktopExpandedPane((expanded) => stepExpandedPane(expanded, "right")),
+    { enabled: readerKeys && !isMobile, preventDefault: true },
+  );
+  useHotkey("Shift+ArrowUp", () => setChromeLevel((level) => stepChromeVisibility(level, "hide")), {
     enabled: readerKeys && !isMobile,
     preventDefault: true,
   });
-  useHotkey("Shift+ArrowRight", () => setDesktopExpandedPane("left"), {
-    enabled: readerKeys && !isMobile,
-    preventDefault: true,
-  });
-  useHotkey("Shift+ArrowDown", () => setDesktopExpandedPane(null), {
-    enabled: readerKeys && !isMobile,
-    preventDefault: true,
-  });
+  useHotkey(
+    "Shift+ArrowDown",
+    () => setChromeLevel((level) => stepChromeVisibility(level, "show")),
+    { enabled: readerKeys && !isMobile, preventDefault: true },
+  );
   useHotkey(
     "D",
     () => setReaderPref("pdfPageLayout", pdfPageLayout === "auto" ? "single" : "auto"),
@@ -254,10 +274,19 @@ export function Workspace({
     enabled: readerKeys,
     preventDefault: true,
   });
-  useHotkey("Z", () => setChromeHidden((hidden) => !hidden), {
-    enabled: !modalOpen,
-    preventDefault: true,
-  });
+  useHotkey(
+    "Z",
+    () => {
+      if (chromeToggleFrameRef.current !== null) return;
+      // Commit the current geometry before changing the class so keyboard
+      // toggles enter the same CSS transition used by the swipe gesture.
+      chromeToggleFrameRef.current = requestAnimationFrame(() => {
+        chromeToggleFrameRef.current = null;
+        setChromeLevel((level) => (level === 0 ? 2 : 0));
+      });
+    },
+    { enabled: !modalOpen, preventDefault: true, requireReset: true },
+  );
   useHotkey("Escape", () => view.search.closeSearch(), {
     enabled: view.search.open && !modalOpen,
     conflictBehavior: "allow",
@@ -285,6 +314,7 @@ export function Workspace({
   onSelectRef.current = (anchor, range, intent) => {
     const sid = sourceIdRef.current;
     if (!sid) return;
+    if (intent === "note" && !isMobile) setDesktopExpandedPane(null);
     Effect.runPromise(captureHighlight(sid, anchor, range)).then((highlight) => {
       if (intent === "highlight") {
         agent.addNote(sid, highlightMark(highlight.quote.exact), [highlight], [HIGHLIGHT_TAG]);
@@ -508,7 +538,7 @@ export function Workspace({
   }
 
   return (
-    <div className={chromeHidden ? "app app--chrome-hidden" : "app"}>
+    <div className={chromeLevel >= 1 ? "app app--chrome-hidden" : "app"}>
       <WorkspaceHeader
         displayName={displayName}
         onRename={(t) => void onRenameGroup(t)}
@@ -529,7 +559,7 @@ export function Workspace({
             onSelectBook={onSelectBook}
             onRenameBook={canRenameBooks ? onRenameBook : null}
             onAddBook={onAddBook}
-            chromeHidden={chromeHidden && isMobile}
+            chromeHidden={chromeLevel >= 2}
           />
         );
         const notePanel = (
@@ -570,7 +600,9 @@ export function Workspace({
             selecting={view.selection !== null}
             onAddNote={() => view.commitSelection("note")}
             onHighlight={() => view.commitSelection("highlight")}
-            onChromeHiddenChange={setChromeHidden}
+            onChromeHiddenChange={(hidden) =>
+              setChromeLevel((level) => stepChromeVisibility(level, hidden ? "hide" : "show"))
+            }
           />
         ) : (
           <SplitPane

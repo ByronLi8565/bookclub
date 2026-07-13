@@ -10,7 +10,18 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   use: { baseURL: "http://localhost:5173", trace: "on-first-retry" },
-  projects: [{ name: "Mobile Safari", use: { ...devices["iPhone 14"] } }],
+  projects: [
+    {
+      name: "Mobile Safari",
+      testMatch: ["**/pdfMobile.pw.ts", "**/visual.pw.ts"],
+      use: { ...devices["iPhone 14"] },
+    },
+    {
+      name: "Desktop Safari",
+      testMatch: "**/readerActions.pw.ts",
+      use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
+    },
+  ],
   webServer: {
     command: "vite --port 5173 --strictPort",
     url: "http://localhost:5173",

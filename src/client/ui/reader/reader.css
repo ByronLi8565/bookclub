@@ -29,6 +29,7 @@
   max-height: 112px;
   opacity: 1;
   transition:
+    min-height var(--chrome-collapse-duration) var(--chrome-ease),
     max-height var(--chrome-collapse-duration) var(--chrome-ease),
     padding-top var(--chrome-collapse-duration) var(--chrome-ease),
     padding-bottom var(--chrome-collapse-duration) var(--chrome-ease),

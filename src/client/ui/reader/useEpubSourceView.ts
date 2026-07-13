@@ -109,6 +109,12 @@ interface ResizableView {
   contents?: Contents;
 }
 
+function afterLayout(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 interface EpubOpenedSource {
   file: File | null;
   initialEpubCfi: string | null;
@@ -208,8 +214,8 @@ export function useEpubSourceView(
   viewRef.current ??= Effect.runSync(Ref.make(Option.none<LiveView>()));
   const [fontSize, setFontSizeState] = useState(100);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
-  const drawnCfiRef = useRef<Map<string, string>>(null!);
-  drawnCfiRef.current ??= new Map<string, string>();
+  const drawnCfiRef = useRef<Map<string, { cfi: string; onClick: () => void }>>(null!);
+  drawnCfiRef.current ??= new Map<string, { cfi: string; onClick: () => void }>();
   const measureSeqRef = useRef(0);
   const [viewState, dispatchView] = useReducer(epubViewReducer, {
     openedSource: { file, initialEpubCfi },
@@ -488,9 +494,9 @@ export function useEpubSourceView(
     [],
   );
 
-  // Apply a live spread change (single ⇄ two-page) without reopening the book:
-  // update the rendition's spread, then re-display the current location so the
-  // new layout takes effect. Skipped on first ready (already set at renderTo).
+  // Apply a live spread change (single ⇄ two-page) without reopening the book.
+  // epub.js retains its annotation panes across this relayout, so repaint them
+  // once the new column geometry is committed or highlights keep stale bounds.
   const prevLayoutRef = useRef(pdfPageLayout);
   useEffect(() => {
     if (!ready) {
@@ -501,16 +507,24 @@ export function useEpubSourceView(
     prevLayoutRef.current = pdfPageLayout;
     const view = Option.getOrNull(Effect.runSync(Ref.get(viewRef.current)));
     if (!view) return;
-    try {
+    let cancelled = false;
+    void (async () => {
       view.rendition.spread(pdfPageLayout === "auto" ? "auto" : "none");
       const loc = view.rendition.currentLocation() as unknown as
         | { start?: { cfi?: string } }
         | undefined;
       const cfi = loc?.start?.cfi;
-      if (cfi) void view.rendition.display(cfi);
-    } catch (error) {
-      console.error("failed to change epub spread", error);
-    }
+      if (cfi) await view.rendition.display(cfi);
+      await afterLayout();
+      if (cancelled) return;
+      for (const [id, drawn] of drawnCfiRef.current) {
+        view.rendition.annotations.remove(drawn.cfi, "highlight");
+        view.rendition.annotations.highlight(drawn.cfi, { id }, drawn.onClick, "bc-highlight");
+      }
+    })().catch((error: unknown) => console.error("failed to change epub spread", error));
+    return () => {
+      cancelled = true;
+    };
   }, [pdfPageLayout, ready]);
 
   const setFontSize = useCallback(
@@ -556,17 +570,17 @@ export function useEpubSourceView(
       const cfi = anchor.value;
       onView((v) => {
         v.rendition.annotations.highlight(cfi, { id }, () => onClick(), "bc-highlight");
-        drawnCfiRef.current.set(id, cfi);
+        drawnCfiRef.current.set(id, { cfi, onClick });
       });
     },
     [onView],
   );
   const eraseHighlight = useCallback(
     (id: string) => {
-      const cfi = drawnCfiRef.current.get(id);
-      if (cfi === undefined) return;
+      const drawn = drawnCfiRef.current.get(id);
+      if (drawn === undefined) return;
       drawnCfiRef.current.delete(id);
-      onView((v) => v.rendition.annotations.remove(cfi, "highlight"));
+      onView((v) => v.rendition.annotations.remove(drawn.cfi, "highlight"));
     },
     [onView],
   );
@@ -574,7 +588,7 @@ export function useEpubSourceView(
     (anchor: HighlightAnchor) => {
       if (anchor.kind !== "epub-cfi") return;
       onView((v) => {
-        if ([...drawnCfiRef.current.values()].includes(anchor.value)) {
+        if ([...drawnCfiRef.current.values()].some((drawn) => drawn.cfi === anchor.value)) {
           v.rendition.annotations.remove(anchor.value, "highlight");
         }
         v.rendition.annotations.highlight(anchor.value, {}, () => {}, "bc-search");

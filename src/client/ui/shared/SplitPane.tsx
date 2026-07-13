@@ -3,7 +3,18 @@ import { useRef, useState, type ReactNode } from "react";
 const MIN_PCT = 25;
 const MAX_PCT = 80;
 
-type ExpandedPane = "left" | "right" | null;
+export type ExpandedPane = "left" | "right" | null;
+
+const EXPANDED_PANES: ExpandedPane[] = ["right", null, "left"];
+
+export function stepExpandedPane(pane: ExpandedPane, direction: "left" | "right"): ExpandedPane {
+  const index = EXPANDED_PANES.indexOf(pane);
+  const next = Math.min(
+    EXPANDED_PANES.length - 1,
+    Math.max(0, index + (direction === "right" ? 1 : -1)),
+  );
+  return EXPANDED_PANES[next]!;
+}
 
 function paneClassName(base: string, hidden: boolean): string {
   return hidden ? `${base} split-pane--hidden` : base;
