@@ -91,7 +91,7 @@ function scrollNoteIntoView(seq: number): void {
   });
 }
 
-const FIT_AFTER_CHROME_TOGGLE_MS = 140;
+const CHROME_TRANSITION_FALLBACK_MS = 400;
 const FIT_AFTER_SPLIT_EXPAND_MS = 240;
 type WorkspaceModal = "group" | "settings" | "info";
 const WORKSPACE_MODALS: WorkspaceModal[] = ["group", "settings", "info"];
@@ -128,9 +128,11 @@ export function Workspace({
   const [pane, setPane] = useState<Pane>("reader");
   const [desktopExpandedPane, setDesktopExpandedPane] = useState<ExpandedPane>(null);
   const [chromeLevel, setChromeLevel] = useState<ChromeVisibilityLevel>(0);
+  const [chromeTransitioning, setChromeTransitioning] = useState(false);
   const fitToTextRef = useRef<(() => void) | null>(null);
   const chromeMountedRef = useRef(false);
   const chromeToggleFrameRef = useRef<number | null>(null);
+  const chromeTransitionTimeoutRef = useRef<number | null>(null);
   const [renamedDisplayName, setRenamedDisplayName] = useState<{
     base: string;
     value: string;
@@ -183,6 +185,29 @@ export function Workspace({
     () => {},
   );
   const restoreAfterSearchClearRef = useRef<() => void>(() => {});
+  const finishChromeTransition = () => {
+    if (chromeTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(chromeTransitionTimeoutRef.current);
+      chromeTransitionTimeoutRef.current = null;
+    }
+    setChromeTransitioning(false);
+  };
+  const beginChromeTransition = () => {
+    setChromeTransitioning(true);
+    if (chromeTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(chromeTransitionTimeoutRef.current);
+    }
+    chromeTransitionTimeoutRef.current = window.setTimeout(
+      finishChromeTransition,
+      CHROME_TRANSITION_FALLBACK_MS,
+    );
+  };
+  const stepChrome = (direction: "hide" | "show") => {
+    const next = stepChromeVisibility(chromeLevel, direction);
+    if (next === chromeLevel) return;
+    beginChromeTransition();
+    setChromeLevel(next);
+  };
   const view = useSourceView(
     source,
     file,
@@ -190,28 +215,32 @@ export function Workspace({
     (dir) => {
       if (dir === "left") setPane("notes");
       else if (dir === "right") setPane("reader");
-      else setChromeLevel((level) => stepChromeVisibility(level, dir === "up" ? "hide" : "show"));
+      else stepChrome(dir === "up" ? "hide" : "show");
     },
     () => restoreAfterSearchClearRef.current(),
     initialReadingPosition,
+    chromeTransitioning,
   );
   fitToTextRef.current = view.fitToText ?? null;
   const readerPending = file === null || !view.ready;
   const showReaderLoading = useDelayedFlag(readerPending, 300);
 
   useEffect(() => {
+    if (chromeTransitioning) return;
     if (!chromeMountedRef.current) {
       chromeMountedRef.current = true;
       return;
     }
-    const timeout = window.setTimeout(() => fitToTextRef.current?.(), FIT_AFTER_CHROME_TOGGLE_MS);
-    return () => window.clearTimeout(timeout);
-  }, [chromeLevel]);
+    fitToTextRef.current?.();
+  }, [chromeTransitioning]);
 
   useEffect(
     () => () => {
       if (chromeToggleFrameRef.current !== null) {
         cancelAnimationFrame(chromeToggleFrameRef.current);
+      }
+      if (chromeTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(chromeTransitionTimeoutRef.current);
       }
     },
     [],
@@ -255,15 +284,14 @@ export function Workspace({
     () => setDesktopExpandedPane((expanded) => stepExpandedPane(expanded, "right")),
     { enabled: readerKeys && !isMobile, preventDefault: true },
   );
-  useHotkey("Shift+ArrowUp", () => setChromeLevel((level) => stepChromeVisibility(level, "hide")), {
+  useHotkey("Shift+ArrowUp", () => stepChrome("hide"), {
     enabled: readerKeys && !isMobile,
     preventDefault: true,
   });
-  useHotkey(
-    "Shift+ArrowDown",
-    () => setChromeLevel((level) => stepChromeVisibility(level, "show")),
-    { enabled: readerKeys && !isMobile, preventDefault: true },
-  );
+  useHotkey("Shift+ArrowDown", () => stepChrome("show"), {
+    enabled: readerKeys && !isMobile,
+    preventDefault: true,
+  });
   useHotkey(
     "D",
     () => setReaderPref("pdfPageLayout", pdfPageLayout === "auto" ? "single" : "auto"),
@@ -282,6 +310,7 @@ export function Workspace({
       // toggles enter the same CSS transition used by the swipe gesture.
       chromeToggleFrameRef.current = requestAnimationFrame(() => {
         chromeToggleFrameRef.current = null;
+        beginChromeTransition();
         setChromeLevel((level) => (level === 0 ? 2 : 0));
       });
     },
@@ -538,7 +567,18 @@ export function Workspace({
   }
 
   return (
-    <div className={chromeLevel >= 1 ? "app app--chrome-hidden" : "app"}>
+    <div
+      className={chromeLevel >= 1 ? "app app--chrome-hidden" : "app"}
+      onTransitionEnd={(event) => {
+        if (
+          event.propertyName === "max-height" &&
+          event.target instanceof Element &&
+          event.target.matches(".topbar, .reader-bar")
+        ) {
+          finishChromeTransition();
+        }
+      }}
+    >
       <WorkspaceHeader
         displayName={displayName}
         onRename={(t) => void onRenameGroup(t)}
@@ -600,9 +640,7 @@ export function Workspace({
             selecting={view.selection !== null}
             onAddNote={() => view.commitSelection("note")}
             onHighlight={() => view.commitSelection("highlight")}
-            onChromeHiddenChange={(hidden) =>
-              setChromeLevel((level) => stepChromeVisibility(level, hidden ? "hide" : "show"))
-            }
+            onChromeHiddenChange={(hidden) => stepChrome(hidden ? "hide" : "show")}
           />
         ) : (
           <SplitPane

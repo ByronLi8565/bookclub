@@ -179,12 +179,15 @@ export function useEpubSourceView(
   onSwipe?: (dir: "left" | "right" | "up" | "down") => void,
   onSearchHighlightCleared?: () => void,
   initialPosition?: SourceReadingPosition | null,
+  suspendResize = false,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
   const onSwipeRef = useRef(onSwipe);
   onSwipeRef.current = onSwipe;
+  const suspendResizeRef = useRef(suspendResize);
+  suspendResizeRef.current = suspendResize;
   // "auto" lets epub.js use a two-page spread when wide enough; "none" forces a
   // single page. Driven by the shared page-layout preference (toggled with `d`).
   const { pdfPageLayout } = useReaderPrefs();
@@ -408,6 +411,7 @@ export function useEpubSourceView(
     const { rendition } = liveView.value;
     let resizeFrame: number | undefined;
     const resizeObserver = new ResizeObserver(() => {
+      if (suspendResizeRef.current) return;
       if (resizeFrame !== undefined) return;
       resizeFrame = requestAnimationFrame(() => {
         resizeFrame = undefined;
@@ -444,6 +448,18 @@ export function useEpubSourceView(
       resizeObserver.disconnect();
     };
   }, [ready]);
+
+  useEffect(() => {
+    if (!ready || suspendResize) return;
+    const el = containerRef.current;
+    const liveView = Effect.runSync(Ref.get(viewRef.current));
+    if (!el || Option.isNone(liveView)) return;
+    const frame = requestAnimationFrame(() => {
+      liveView.value.rendition.resize(el.clientWidth, el.clientHeight);
+      dispatchView({ type: "viewport" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ready, suspendResize]);
 
   // Recompute the page-turn total whenever the book opens, the zoom changes, or
   // the viewport resizes. Each run is a forked fiber; a newer trigger interrupts

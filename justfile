@@ -1,7 +1,7 @@
 # bookclub task runner
 #
 # Primary entrypoint:
-#   just publish "your commit message"
+#   just publish ["your commit message"]
 # Runs: describe -> push to github -> deploy (bun) -> sync remote dev box.
 #
 # The individual steps are also runnable on their own (see below).
@@ -22,8 +22,8 @@ _default:
 # --- the one command --------------------------------------------------------
 
 # Describe latest work, push to GitHub, deploy with bun, and sync the remote box.
-publish message: (describe message) push deploy sync-remote
-    @echo "✅ published, deployed, and remote box synced"
+publish message="": (describe message) push deploy sync-remote
+    @echo "Published, deployed, and synced the remote box"
 
 # --- decomposed steps -------------------------------------------------------
 
@@ -32,32 +32,40 @@ describe message:
     #!/usr/bin/env bash
     set -euo pipefail
     rev=$(jj log --no-graph -r @ -T 'if(empty, "@-", "@")')
-    echo "📝 describing $rev"
-    jj describe -r "$rev" -m "{{message}}"
+    message={{quote(message)}}
+    if [ -z "$message" ]; then
+        message=$(jj log --no-graph -r "$rev" -T 'description')
+    fi
+    if [ -z "$message" ]; then
+        echo "error: no description provided and $rev has no description" >&2
+        exit 1
+    fi
+    echo "Describing $rev"
+    jj describe -r "$rev" -m "$message"
 
 # Point the `main` bookmark at the latest work and push it to GitHub.
 push:
     #!/usr/bin/env bash
     set -euo pipefail
     rev=$(jj log --no-graph -r @ -T 'if(empty, "@-", "@")')
-    echo "⬆️  pushing $rev to main"
+    echo "Pushing $rev to main"
     jj bookmark set main -r "$rev"
     jj git push --bookmark main
 
 # Build and deploy to Cloudflare (predeploy backup + vite build + wrangler deploy).
 deploy:
-    @echo "🚀 deploying with bun"
-    bun run deploy
+    @echo "Deploying with bun"
+    WRANGLER_LOG=error bun run deploy
 
 # Sync the remote dev box: fetch + rebase onto latest main (skipped if run on the box).
 sync-remote:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(hostname -s 2>/dev/null || hostname)" = "{{remote_host}}" ]; then
-        echo "🖥️  on the remote box already; skipping self-sync"
+        echo "Already on the remote box; skipping self-sync"
         exit 0
     fi
-    echo "🔄 syncing remote box ({{remote}})"
+    echo "Syncing remote box ({{remote}})"
     ssh {{remote}} 'fish -l -c "cd {{remote_dir}}; and jj git fetch; and jj rebase -d main@origin"'
 
 # --- convenience -------------------------------------------------------------

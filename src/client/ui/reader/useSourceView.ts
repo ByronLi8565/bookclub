@@ -14,6 +14,7 @@ export function useSourceView(
   onSwipe?: (dir: "left" | "right" | "up" | "down") => void,
   onSearchHighlightCleared?: () => void,
   initialPosition?: SourceReadingPosition | null,
+  suspendResize = false,
 ): SourceView {
   const isPdf = source?.kind === "pdf";
   const epub = useEpubSourceView(
@@ -22,6 +23,7 @@ export function useSourceView(
     onSwipe,
     onSearchHighlightCleared,
     initialPosition?.kind === "epub" ? initialPosition : null,
+    suspendResize,
   );
   // PDF pane-switching is handled solely by MobilePager's swiper; the PDF view
   // intentionally takes no onSwipe so sideways drags pan the page instead.
