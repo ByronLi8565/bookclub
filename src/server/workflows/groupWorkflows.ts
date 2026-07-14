@@ -814,9 +814,9 @@ export function restoreGroupBackup(
         }),
       );
       const restoredIds = new Set(backup.images.map((image) => image.id));
-      const obsoleteIds = existingImages
-        .map((image) => image.id)
-        .filter((imageId) => !restoredIds.has(imageId));
+      const obsoleteIds = existingImages.flatMap((image) =>
+        restoredIds.has(image.id) ? [] : [image.id],
+      );
       yield* tryPromise(() => deleteImages(env, summary.groupId, obsoleteIds));
       return {
         notes: backup.notes.length,

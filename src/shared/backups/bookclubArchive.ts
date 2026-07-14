@@ -201,19 +201,22 @@ export async function createBookclubArchive(
       entries[file] = strToU8(body);
       return { ...metadata, file };
     });
-  const images: ManifestImage[] = [];
-  for (const image of input.images.toSorted((a, b) => a.id.localeCompare(b.id))) {
-    const file = `images/${image.id}.${imageExtension(image.contentType)}`;
-    entries[file] = [image.bytes, { level: 0 }];
-    images.push({
-      id: image.id,
-      file,
-      contentType: image.contentType,
-      size: image.bytes.byteLength,
-      sha256: await sha256(image.bytes),
-      uploadedBy: image.uploadedBy,
-    });
-  }
+  const images = await Promise.all(
+    input.images
+      .toSorted((a, b) => a.id.localeCompare(b.id))
+      .map(async (image) => {
+        const file = `images/${image.id}.${imageExtension(image.contentType)}`;
+        entries[file] = [image.bytes, { level: 0 }];
+        return {
+          id: image.id,
+          file,
+          contentType: image.contentType,
+          size: image.bytes.byteLength,
+          sha256: await sha256(image.bytes),
+          uploadedBy: image.uploadedBy,
+        } satisfies ManifestImage;
+      }),
+  );
   const manifest: BookclubArchiveManifest = {
     format: "bookclub-backup",
     version: 1,

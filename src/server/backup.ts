@@ -44,28 +44,44 @@ function groupIdsFrom(registry: RegistryState): string[] {
 export async function collectSnapshot(env: Env): Promise<BackupSnapshot> {
   // Lazy import keeps the cloudflare:-scheme `agents` module out of the
   // top-level graph so the pure retention helpers stay unit-testable.
-  const { getAgentByName } = await import("agents");
-  const { REGISTRY_ID } = await import("./state/GroupRegistry.ts");
+  const [{ getAgentByName }, { REGISTRY_ID }] = await Promise.all([
+    import("agents"),
+    import("./state/GroupRegistry.ts"),
+  ]);
   const registry = await (await getAgentByName(env.GroupRegistry, REGISTRY_ID)).exportState();
 
   const groups: Record<string, GroupState> = {};
   const notes: Record<string, NoteState> = {};
   const emails = new Set<string>();
 
-  for (const id of groupIdsFrom(registry)) {
-    const groupState = await (await getAgentByName(env.GroupAgent, id)).exportState();
-    if (groupState.groupId === "") continue; // never-created / empty instance
+  const groupEntries = await Promise.all(
+    groupIdsFrom(registry).map(async (id) => ({
+      id,
+      state: await (await getAgentByName(env.GroupAgent, id)).exportState(),
+    })),
+  );
+  const liveGroups = groupEntries.filter(({ state }) => state.groupId !== "");
+  for (const { id, state: groupState } of liveGroups) {
     groups[id] = groupState;
     for (const member of Object.values(groupState.members)) {
       emails.add(canonicalEmail(member.email));
     }
-    notes[id] = await (await getAgentByName(env.NoteAgent, id)).exportState();
   }
+  const noteEntries = await Promise.all(
+    liveGroups.map(
+      async ({ id }) =>
+        [id, await (await getAgentByName(env.NoteAgent, id)).exportState()] as const,
+    ),
+  );
+  Object.assign(notes, Object.fromEntries(noteEntries));
 
-  const auth: Record<string, AuthState> = {};
-  for (const email of emails) {
-    auth[email] = await (await getAgentByName(env.AuthAgent, email)).exportState();
-  }
+  const authEntries = await Promise.all(
+    [...emails].map(
+      async (email) =>
+        [email, await (await getAgentByName(env.AuthAgent, email)).exportState()] as const,
+    ),
+  );
+  const auth = Object.fromEntries(authEntries) as Record<string, AuthState>;
 
   return { version: 1, takenAt: new Date().toISOString(), registry, groups, notes, auth };
 }
@@ -76,8 +92,10 @@ export async function backupAll(env: Env): Promise<BackupResult> {
   const metadata = { httpMetadata: { contentType: "application/json" } };
   // Timestamped key for history; `latest.json` always points at the newest.
   const key = `${PREFIX}${snapshot.takenAt.replaceAll(":", "-")}.json`;
-  await env.BACKUPS.put(key, body, metadata);
-  await env.BACKUPS.put(LATEST_KEY, body, metadata);
+  await Promise.all([
+    env.BACKUPS.put(key, body, metadata),
+    env.BACKUPS.put(LATEST_KEY, body, metadata),
+  ]);
   // Best-effort retention sweep; a prune failure must never fail the backup.
   let pruned = 0;
   try {
@@ -184,18 +202,22 @@ export async function restoreFrom(env: Env, key: string): Promise<RestoreResult>
   if (!object) throw new Error(`backup not found: ${key}`);
   const snapshot = (await object.json()) as BackupSnapshot;
 
-  const { getAgentByName } = await import("agents");
-  const { REGISTRY_ID } = await import("./state/GroupRegistry.ts");
+  const [{ getAgentByName }, { REGISTRY_ID }] = await Promise.all([
+    import("agents"),
+    import("./state/GroupRegistry.ts"),
+  ]);
   await (await getAgentByName(env.GroupRegistry, REGISTRY_ID)).importState(snapshot.registry);
-  for (const [id, state] of Object.entries(snapshot.groups)) {
-    await (await getAgentByName(env.GroupAgent, id)).importState(state);
-  }
-  for (const [id, state] of Object.entries(snapshot.notes)) {
-    await (await getAgentByName(env.NoteAgent, id)).importState(state);
-  }
-  for (const [email, state] of Object.entries(snapshot.auth)) {
-    await (await getAgentByName(env.AuthAgent, email)).importState(state);
-  }
+  await Promise.all([
+    ...Object.entries(snapshot.groups).map(async ([id, state]) =>
+      (await getAgentByName(env.GroupAgent, id)).importState(state),
+    ),
+    ...Object.entries(snapshot.notes).map(async ([id, state]) =>
+      (await getAgentByName(env.NoteAgent, id)).importState(state),
+    ),
+    ...Object.entries(snapshot.auth).map(async ([email, state]) =>
+      (await getAgentByName(env.AuthAgent, email)).importState(state),
+    ),
+  ]);
 
   return {
     key,

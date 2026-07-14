@@ -63,7 +63,3 @@ export function idbPut(
 ): Effect.Effect<void, PersistError> {
   return request<IDBValidKey>(store, "readwrite", (s) => s.put(value, key)).pipe(Effect.asVoid);
 }
-
-export function idbDelete(store: string, key: string): Effect.Effect<void, PersistError> {
-  return request<undefined>(store, "readwrite", (s) => s.delete(key)).pipe(Effect.asVoid);
-}

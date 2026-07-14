@@ -90,7 +90,7 @@ export function removeNote(
 
   const hasChildren = state.notes.some((note) => note.parent === id);
   const isReferenced = state.notes.some(
-    (note) => note.id !== id && extractReferences(note.body).includes(target.seq),
+    (note) => note.id !== id && extractReferences(note.body).some((seq) => seq === target.seq),
   );
   if (!hasChildren && !isReferenced) {
     return setNotes(
@@ -280,11 +280,12 @@ export function applyOperations(
   ctx: ApplyContext,
 ): { state: NoteState } & ApplyOpsResult {
   let next: NoteState = { ...state, appliedOpIds: state.appliedOpIds ?? [] };
+  const knownOpIds = new Set(next.appliedOpIds);
   const appliedOpIds: string[] = [];
   const rejectedOps: RejectedOp[] = [];
 
   for (const op of ops) {
-    if ((next.appliedOpIds ?? []).includes(op.opId)) {
+    if (knownOpIds.has(op.opId)) {
       appliedOpIds.push(op.opId);
       continue;
     }
@@ -295,6 +296,7 @@ export function applyOperations(
     }
     if (outcome.kind === "applied") next = outcome.state;
     next = rememberOp(next, op.opId);
+    knownOpIds.add(op.opId);
     appliedOpIds.push(op.opId);
   }
 

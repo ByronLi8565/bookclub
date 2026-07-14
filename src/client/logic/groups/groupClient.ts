@@ -370,11 +370,6 @@ export async function updateBookMetadata(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
-export async function deleteGroup(groupRef: string): Promise<ApiResult<null>> {
-  const r = await apiFetch(`/groups/${groupRef}`, { method: "DELETE" });
-  return r.ok ? { ok: true, value: null } : { ok: false, error: await parseHttpError(r) };
-}
-
 export async function uploadNoteImage(groupRef: string, file: File): Promise<ApiResult<string>> {
   const compressed = await compressedImage(file, "note");
   if (!compressed.ok) return compressed;

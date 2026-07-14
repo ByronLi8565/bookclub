@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stepExpandedPane, type ExpandedPane } from "../client/ui/shared/SplitPane.tsx";
+import { stepExpandedPane, type ExpandedPane } from "../client/ui/workspace/visibility.ts";
 
 describe("desktop pane view stepping", () => {
   const cases: Array<{

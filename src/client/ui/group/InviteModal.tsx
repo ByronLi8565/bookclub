@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useLayoutEffect, useReducer } from "react";
 import { getInviteLink, inviteToGroup } from "../../logic/groups/groupClient.ts";
 import { Loading } from "../shared/Loading.tsx";
 import { Modal } from "../shared/Modal.tsx";
@@ -71,13 +71,11 @@ export function InviteControls({
   children?: React.ReactNode;
 }): React.ReactElement {
   const [state, dispatch] = useReducer(inviteReducer, initialInviteState);
-  const loadedGroupRef = useRef(groupRef);
   const { link, linkLoading, email, busy, copied } = state;
 
-  if (loadedGroupRef.current !== groupRef) {
-    loadedGroupRef.current = groupRef;
+  useLayoutEffect(() => {
     dispatch({ type: "reset" });
-  }
+  }, [groupRef]);
 
   useEffect(() => {
     let cancelled = false;

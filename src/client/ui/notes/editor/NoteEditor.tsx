@@ -22,7 +22,8 @@ import {
   FORMAT_TEXT_COMMAND,
   type NodeKey,
 } from "lexical";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useLatestRef } from "../../../logic/useLatestRef.ts";
 import { NOTE_TRANSFORMERS } from "../../../logic/notes/renderHtml.ts";
 import { noteImageIds } from "../../../../shared/notes/images.ts";
 import {
@@ -208,6 +209,7 @@ function Chrome({
   });
   useHotkey("Mod+Enter", () => submit(), { target: containerRef, preventDefault: true });
 
+  const beginPasteUpload = useEffectEvent(beginUpload);
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !onPasteImage) return;
@@ -225,11 +227,11 @@ function Chrome({
         $insertNodes([node]);
         key = node.getKey();
       });
-      if (key) beginUpload(key, image);
+      if (key) beginPasteUpload(key, image);
     };
     container.addEventListener("paste", onPaste);
     return () => container.removeEventListener("paste", onPaste);
-  }, [beginUpload, containerRef, editor, onPasteImage]);
+  }, [containerRef, editor, onPasteImage]);
 
   const imageActions = { imageUrlBase, retry: beginUpload, remove: removeImage };
 
@@ -297,11 +299,10 @@ export function NoteEditor({
   // Offline, the target note's seq is unknowable, so we feed the reference
   // transformer an empty set — `@N` simply stays plain text — and tell the user
   // why below the editor.
-  const validSeqsRef = useRef(validSeqs);
-  validSeqsRef.current = canReference ? validSeqs : NO_SEQS;
+  const validSeqsRef = useLatestRef(canReference ? validSeqs : NO_SEQS);
   const referenceTransformer = useMemo(
     () => createReferenceTransformer(() => validSeqsRef.current),
-    [],
+    [validSeqsRef],
   );
   const transformers = useMemo<Transformer[]>(
     () => [NOTE_IMAGE_TRANSFORMER, ...NOTE_TRANSFORMERS, referenceTransformer],

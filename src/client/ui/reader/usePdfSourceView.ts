@@ -1,7 +1,15 @@
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   expandToWordBoundaries,
   pdfAnchor,
@@ -13,6 +21,7 @@ import {
   type SourceReader,
 } from "../../logic/notes/highlights.ts";
 import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
+import { useLatestRef } from "../../logic/useLatestRef.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import {
   destroyPdf,
@@ -359,13 +368,10 @@ export function usePdfSourceView(
   initialPosition?: SourceReadingPosition | null,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
+  const onSelectRef = useLatestRef(onSelect);
   const { smartArrows, pdfPageLayout } = useReaderPrefs();
-  const smartArrowsRef = useRef(smartArrows);
-  smartArrowsRef.current = smartArrows;
-  const pageLayoutRef = useRef(pdfPageLayout);
-  pageLayoutRef.current = pdfPageLayout;
+  const smartArrowsRef = useLatestRef(smartArrows);
+  const pageLayoutRef = useLatestRef(pdfPageLayout);
 
   const [fontSize, setFontSizeState] = useState(100);
   const [viewState, dispatchView] = useReducer(pdfViewReducer, {
@@ -386,22 +392,20 @@ export function usePdfSourceView(
 
   const docRef = useRef<PDFDocumentProxy | null>(null);
   const pageRef = useRef(1);
-  const fontSizeRef = useRef(100);
-  fontSizeRef.current = fontSize;
+  const fontSizeRef = useLatestRef(fontSize);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   // Up to two page panes (the current spread). pageRef holds the *left* page.
   const panesRef = useRef<Pane[]>([]);
   const spreadActiveRef = useRef(false);
-  const geometryRef = useRef<Map<number, PageGeometry>>(null!);
-  geometryRef.current ??= new Map<number, PageGeometry>();
-  const drawnRef = useRef<Map<string, Drawn>>(null!);
-  drawnRef.current ??= new Map<string, Drawn>();
+  const geometryRef = useRef(new Map<number, PageGeometry>());
+  const drawnRef = useRef(new Map<string, Drawn>());
   const underlineRef = useRef<HighlightAnchor | null>(null);
   const pendingRef = useRef<{ anchor: HighlightAnchor; range: Range; clear: () => void } | null>(
     null,
   );
   const renderSeqRef = useRef(0);
+  const computeFitZoomRef = useRef<() => Promise<number | null>>(() => Promise.resolve(null));
   const initialPdfPage = initialPosition?.kind === "pdf" ? initialPosition.page : null;
   // The cross-navigation PDF document cache keeps a `PDFDocumentProxy` (and its
   // pdf.js worker) alive after the reader unmounts, so revisiting a book skips
@@ -421,11 +425,14 @@ export function usePdfSourceView(
   ) {
     setOpenedSource({ file, initialPdfPage, sourceId });
     dispatchView({ type: "reset", sourceId });
+  }
+
+  useLayoutEffect(() => {
     geometryRef.current.clear();
     drawnRef.current.clear();
     underlineRef.current = null;
     pageRef.current = initialPdfPage === null ? 1 : Math.max(1, Math.round(initialPdfPage));
-  }
+  }, [file, initialPdfPage, sourceId]);
 
   const geometryFor = useCallback(async (pageNum: number): Promise<PageGeometry | null> => {
     const doc = docRef.current;
@@ -445,7 +452,7 @@ export function usePdfSourceView(
     const scroller = scrollerRef.current;
     if (!doc || !scroller) return false;
     return spreadFits(pageLayoutRef.current, doc.numPages, scroller.clientWidth);
-  }, []);
+  }, [pageLayoutRef]);
 
   const ensurePanes = useCallback((count: number): Pane[] => {
     const wrap = wrapRef.current;
@@ -522,7 +529,7 @@ export function usePdfSourceView(
         percentage: doc.numPages > 0 ? (pageRef.current - 1 + scrollRatio) / doc.numPages : 0,
       },
     });
-  }, []);
+  }, [fontSizeRef]);
 
   const scrollToAnchor = useCallback(
     async (anchor: HighlightAnchor): Promise<void> => {
@@ -562,7 +569,10 @@ export function usePdfSourceView(
         cls === "bc-highlight" ? "cursor:pointer;" : ""
       }`;
       if (cls === "bc-highlight") {
-        div.addEventListener("click", () => drawnRef.current.get(id)?.onClick());
+        // The generated node owns exactly one handler, so replacing or removing
+        // the node also ends the handler's lifetime.
+        // oxlint-disable-next-line unicorn/prefer-add-event-listener
+        div.onclick = () => drawnRef.current.get(id)?.onClick();
       }
       layer.appendChild(div);
       painted.push(div);
@@ -731,75 +741,73 @@ export function usePdfSourceView(
         })),
       );
       if (seq !== renderSeqRef.current) return;
-      const renderedPanes = [];
-      for (const { index, pageNum, page } of pageEntries) {
-        const pane = panes[index]!;
-        const viewport = page.getViewport({ scale });
-        const pageW = viewport.width;
-        const pageH = viewport.height;
-        pane.page = pageNum;
+      const renderedPanes = await Promise.all(
+        pageEntries.map(async ({ index, pageNum, page }) => {
+          const pane = panes[index]!;
+          const viewport = page.getViewport({ scale });
+          const pageW = viewport.width;
+          const pageH = viewport.height;
+          pane.page = pageNum;
 
-        // Crop rect (CSS px within the full page). Horizontal: this page's text;
-        // vertical: the shared union so both panes align.
-        const hb = boundsByPage.get(pageNum);
-        const crop = cropBox(
-          enabled ? (hb ?? null) : null,
-          hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
-          pageW,
-          pageH,
-          pad,
-        );
+          // Crop rect (CSS px within the full page). Horizontal: this page's text;
+          // vertical: the shared union so both panes align.
+          const hb = boundsByPage.get(pageNum);
+          const crop = cropBox(
+            enabled ? (hb ?? null) : null,
+            hasVerticalCrop ? { minY: unionMinY, maxY: unionMaxY } : null,
+            pageW,
+            pageH,
+            pad,
+          );
 
-        // `inner` holds the full page in page coordinates; offset it so only the
-        // crop region shows through `el` (which has overflow: hidden).
-        const applyLayout = () => {
-          pane.inner.style.width = `${pageW}px`;
-          pane.inner.style.height = `${pageH}px`;
-          pane.inner.style.left = `${-crop.left}px`;
-          pane.inner.style.top = `${-crop.top}px`;
-          pane.el.style.width = `${crop.width}px`;
-          pane.el.style.height = `${crop.height}px`;
-          pane.pageHeightPx = pageH;
-          pane.cropTopPx = crop.top;
-        };
+          // `inner` holds the full page in page coordinates; offset it so only the
+          // crop region shows through `el` (which has overflow: hidden).
+          const applyLayout = () => {
+            pane.inner.style.width = `${pageW}px`;
+            pane.inner.style.height = `${pageH}px`;
+            pane.inner.style.left = `${-crop.left}px`;
+            pane.inner.style.top = `${-crop.top}px`;
+            pane.el.style.width = `${crop.width}px`;
+            pane.el.style.height = `${crop.height}px`;
+            pane.pageHeightPx = pageH;
+            pane.cropTopPx = crop.top;
+          };
 
-        if (opts?.doubleBuffer) {
-          const next = document.createElement("canvas");
-          next.width = Math.floor(pageW * dpr);
-          next.height = Math.floor(pageH * dpr);
-          setCanvasCssSize(next, pageW, pageH);
-          const ctx = next.getContext("2d");
-          if (!ctx) return;
+          if (opts?.doubleBuffer) {
+            const next = document.createElement("canvas");
+            next.width = Math.floor(pageW * dpr);
+            next.height = Math.floor(pageH * dpr);
+            setCanvasCssSize(next, pageW, pageH);
+            const ctx = next.getContext("2d");
+            if (!ctx || seq !== renderSeqRef.current) return null;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
+            if (seq !== renderSeqRef.current) return null;
+            return {
+              width: crop.width,
+              height: crop.height,
+              commit: () => {
+                const prev = pane.canvas;
+                if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
+                else pane.inner.insertBefore(next, pane.inner.firstChild);
+                prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
+                pane.canvas = next;
+                applyLayout();
+              },
+            };
+          }
+          const canvas = pane.canvas;
+          canvas.width = Math.floor(pageW * dpr);
+          canvas.height = Math.floor(pageH * dpr);
+          setCanvasCssSize(canvas, pageW, pageH);
+          const ctx = canvas.getContext("2d");
+          if (!ctx || seq !== renderSeqRef.current) return null;
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          if (seq !== renderSeqRef.current) return;
-          await page.render({ canvas: next, canvasContext: ctx, viewport }).promise;
-          if (seq !== renderSeqRef.current) return;
-          renderedPanes.push({
-            width: crop.width,
-            height: crop.height,
-            commit: () => {
-              const prev = pane.canvas;
-              if (prev.parentNode === pane.inner) pane.inner.replaceChild(next, prev);
-              else pane.inner.insertBefore(next, pane.inner.firstChild);
-              prev.width = prev.height = 0; // release the old backing store (iOS canvas memory).
-              pane.canvas = next;
-              applyLayout();
-            },
-          });
-          continue;
-        }
-        const canvas = pane.canvas;
-        canvas.width = Math.floor(pageW * dpr);
-        canvas.height = Math.floor(pageH * dpr);
-        setCanvasCssSize(canvas, pageW, pageH);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        if (seq !== renderSeqRef.current) return;
-        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-        if (seq !== renderSeqRef.current) return;
-        renderedPanes.push({ width: crop.width, height: crop.height, commit: applyLayout });
-      }
+          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+          if (seq !== renderSeqRef.current) return null;
+          return { width: crop.width, height: crop.height, commit: applyLayout };
+        }),
+      );
       if (seq !== renderSeqRef.current) return;
       let totalWidth = 0;
       let maxHeight = 0;
@@ -861,13 +869,13 @@ export function usePdfSourceView(
       publishPosition,
       renderTextLayerInto,
       sourceId,
+      fontSizeRef,
     ],
   );
 
   // Latest renderSpread for use inside imperative touch handlers without making
   // the pinch effect re-subscribe on every renderSpread identity change.
-  const renderPageRef = useRef(renderSpread);
-  renderPageRef.current = renderSpread;
+  const renderPageRef = useLatestRef(renderSpread);
 
   const goToPage = useCallback(
     async (
@@ -918,7 +926,7 @@ export function usePdfSourceView(
       scroller.scrollTo({ top: target, behavior: mode === "smooth" ? "smooth" : "auto" });
       return true;
     },
-    [scrollBounds],
+    [scrollBounds, smartArrowsRef],
   );
 
   useEffect(() => {
@@ -1007,6 +1015,7 @@ export function usePdfSourceView(
     initialPdfPage,
     computeSpreadEnabled,
     scrollToTextTop,
+    fontSizeRef,
   ]);
 
   // Re-render when the page-layout preference changes (single ⇄ two-page),
@@ -1065,7 +1074,7 @@ export function usePdfSourceView(
       cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, [ready, computeSpreadEnabled]);
+  }, [ready, computeSpreadEnabled, renderPageRef]);
 
   useEffect(() => {
     const clear = () => {
@@ -1134,7 +1143,7 @@ export function usePdfSourceView(
         scrollToFocalFraction(scroller, wrap, frac.fracX, frac.fracY, cx, cy);
       });
     },
-    [renderSpread],
+    [renderSpread, fontSizeRef],
   );
 
   // Zoom so the current spread's text fills the viewport: as large as possible
@@ -1214,8 +1223,9 @@ export function usePdfSourceView(
       Math.max(READER_NAV.minZoom, Math.floor((scale / fit) * 100)),
     );
   }, [geometryFor]);
-  const computeFitZoomRef = useRef(computeFitZoom);
-  computeFitZoomRef.current = computeFitZoom;
+  useLayoutEffect(() => {
+    computeFitZoomRef.current = computeFitZoom;
+  }, [computeFitZoom]);
 
   const fitToText = useCallback(async (): Promise<void> => {
     const clamped = await computeFitZoom();
@@ -1225,8 +1235,10 @@ export function usePdfSourceView(
       await renderSpread();
     }
     await scrollToTextTop();
-  }, [computeFitZoom, renderSpread, scrollToTextTop]);
-  fitToTextRef.current = fitToText;
+  }, [computeFitZoom, renderSpread, scrollToTextTop, fontSizeRef]);
+  useLayoutEffect(() => {
+    fitToTextRef.current = fitToText;
+  }, [fitToText]);
   const next = useCallback(() => {
     if (scrollWithinPage("down")) return;
     const numPages = docRef.current?.numPages ?? pageRef.current;
@@ -1281,7 +1293,7 @@ export function usePdfSourceView(
       if (pending) onSelectRef.current(pending.anchor, pending.range, intent);
       dismissSelection();
     },
-    [dismissSelection],
+    [dismissSelection, onSelectRef],
   );
 
   useEffect(() => {
@@ -1442,7 +1454,7 @@ export function usePdfSourceView(
       scroller.removeEventListener("gesturechange", swallowGesture, { capture: true });
       scroller.removeEventListener("gestureend", swallowGesture, { capture: true });
     };
-  }, [ready, publishPosition]);
+  }, [ready, publishPosition, fontSizeRef, renderPageRef]);
 
   const reader = useMemo<SourceReader>(() => {
     const locateOnPage = (

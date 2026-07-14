@@ -1,6 +1,6 @@
 import { fetchSource, uploadSource, type ApiResult, type GroupSummary } from "./groupClient.ts";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
-import { deleteCachedSource, getCachedSource, putCachedSource } from "./sourceCache.ts";
+import { getCachedSource, putCachedSource } from "./sourceCache.ts";
 import { isNative } from "../net/api.ts";
 import { sourceById, sourceRefById } from "../../../shared/sources.ts";
 import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
@@ -60,10 +60,6 @@ export async function uploadCurrentSource(
   };
 }
 
-export async function cachedSourceSize(sourceId: string): Promise<number | null> {
-  return (await getCachedSource(sourceId))?.size ?? null;
-}
-
 export async function ensureSourceCached(groupRef: string, sourceId: string): Promise<boolean> {
   if (await getCachedSource(sourceId)) return true;
   const fetched = await fetchSource(groupRef, sourceId).catch(() => null);
@@ -85,15 +81,13 @@ export async function downloadGroupForOffline(
   const ref = groupUrlName(group);
   const total = group.sources.length;
   let done = 0;
-  for (const sourceId of group.sources) {
-    if (await ensureSourceCached(ref, sourceId)) done++;
-    onProgress?.({ done, total });
-  }
+  await Promise.all(
+    group.sources.map(async (sourceId) => {
+      if (await ensureSourceCached(ref, sourceId)) done++;
+      onProgress?.({ done, total });
+    }),
+  );
   return { done, total };
-}
-
-export async function removeDownloadedSource(sourceId: string): Promise<void> {
-  await deleteCachedSource(sourceId);
 }
 
 function triggerBrowserDownload(file: File): void {

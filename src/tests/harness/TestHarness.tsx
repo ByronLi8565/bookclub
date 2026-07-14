@@ -1,5 +1,12 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { HighlightAnchor } from "../../client/logic/notes/highlights.ts";
 import { setReaderPref, useReaderPrefs } from "../../client/logic/settings/userPrefs.ts";
 import { Reader } from "../../client/ui/reader/Reader.tsx";
@@ -8,7 +15,7 @@ import { MobilePager, type Pane } from "../../client/ui/shared/MobilePager.tsx";
 import {
   stepChromeVisibility,
   type ChromeVisibilityLevel,
-} from "../../client/ui/workspace/chromeVisibility.ts";
+} from "../../client/ui/workspace/visibility.ts";
 
 let harnessBook: File | null = null;
 let harnessBookUrl: string | null = null;
@@ -56,22 +63,26 @@ export function ReaderHarness() {
   const highlightIdRef = useRef(0);
   const isPdf = file?.name.toLowerCase().endsWith(".pdf") ?? false;
   const { pdfPageLayout } = useReaderPrefs();
+  const onSelect = useCallback((anchor: HighlightAnchor) => {
+    const id = `harness-highlight-${++highlightIdRef.current}`;
+    viewRef.current?.drawHighlight(id, anchor, () => {});
+  }, []);
+  const onSwipe = useCallback((dir: "left" | "right" | "up" | "down") => {
+    if (dir === "left") setPane("notes");
+    else if (dir === "right") setPane("reader");
+    else setChromeLevel((level) => stepChromeVisibility(level, dir === "up" ? "hide" : "show"));
+  }, []);
   const view = useSourceView(
     isPdf
       ? { id: "harness", kind: "pdf", contentType: "application/pdf" }
       : { id: "harness", kind: "epub", contentType: "application/epub+zip" },
     file,
-    (anchor: HighlightAnchor) => {
-      const id = `harness-highlight-${++highlightIdRef.current}`;
-      viewRef.current?.drawHighlight(id, anchor, () => {});
-    },
-    (dir) => {
-      if (dir === "left") setPane("notes");
-      else if (dir === "right") setPane("reader");
-      else setChromeLevel((level) => stepChromeVisibility(level, dir === "up" ? "hide" : "show"));
-    },
+    onSelect,
+    onSwipe,
   );
-  viewRef.current = view;
+  useLayoutEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   useEffect(
     () => () => {

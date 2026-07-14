@@ -2,7 +2,15 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { useSwipeable } from "react-swipeable";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
 import {
@@ -15,6 +23,7 @@ import {
 import type Navigation from "epubjs/types/navigation";
 import { makeEpubReader } from "./engine/epubReader.ts";
 import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
+import { useLatestRef } from "../../logic/useLatestRef.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { bumpSeq } from "./engine/seq.ts";
@@ -182,18 +191,14 @@ export function useEpubSourceView(
   suspendResize = false,
 ): SourceView {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
-  const onSwipeRef = useRef(onSwipe);
-  onSwipeRef.current = onSwipe;
-  const suspendResizeRef = useRef(suspendResize);
-  suspendResizeRef.current = suspendResize;
+  const onSelectRef = useLatestRef(onSelect);
+  const onSwipeRef = useLatestRef(onSwipe);
+  const suspendResizeRef = useLatestRef(suspendResize);
   // "auto" lets epub.js use a two-page spread when wide enough; "none" forces a
   // single page. Driven by the shared page-layout preference (toggled with `d`).
   const { pdfPageLayout } = useReaderPrefs();
   const spreadMode = pdfPageLayout === "auto" ? "auto" : "none";
-  const spreadModeRef = useRef(spreadMode);
-  spreadModeRef.current = spreadMode;
+  const spreadModeRef = useLatestRef(spreadMode);
   const openSearchRef = useRef<() => void>(() => {});
   const initialEpubCfi = initialPosition?.kind === "epub" ? initialPosition.cfi : null;
 
@@ -210,8 +215,7 @@ export function useEpubSourceView(
     },
     preventScrollOnSwipe: true,
   });
-  const swipeRef = useRef(swipe.ref);
-  swipeRef.current = swipe.ref;
+  const swipeRef = useLatestRef(swipe.ref);
 
   const viewRef = useRef<Ref.Ref<Option.Option<LiveView>>>(null!);
   viewRef.current ??= Effect.runSync(Ref.make(Option.none<LiveView>()));
@@ -401,7 +405,7 @@ export function useEpubSourceView(
       rendition.destroy();
       book.destroy();
     };
-  }, [file, initialEpubCfi]);
+  }, [file, initialEpubCfi, swipeRef, spreadModeRef]);
 
   useEffect(() => {
     if (!ready) return;
@@ -447,7 +451,7 @@ export function useEpubSourceView(
       if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
       resizeObserver.disconnect();
     };
-  }, [ready]);
+  }, [ready, suspendResizeRef]);
 
   useEffect(() => {
     if (!ready || suspendResize) return;
@@ -499,7 +503,7 @@ export function useEpubSourceView(
       bumpSeq(measureSeqRef);
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [ready, fontSize, viewportTick, pdfPageLayout]);
+  }, [ready, fontSize, viewportTick, pdfPageLayout, spreadModeRef]);
 
   const onView = useCallback((f: (view: LiveView) => void) => {
     const view = Effect.runSync(Ref.get(viewRef.current));
@@ -631,7 +635,7 @@ export function useEpubSourceView(
       if (pending) onSelectRef.current(epubAnchor(pending.cfi), pending.range, intent);
       dismissSelection();
     },
-    [dismissSelection],
+    [dismissSelection, onSelectRef],
   );
 
   const reader = useMemo<SourceReader>(
@@ -650,7 +654,9 @@ export function useEpubSourceView(
     eraseSearchHighlight,
     onSearchHighlightCleared,
   });
-  openSearchRef.current = search.openSearch;
+  useLayoutEffect(() => {
+    openSearchRef.current = search.openSearch;
+  }, [search.openSearch]);
 
   // Turn the raw position into a press count. Until pagination lands, `total` is
   // 0 so the reader hides the count, but `atStart`/`atEnd` stay live for the

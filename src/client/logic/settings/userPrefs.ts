@@ -8,6 +8,7 @@ import {
   UserPrefsResponse,
   type UserPrefs,
 } from "../../../shared/types/userPrefs.ts";
+import { readVersionedLocal, writeLocal } from "../storage.ts";
 
 export type {
   PdfPageLayout,
@@ -16,15 +17,17 @@ export type {
   UserPrefs,
 } from "../../../shared/types/userPrefs.ts";
 
-const STORAGE_KEY = "bookclub.userPrefs";
+const STORAGE_KEY = "bookclub.userPrefs:v1";
+const LEGACY_STORAGE_KEY = "bookclub.userPrefs";
 
 function load(): UserPrefs {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  return raw ? mergeUserPrefs(JSON.parse(raw) as Partial<UserPrefs>) : DEFAULT_USER_PREFS;
+  return mergeUserPrefs(
+    readVersionedLocal<Partial<UserPrefs>>(STORAGE_KEY, LEGACY_STORAGE_KEY) ?? DEFAULT_USER_PREFS,
+  );
 }
 
 function save(next: UserPrefs): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  writeLocal(STORAGE_KEY, next);
 }
 
 let prefs = load();

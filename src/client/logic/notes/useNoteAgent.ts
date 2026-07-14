@@ -2,7 +2,7 @@ import { useAgent } from "agents/react";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ApplyOpsResult, Note, NoteAuthor } from "../../../shared/types/notes.ts";
 import type { NoteState } from "../../../shared/notes/noteState.ts";
 import type { NoteAgent } from "../../../server/state/NoteAgent.ts";
@@ -12,6 +12,7 @@ import { addNoteOp, addReplyOp, editNoteOp, rebindOp, removeNoteOp } from "./not
 import { NoteStore } from "./noteStore.ts";
 import { spawnToast } from "../../ui/shared/toast/toastStore.ts";
 import { apiOrigin, isNative, loadSessionToken } from "../net/api.ts";
+import { useLatestRef } from "../useLatestRef.ts";
 
 export type { OnlinePeer } from "../../../server/state/NoteAgent.ts";
 
@@ -48,13 +49,10 @@ export function useNoteAgent(
   });
   if (presence.groupId !== groupId) setPresence({ groupId, online: [] });
 
-  const storeKey = groupId && author ? `${groupId}:${author.id}` : null;
-  const storeRef = useRef<{ key: string; store: NoteStore } | null>(null);
-  if (storeKey && groupId && author && storeRef.current?.key !== storeKey) {
-    storeRef.current = { key: storeKey, store: new NoteStore(groupId, author, isOwner) };
-  }
-  if (!storeKey) storeRef.current = null;
-  const store = storeRef.current?.store ?? null;
+  const store = useMemo(
+    () => (groupId && author ? new NoteStore(groupId, author, isOwner) : null),
+    [groupId, author, isOwner],
+  );
 
   const agent = useAgent<NoteAgent, NoteState>({
     agent: "note-agent",
@@ -76,8 +74,7 @@ export function useNoteAgent(
     },
   });
 
-  const agentRef = useRef(agent);
-  agentRef.current = agent;
+  const agentRef = useLatestRef(agent);
   const flushingRef = useRef(false);
 
   useEffect(() => {

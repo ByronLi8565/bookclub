@@ -7,6 +7,7 @@ import { Modal } from "../shared/Modal.tsx";
 import { RenamableText } from "../shared/RenamableText.tsx";
 
 interface InfoRow {
+  key: string;
   label: string;
   value: string;
   editable?: "title" | "author";
@@ -26,6 +27,7 @@ const CAPABILITY_ROWS: { key: keyof SourceCapabilities; label: string }[] = [
 
 function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
   return CAPABILITY_ROWS.map(({ key, label }) => ({
+    key: `capability:${key}`,
     label,
     value: capabilities[key] ? "yes" : "no",
     status: capabilities[key] ? ("ok" as const) : ("error" as const),
@@ -35,6 +37,7 @@ function capabilityRows(capabilities: SourceCapabilities): InfoRow[] {
 function healthRows(health: SourceHealth): InfoRow[] {
   if (health.status === "error") {
     return health.errors.map((e) => ({
+      key: `error:${e.code}:${e.page ?? "all"}`,
       label: "Problem",
       value: e.message,
       status: "error" as const,
@@ -43,6 +46,7 @@ function healthRows(health: SourceHealth): InfoRow[] {
   const warnings =
     health.status === "warn"
       ? health.warnings.map((w) => ({
+          key: `warning:${w.code}:${w.page ?? "all"}`,
           label: "Warning",
           value: w.message,
           status: "warn" as const,
@@ -54,13 +58,29 @@ function healthRows(health: SourceHealth): InfoRow[] {
 function infoRows(inspected: InspectedBook): InfoRow[] {
   const { metadata, file, health } = inspected;
   const rows: InfoRow[] = [
-    { label: "Title", value: metadata.title ?? "", editable: "title", placeholder: "untitled" },
-    { label: "Author", value: metadata.author ?? "", editable: "author", placeholder: "unknown" },
+    {
+      key: "title",
+      label: "Title",
+      value: metadata.title ?? "",
+      editable: "title",
+      placeholder: "untitled",
+    },
+    {
+      key: "author",
+      label: "Author",
+      value: metadata.author ?? "",
+      editable: "author",
+      placeholder: "unknown",
+    },
   ];
   if (metadata.wordCount !== null) {
-    rows.push({ label: "Words", value: metadata.wordCount.toLocaleString() });
+    rows.push({ key: "words", label: "Words", value: metadata.wordCount.toLocaleString() });
   }
-  return [...rows, { label: "Size", value: formatBytes(file.size) }, ...healthRows(health)];
+  return [
+    ...rows,
+    { key: "size", label: "Size", value: formatBytes(file.size) },
+    ...healthRows(health),
+  ];
 }
 
 export function UploadModal({
@@ -136,8 +156,8 @@ export function UploadModal({
           <div className="upload-info">
             <h2 className="upload-info-head">upload info</h2>
             <dl className="upload-info-table">
-              {infoRows(inspected).map((row, i) => (
-                <div className="upload-info-row" key={`${row.label}-${i}`}>
+              {infoRows(inspected).map((row) => (
+                <div className="upload-info-row" key={row.key}>
                   <dt>{row.label}</dt>
                   <dd className={row.status ? `upload-status--${row.status}` : undefined}>
                     {row.editable ? (

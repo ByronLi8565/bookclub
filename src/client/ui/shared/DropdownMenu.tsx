@@ -42,10 +42,10 @@ export function DropdownMenu<P extends object = object>({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
-  const openedSignalRef = useRef(openSignal);
+  const [seenOpenSignal, setSeenOpenSignal] = useState(openSignal);
 
-  if (openedSignalRef.current !== openSignal) {
-    openedSignalRef.current = openSignal;
+  if (seenOpenSignal !== openSignal) {
+    setSeenOpenSignal(openSignal);
     if (openSignal) setOpen(true);
   }
 

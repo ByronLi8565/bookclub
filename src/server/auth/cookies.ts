@@ -27,10 +27,6 @@ export async function mintSessionToken(env: Env, user: User): Promise<string> {
   );
 }
 
-export async function mintSessionCookie(env: Env, user: User): Promise<string> {
-  return sessionCookie(await mintSessionToken(env, user));
-}
-
 export async function sessionCredentials(
   env: Env,
   user: User,

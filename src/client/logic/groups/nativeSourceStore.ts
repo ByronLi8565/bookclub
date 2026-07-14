@@ -64,30 +64,3 @@ export async function getNativeSource(sourceId: string): Promise<File | null> {
   const blob = await base64ToBlob(base64, meta.type);
   return new File([blob], meta.name, { type: meta.type });
 }
-
-export async function deleteNativeSource(sourceId: string): Promise<void> {
-  for (const path of [blobPath(sourceId), metaPath(sourceId)]) {
-    try {
-      await Filesystem.deleteFile({ path, directory: DIR });
-    } catch {}
-  }
-}
-
-export async function nativeSourceSize(sourceId: string): Promise<number | null> {
-  try {
-    const raw = (
-      await Filesystem.readFile({
-        path: metaPath(sourceId),
-        directory: DIR,
-        encoding: Encoding.UTF8,
-      })
-    ).data as string;
-    return (JSON.parse(raw) as SourceMeta).size;
-  } catch {
-    try {
-      return (await Filesystem.stat({ path: blobPath(sourceId), directory: DIR })).size;
-    } catch {
-      return null;
-    }
-  }
-}

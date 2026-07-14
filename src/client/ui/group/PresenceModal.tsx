@@ -669,7 +669,7 @@ export function PresenceModal({
                         <img
                           className="group-image-preview"
                           src={`/groups/${groupRef}/images/${encodeURIComponent(image.id)}`}
-                          alt={`Image ${index + 1}`}
+                          alt={`Upload ${index + 1}`}
                         />
                       )}
                     </li>

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   stepChromeVisibility,
   type ChromeVisibilityLevel,
-} from "../client/ui/workspace/chromeVisibility.ts";
+} from "../client/ui/workspace/visibility.ts";
 
 describe("chrome visibility stepping", () => {
   const cases: Array<{

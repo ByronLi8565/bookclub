@@ -12,7 +12,6 @@ import {
 import {
   createContext,
   useContext,
-  useEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -182,16 +181,15 @@ function NoteImagePreview({
     containerWidth: number;
     currentWidth: number;
   } | null>(null);
-  const [displayWidth, setDisplayWidth] = useState(width);
+  const [resizingWidth, setResizingWidth] = useState<number | null>(null);
   const [resizing, setResizing] = useState(false);
+  const displayWidth = resizingWidth ?? width;
   const src =
     previewUrl ?? (imageId && actions?.imageUrlBase ? `${actions.imageUrlBase}/${imageId}` : null);
 
-  useEffect(() => setDisplayWidth(width), [width]);
-
   function commitWidth(next: number): void {
     const clamped = clampNoteImageWidth(next);
-    setDisplayWidth(clamped);
+    setResizingWidth(null);
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
       if ($isNoteImageNode(node)) node.setWidth(clamped);
@@ -216,7 +214,7 @@ function NoteImagePreview({
     if (!drag) return;
     const delta = ((event.clientX - drag.startX) / drag.containerWidth) * 100;
     drag.currentWidth = clampNoteImageWidth(drag.startWidth + delta);
-    setDisplayWidth(drag.currentWidth);
+    setResizingWidth(drag.currentWidth);
   }
 
   function onResizeEnd(event: PointerEvent<HTMLButtonElement>): void {
@@ -279,7 +277,7 @@ function NoteImagePreview({
         onPointerCancel={() => {
           dragRef.current = null;
           setResizing(false);
-          setDisplayWidth(width);
+          setResizingWidth(null);
         }}
         onKeyDown={onResizeKey}
       />

@@ -9,8 +9,10 @@ import {
   type ReadingPositionRecord,
   type StoredReadingPosition,
 } from "../../../shared/types/readingPositions.ts";
+import { readVersionedLocal, writeLocal } from "../storage.ts";
 
-const STORAGE_KEY = "bookclub.readingPositions";
+const STORAGE_KEY = "bookclub.readingPositions:v1";
+const LEGACY_STORAGE_KEY = "bookclub.readingPositions";
 
 function positionKey(userId: string, groupId: string, sourceId: string): string {
   return `${userId}:${groupId}:${sourceId}`;
@@ -21,12 +23,12 @@ function samePosition(a: StoredReadingPosition | null, b: StoredReadingPosition 
 }
 
 function loadAll(): Record<string, ReadingPositionRecord> {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  return raw ? (decode(ReadingPositionCache, JSON.parse(raw)) ?? {}) : {};
+  const stored = readVersionedLocal<unknown>(STORAGE_KEY, LEGACY_STORAGE_KEY);
+  return decode(ReadingPositionCache, stored) ?? {};
 }
 
 function saveAll(positions: Record<string, ReadingPositionRecord>): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+  writeLocal(STORAGE_KEY, positions);
 }
 
 function getRecord(

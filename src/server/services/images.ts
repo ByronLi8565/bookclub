@@ -63,9 +63,10 @@ export function getImage(env: Env, groupId: string, imageId: string): Promise<R2
 
 export async function deleteImages(env: Env, groupId: string, imageIds: string[]): Promise<void> {
   const keys = imageIds.map((imageId) => imageKey(groupId, imageId));
-  for (let offset = 0; offset < keys.length; offset += 1000) {
-    await env.IMAGES.delete(keys.slice(offset, offset + 1000));
-  }
+  const batches = Array.from({ length: Math.ceil(keys.length / 1000) }, (_, index) =>
+    keys.slice(index * 1000, (index + 1) * 1000),
+  );
+  await Promise.all(batches.map((batch) => env.IMAGES.delete(batch)));
 }
 
 export function restoreImage(

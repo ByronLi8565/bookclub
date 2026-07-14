@@ -69,7 +69,8 @@ export class NoteAgent extends Agent<Env, NoteState> {
     if (pending.length === 0) return;
 
     await deleteImages(this.env, this.name, pending);
-    const remaining = (this.state.pendingImageDeletes ?? []).filter((id) => !pending.includes(id));
+    const deleted = new Set(pending);
+    const remaining = (this.state.pendingImageDeletes ?? []).filter((id) => !deleted.has(id));
     if (remaining.length > 0) {
       this.setState({ ...this.state, pendingImageDeletes: remaining });
     } else {

@@ -5,20 +5,18 @@ import {
   changeMemberRole,
   deleteBook as deleteGroupBook,
   fetchGroup,
-  redeemInvite,
   renameBook,
   resolveBookTitle,
   updateBookMetadata,
   type BookMetadataPatch,
   type GroupSummary,
   type GroupRole,
-  type RosterEntry,
 } from "../../logic/groups/groupClient.ts";
-import { useOnline } from "../../logic/net/online.ts";
-import { readLocal, writeLocal } from "../../logic/storage.ts";
 import { books, downloadGroupForOffline, loadSource } from "../../logic/groups/sourceAccess.ts";
 import { isNative } from "../../logic/net/api.ts";
 import { useBookUpload } from "../../logic/groups/useBookUpload.ts";
+import { useLatestRef } from "../../logic/useLatestRef.ts";
+import { useResolvedGroup } from "../../logic/groups/useResolvedGroup.ts";
 import {
   fetchServerReadingPosition,
   getReadingPosition,
@@ -35,25 +33,6 @@ import { spawnToast } from "../shared/toast/toastStore.ts";
 import { UploadModal } from "./UploadModal.tsx";
 import { WorkspaceLoadingShell } from "./WorkspaceLoadingShell.tsx";
 
-type Resolved =
-  | { k: "loading" }
-  | { k: "anon" }
-  | { k: "notfound" }
-  | { k: "refused" }
-  | { k: "offline" }
-  | { k: "member"; group: GroupSummary; role: GroupRole; isOwner: boolean; members: RosterEntry[] };
-
-interface CachedGroupView {
-  group: GroupSummary;
-  role: GroupRole;
-  isOwner: boolean;
-  members: RosterEntry[];
-}
-
-function groupViewCacheKey(userId: string, groupRef: string): string {
-  return `bookclub.groupview.${userId}.${groupRef}`;
-}
-
 type LoadedFiles = Record<string, File | null>;
 
 const SELECTED_SOURCE_PREFIX = "bookclub.selectedSource";
@@ -67,13 +46,6 @@ function selectedSourceKey(groupId: string): string {
 function storedSelectedSource(group: GroupSummary): string | null {
   const stored = localStorage.getItem(selectedSourceKey(group.groupId));
   return stored && group.sources.includes(stored) ? stored : null;
-}
-
-function takeInviteToken(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get("invite");
-  if (token) window.history.replaceState(null, "", window.location.pathname);
-  return token;
 }
 
 function FittedHomeTitle({ children }: { children: string }): React.ReactElement {
@@ -129,33 +101,26 @@ export function GroupView({
   groupRef: string;
   session: Session;
 }): React.ReactElement {
-  const [resolved, setResolved] = useState<Resolved>({ k: "loading" });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [resolved, setResolved, selectedId, setSelectedId] = useResolvedGroup(
+    groupRef,
+    session,
+    storedSelectedSource,
+  );
   const [loadedFiles, setLoadedFiles] = useState<LoadedFiles>({});
-  const loadedFilesRef = useRef<LoadedFiles>({});
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [reloadTick, setReloadTick] = useState(0);
   const userId = session.user?.id ?? null;
-  const online = useOnline();
   const isMobile = useIsMobile();
   const loadKey = `${groupRef}:${session.status}:${userId ?? ""}`;
-  const loadKeyRef = useRef(loadKey);
+  const [loadedFor, setLoadedFor] = useState(loadKey);
 
-  if (loadKeyRef.current !== loadKey) {
-    loadKeyRef.current = loadKey;
-    if (session.status === "anon") {
-      setResolved({ k: "anon" });
-    } else if (session.status === "authed") {
-      setResolved({ k: "loading" });
-      setSelectedId(null);
-      setLoadedFiles({});
-    }
+  if (loadedFor !== loadKey) {
+    setLoadedFor(loadKey);
+    if (session.status === "authed") setLoadedFiles({});
   }
 
   const group = resolved.k === "member" ? resolved.group : null;
-  const groupStateRef = useRef<GroupSummary | null>(null);
-  groupStateRef.current = group;
-  loadedFilesRef.current = loadedFiles;
+  const groupStateRef = useLatestRef(group);
+  const loadedFilesRef = useLatestRef(loadedFiles);
   const effectiveId = group ? (selectedId ?? currentSourceId(group)) : null;
 
   function selectBook(sourceId: string): void {
@@ -281,68 +246,6 @@ export function GroupView({
     );
   }
 
-  const wasOnlineRef = useRef(online);
-  useEffect(() => {
-    if (online && !wasOnlineRef.current) setReloadTick((t) => t + 1);
-    wasOnlineRef.current = online;
-  }, [online]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (session.status === "loading") return;
-    if (session.status === "anon") return;
-
-    void (async () => {
-      let view = await fetchGroup(groupRef);
-      if (view.status === "notfound") {
-        if (!cancelled) setResolved({ k: "notfound" });
-        return;
-      }
-      if (view.status === "error") {
-        if (cancelled) return;
-        const cached = userId
-          ? readLocal<CachedGroupView>(groupViewCacheKey(userId, groupRef))
-          : null;
-        if (cached) {
-          setSelectedId(storedSelectedSource(cached.group));
-          setResolved({ k: "member", ...cached, role: cached.role ?? GroupRoles.Visitor });
-        } else {
-          setResolved({ k: "offline" });
-        }
-        return;
-      }
-      if (!view.membership.isMember) {
-        const token = takeInviteToken();
-        if (token) {
-          const joined = await redeemInvite(groupRef, token);
-          if (joined.ok) {
-            const rejoined = await fetchGroup(groupRef);
-            if (rejoined.status === "ok") view = rejoined;
-          } else {
-            spawnToast("Invite failed", "That invite link isn't valid.", { type: "error" });
-          }
-        }
-      }
-      if (cancelled) return;
-      if (view.status !== "ok" || !view.membership.isMember) {
-        setResolved({ k: "refused" });
-        return;
-      }
-      const resolvedView: CachedGroupView = {
-        group: view.group,
-        role: view.membership.role ?? GroupRoles.Visitor,
-        isOwner: view.group.ownerId === userId,
-        members: view.members,
-      };
-      if (userId) writeLocal(groupViewCacheKey(userId, groupRef), resolvedView);
-      setSelectedId(storedSelectedSource(view.group));
-      setResolved({ k: "member", ...resolvedView, role: resolvedView.role ?? GroupRoles.Visitor });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [groupRef, session.status, userId, reloadTick]);
-
   useEffect(() => {
     let cancelled = false;
     const loadGroup = groupStateRef.current;
@@ -355,7 +258,7 @@ export function GroupView({
     return () => {
       cancelled = true;
     };
-  }, [group?.groupId, effectiveId]);
+  }, [group?.groupId, effectiveId, groupStateRef, loadedFilesRef]);
 
   useEffect(() => {
     // Read through the ref (like the loadSource effect above) so the deps stay
@@ -364,7 +267,7 @@ export function GroupView({
     if (!isNative || !shelf) return;
     void downloadGroupForOffline(shelf);
     // Keyed on identity + shelf contents so a newly-added book also downloads.
-  }, [group?.groupId, group?.sources.length]);
+  }, [group?.groupId, group?.sources.length, groupStateRef]);
 
   const source =
     effectiveId && group ? (sourceById(group, effectiveId) ?? currentSource(group)) : null;
