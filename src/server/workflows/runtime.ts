@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { currentIdentity } from "../auth/cookies.ts";
 import type { Env } from "../env.ts";
 import type { Identity } from "../state/GroupAgent.ts";
@@ -25,6 +26,35 @@ export const WorkflowReason = { Empty: "empty", TooLong: "too_long" } as const;
 
 export type WorkflowReason = (typeof WorkflowReason)[keyof typeof WorkflowReason];
 
+const WorkflowErrorSchema = Schema.Union([
+  Schema.Literal(WorkflowError.InternalError),
+  Schema.Literal(WorkflowError.Unauthenticated),
+  Schema.Literal(WorkflowError.InvalidRequest),
+  Schema.Literal(WorkflowError.InvalidName),
+  Schema.Literal(WorkflowError.InvalidEmail),
+  Schema.Literal(WorkflowError.IdExhausted),
+  Schema.Literal(WorkflowError.UnsupportedType),
+  Schema.Literal(WorkflowError.NoBook),
+  Schema.Literal(WorkflowError.KindMismatch),
+  Schema.Literal(WorkflowError.TooLarge),
+  Schema.Literal(WorkflowError.InvalidBackup),
+  Schema.Literal(WorkflowError.BackupClubMismatch),
+  Schema.Literal("exists"),
+  Schema.Literal("not_member"),
+  Schema.Literal("not_found"),
+  Schema.Literal("forbidden"),
+  Schema.Literal("bad_source"),
+  Schema.Literal("empty"),
+  Schema.Literal("bad_invite"),
+  Schema.Literal("wrong_email"),
+  Schema.Literal("bad_member"),
+]);
+
+const WorkflowReasonSchema = Schema.Union([
+  Schema.Literal(WorkflowReason.Empty),
+  Schema.Literal(WorkflowReason.TooLong),
+]);
+
 export type WorkflowResult<T> = { ok: true; value: T } | WorkflowFailure;
 
 export interface WorkflowFailure {
@@ -34,21 +64,25 @@ export interface WorkflowFailure {
   reason?: WorkflowReason;
 }
 
-export type WorkflowEffect<T> = Effect.Effect<T, WorkflowFailure>;
+export class WorkflowFailureError extends Schema.TaggedErrorClass<WorkflowFailureError>()(
+  "Workflow.Failure",
+  {
+    status: Schema.Number,
+    error: WorkflowErrorSchema,
+    reason: Schema.optionalKey(WorkflowReasonSchema),
+  },
+) {}
 
-/** Maps an agent's sync/async method surface to an all-async stub-call shape. */
-export type Async<T> = {
-  [K in keyof T]: T[K] extends (...args: infer A) => infer R
-    ? (...args: A) => Promise<Awaited<R>>
-    : T[K];
-};
+export type WorkflowEffect<T> = Effect.Effect<T, WorkflowFailureError>;
 
 export function fail(
   status: number,
   error: WorkflowError,
   reason?: WorkflowReason,
-): WorkflowFailure {
-  return reason === undefined ? { ok: false, status, error } : { ok: false, status, error, reason };
+): WorkflowFailureError {
+  return new WorkflowFailureError(
+    reason === undefined ? { status, error } : { status, error, reason },
+  );
 }
 
 const succeed = <T>(value: T): WorkflowResult<T> => ({ ok: true, value });
@@ -58,23 +92,40 @@ const succeed = <T>(value: T): WorkflowResult<T> => ({ ok: true, value });
 // old `Effect.promise`, any thrown/rejected step escaped `runWorkflow`'s match
 // and crashed the request instead of surfacing a structured error the client
 // can turn into a toast. Never fail silently.
-export const tryPromise = <T>(evaluate: () => T | PromiseLike<T>): WorkflowEffect<Awaited<T>> =>
-  Effect.tryPromise({
+export const tryPromise = Effect.fn("Workflow.tryPromise")(function* <T>(
+  evaluate: () => T,
+): Effect.fn.Return<Awaited<T>, WorkflowFailureError> {
+  return yield* Effect.tryPromise({
     try: () => Promise.resolve(evaluate()),
     catch: (cause) => {
       console.error("workflow step failed", cause);
       return fail(500, WorkflowError.InternalError);
     },
   });
+});
 
-export const runWorkflow = <T>(workflow: WorkflowEffect<T>): Promise<WorkflowResult<T>> =>
+export const runWorkflow = <T>(
+  operation: string,
+  workflow: WorkflowEffect<T>,
+): Promise<WorkflowResult<T>> =>
   Effect.runPromise(
-    workflow.pipe(Effect.match({ onFailure: (failure) => failure, onSuccess: succeed })),
+    workflow.pipe(
+      Effect.withSpan(operation),
+      Effect.match({
+        onFailure: ({ status, error, reason }): WorkflowFailure =>
+          reason === undefined
+            ? { ok: false, status, error }
+            : { ok: false, status, error, reason },
+        onSuccess: succeed,
+      }),
+    ),
   );
 
-export const requireIdentity = (env: Env, request: Request): WorkflowEffect<Identity> =>
-  Effect.gen(function* () {
-    const me = yield* tryPromise(() => currentIdentity(request, env));
-    if (!me) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
-    return me;
-  });
+export const requireIdentity = Effect.fn("Workflow.requireIdentity")(function* (
+  env: Env,
+  request: Request,
+): Effect.fn.Return<Identity, WorkflowFailureError> {
+  const me = yield* tryPromise(() => currentIdentity(request, env));
+  if (!me) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
+  return me;
+});

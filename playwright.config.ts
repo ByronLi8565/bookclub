@@ -2,8 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 // Mobile Safari emulation per https://playwright.dev/docs/emulation
 export default defineConfig({
-  testDir: "./src/tests/playwright",
-  testMatch: "**/*.pw.ts",
+  testDir: ".",
+  testMatch: ["src/tests/playwright/**/*.pw.ts", "e2e/browser/**/*.pw.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
@@ -18,7 +18,7 @@ export default defineConfig({
     },
     {
       name: "Desktop Safari",
-      testMatch: "**/readerActions.pw.ts",
+      testMatch: ["**/readerActions.pw.ts", "e2e/browser/**/*.pw.ts"],
       use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
     },
   ],

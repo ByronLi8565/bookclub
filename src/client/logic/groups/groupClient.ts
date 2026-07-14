@@ -1,17 +1,17 @@
 import * as Schema from "effect/Schema";
 import { apiFetch } from "../net/api.ts";
 import {
-  GroupRole,
+  GroupSummary,
+  Membership,
+  RosterEntry,
   type BookMetadataPatch,
-  type GroupSummary,
-  type Membership,
-  type RosterEntry,
+  type GroupRole,
 } from "../../../shared/types/groups.ts";
 import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../../shared/types/sources.ts";
 import { parseHttpError } from "../../http.ts";
 import { decode } from "../../../shared/schema.ts";
-import type { ClubProfile } from "../../../shared/types/profiles.ts";
+import { ClubProfile } from "../../../shared/types/profiles.ts";
 
 export type {
   BookMetadataPatch,
@@ -29,55 +29,7 @@ export interface FetchedSource {
   file: File;
 }
 
-const GroupRoleSchema = Schema.Union([
-  Schema.Literal(GroupRole.Owner),
-  Schema.Literal(GroupRole.Admin),
-  Schema.Literal(GroupRole.Member),
-  Schema.Literal(GroupRole.Visitor),
-]);
-
-const SourceMeta = Schema.Struct({
-  kind: Schema.Union([Schema.Literal("epub"), Schema.Literal("pdf")]),
-  contentType: Schema.String,
-  size: Schema.Number,
-  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  addedBy: Schema.String,
-});
-
-const GroupSummary = Schema.Struct({
-  groupId: Schema.String,
-  slug: Schema.String,
-  publicId: Schema.String,
-  displayName: Schema.String,
-  ownerId: Schema.String,
-  sources: Schema.mutable(Schema.Array(Schema.String)),
-  bookTitles: Schema.Record(Schema.String, Schema.String),
-  sourceMeta: Schema.Record(Schema.String, SourceMeta),
-  memberCount: Schema.Number,
-});
-
-const Membership = Schema.Struct({
-  isMember: Schema.Boolean,
-  role: Schema.NullOr(GroupRoleSchema),
-});
-
-const RosterEntry = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  email: Schema.String,
-  role: GroupRoleSchema,
-  avatarImageId: Schema.optionalKey(Schema.String),
-});
-
-const ClubProfileResponse = Schema.Struct({
-  profile: Schema.Struct({
-    id: Schema.String,
-    displayName: Schema.String,
-    avatarImageId: Schema.optionalKey(Schema.String),
-  }),
-});
+const ClubProfileResponse = Schema.Struct({ profile: ClubProfile });
 
 const ErrorBody = Schema.Struct({
   error: Schema.optionalKey(Schema.String),
@@ -172,10 +124,10 @@ async function compressedImage(file: File, kind: ImageUploadKind): Promise<ApiRe
   }
 }
 
-async function parseJson<S extends Schema.Top>(
+async function parseJson<S extends Schema.Decoder<unknown>>(
   response: Response,
   schema: S,
-): Promise<Schema.Schema.Type<S> | null> {
+): Promise<S["Type"] | null> {
   return decode(schema, await response.json());
 }
 

@@ -43,13 +43,15 @@ function highlight(id: string, cfi: string): Highlight {
 
 const noRebind = () => {};
 const notCancelled = () => false;
+const runUpdateHighlights = (...args: Parameters<typeof updateHighlights>) =>
+  Effect.runPromise(updateHighlights(...args));
 
 describe("updateHighlights", () => {
   it("draws a desired highlight that is not yet drawn", async () => {
     const { painter, draws } = fakePainter();
     const drawn = new Map<string, HighlightAnchor>();
 
-    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
+    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
       reader: fakeReader(new Set(["cfi-1"])),
       painter,
       rebind: noRebind,
@@ -64,7 +66,7 @@ describe("updateHighlights", () => {
     const { painter, erases } = fakePainter();
     const drawn = new Map<string, HighlightAnchor>([["gone", epubAnchor("cfi-gone")]]);
 
-    await updateHighlights([], drawn, {
+    await runUpdateHighlights([], drawn, {
       reader: fakeReader(new Set()),
       painter,
       rebind: noRebind,
@@ -87,7 +89,7 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
+    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
       reader,
       painter,
       rebind: noRebind,
@@ -109,7 +111,7 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
+    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
       reader,
       painter,
       rebind: (noteId, highlightId, anchor) => void rebinds.push({ noteId, highlightId, anchor }),
@@ -130,7 +132,7 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
+    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
       reader,
       painter,
       rebind: (_n, id) => void rebinds.push(id),
@@ -151,7 +153,7 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await updateHighlights([{ noteId: null, highlight: highlight("draft", "cfi-old") }], drawn, {
+    await runUpdateHighlights([{ noteId: null, highlight: highlight("draft", "cfi-old") }], drawn, {
       reader,
       painter,
       rebind: (_n, id) => void rebinds.push(id),
@@ -166,7 +168,7 @@ describe("updateHighlights", () => {
     const { painter, draws } = fakePainter();
     const drawn = new Map<string, HighlightAnchor>();
 
-    await updateHighlights(
+    await runUpdateHighlights(
       [
         { noteId: "n1", highlight: highlight("h1", "cfi-1") },
         { noteId: "n2", highlight: highlight("h2", "cfi-2") },
@@ -198,7 +200,7 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await updateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
+    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
       reader,
       painter,
       rebind: noRebind,

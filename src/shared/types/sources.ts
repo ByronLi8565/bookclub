@@ -1,4 +1,7 @@
-export type SourceKind = "epub" | "pdf";
+import * as Schema from "effect/Schema";
+
+export const SourceKind = Schema.Union([Schema.Literal("epub"), Schema.Literal("pdf")]);
+export type SourceKind = typeof SourceKind.Type;
 
 export const EPUB_CONTENT_TYPE = "application/epub+zip";
 const PDF_CONTENT_TYPE = "application/pdf";

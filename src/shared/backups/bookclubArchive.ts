@@ -2,8 +2,10 @@ import * as Schema from "effect/Schema";
 import { strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import { decode } from "../schema.ts";
 import { noteImageIds } from "../notes/images.ts";
-import type { Note } from "../types/notes.ts";
-import type { SourceMeta } from "../types/groups.ts";
+import { Highlight, Note, type Note as NoteType } from "../types/notes.ts";
+import { SourceMeta } from "../types/groups.ts";
+
+type SchemaType<S extends Schema.Top> = S["Type"];
 
 export const BOOKCLUB_ARCHIVE_CONTENT_TYPE = "application/vnd.bookclub.backup+zip";
 export const BOOKCLUB_ARCHIVE_EXTENSION = ".bookclub";
@@ -22,17 +24,19 @@ export const BookclubArchiveError = {
 
 export type BookclubArchiveError = (typeof BookclubArchiveError)[keyof typeof BookclubArchiveError];
 
-export interface BookclubArchiveClub {
-  id: string;
-  name: string;
-  publicId: string;
-}
+export const BookclubArchiveClub = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  publicId: Schema.String,
+});
+export interface BookclubArchiveClub extends SchemaType<typeof BookclubArchiveClub> {}
 
-export interface BookclubArchiveBook {
-  sourceId: string;
-  title: string | null;
-  meta: SourceMeta;
-}
+export const BookclubArchiveBook = Schema.Struct({
+  sourceId: Schema.String,
+  title: Schema.NullOr(Schema.String),
+  meta: SourceMeta,
+});
+export interface BookclubArchiveBook extends SchemaType<typeof BookclubArchiveBook> {}
 
 export interface BookclubArchiveImage {
   id: string;
@@ -41,33 +45,15 @@ export interface BookclubArchiveImage {
   bytes: Uint8Array;
 }
 
-interface ManifestNote extends Omit<Note, "body"> {
+interface ManifestNote extends Omit<NoteType, "body"> {
   file: string;
 }
 
-interface ManifestImage {
-  id: string;
-  file: string;
-  contentType: string;
-  size: number;
-  sha256: string;
-  uploadedBy: string | null;
-}
-
-export interface BookclubArchiveManifest {
-  format: "bookclub-backup";
-  version: 1;
-  createdAt: string;
-  club: BookclubArchiveClub;
-  nextSeq: number;
-  books: BookclubArchiveBook[];
-  notes: ManifestNote[];
-  images: ManifestImage[];
-}
+interface ManifestImage extends SchemaType<typeof ManifestImage> {}
 
 export interface BookclubArchiveData {
   manifest: BookclubArchiveManifest;
-  notes: Note[];
+  notes: NoteType[];
   images: BookclubArchiveImage[];
 }
 
@@ -76,7 +62,7 @@ export interface CreateBookclubArchiveInput {
   club: BookclubArchiveClub;
   nextSeq: number;
   books: BookclubArchiveBook[];
-  notes: Note[];
+  notes: NoteType[];
   images: BookclubArchiveImage[];
 }
 
@@ -84,84 +70,39 @@ export type DecodeBookclubArchiveResult =
   | { ok: true; value: BookclubArchiveData }
   | { ok: false; error: BookclubArchiveError };
 
-const PdfRectSchema = Schema.Struct({
-  x: Schema.Number,
-  y: Schema.Number,
-  width: Schema.Number,
-  height: Schema.Number,
-});
-const HighlightAnchorSchema = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("epub-cfi"), value: Schema.String }),
-  Schema.Struct({
-    kind: Schema.Literal("pdf-text"),
-    page: Schema.Number,
-    rects: Schema.mutable(Schema.Array(PdfRectSchema)),
-  }),
-]);
-const HighlightSchema = Schema.Struct({
-  id: Schema.String,
-  sourceId: Schema.String,
-  anchor: HighlightAnchorSchema,
-  quote: Schema.Struct({
-    type: Schema.Literal("TextQuoteSelector"),
-    exact: Schema.String,
-    prefix: Schema.String,
-    suffix: Schema.String,
-  }),
-  createdAt: Schema.String,
-});
-const NoteSchema = Schema.Struct({
-  id: Schema.String,
-  seq: Schema.Number,
-  sourceId: Schema.String,
-  author: Schema.Struct({ id: Schema.String, name: Schema.String }),
-  parent: Schema.NullOr(Schema.String),
+const ManifestNote = Schema.Struct({
+  id: Note.fields.id,
+  seq: Note.fields.seq,
+  sourceId: Note.fields.sourceId,
+  author: Note.fields.author,
+  parent: Note.fields.parent,
   file: Schema.String,
-  highlights: Schema.mutable(Schema.Array(HighlightSchema)),
-  createdAt: Schema.String,
-  editedAt: Schema.NullOr(Schema.String),
-  deletedAt: Schema.NullOr(Schema.String),
-  version: Schema.Number,
-  tags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+  highlights: Schema.mutable(Schema.Array(Highlight)),
+  createdAt: Note.fields.createdAt,
+  editedAt: Note.fields.editedAt,
+  deletedAt: Note.fields.deletedAt,
+  version: Note.fields.version,
+  tags: Note.fields.tags,
 });
-const SourceMetaSchema = Schema.Struct({
-  kind: Schema.Union([Schema.Literal("epub"), Schema.Literal("pdf")]),
+const ManifestImage = Schema.Struct({
+  id: Schema.String,
+  file: Schema.String,
   contentType: Schema.String,
   size: Schema.Number,
-  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  addedBy: Schema.String,
+  sha256: Schema.String,
+  uploadedBy: Schema.NullOr(Schema.String),
 });
-const ManifestSchema = Schema.Struct({
+export const BookclubArchiveManifest = Schema.Struct({
   format: Schema.Literal("bookclub-backup"),
   version: Schema.Literal(1),
   createdAt: Schema.String,
-  club: Schema.Struct({ id: Schema.String, name: Schema.String, publicId: Schema.String }),
+  club: BookclubArchiveClub,
   nextSeq: Schema.Number,
-  books: Schema.mutable(
-    Schema.Array(
-      Schema.Struct({
-        sourceId: Schema.String,
-        title: Schema.NullOr(Schema.String),
-        meta: SourceMetaSchema,
-      }),
-    ),
-  ),
-  notes: Schema.mutable(Schema.Array(NoteSchema)),
-  images: Schema.mutable(
-    Schema.Array(
-      Schema.Struct({
-        id: Schema.String,
-        file: Schema.String,
-        contentType: Schema.String,
-        size: Schema.Number,
-        sha256: Schema.String,
-        uploadedBy: Schema.NullOr(Schema.String),
-      }),
-    ),
-  ),
+  books: Schema.mutable(Schema.Array(BookclubArchiveBook)),
+  notes: Schema.mutable(Schema.Array(ManifestNote)),
+  images: Schema.mutable(Schema.Array(ManifestImage)),
 });
+export interface BookclubArchiveManifest extends SchemaType<typeof BookclubArchiveManifest> {}
 
 function imageExtension(contentType: string): string {
   if (contentType === "image/jpeg") return "jpg";
@@ -175,7 +116,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function notePath(note: Note): string {
+function notePath(note: NoteType): string {
   return `notes/${String(note.seq).padStart(6, "0")}-${note.id}.md`;
 }
 
@@ -282,7 +223,7 @@ export async function decodeBookclubArchive(
   ) {
     return invalid(BookclubArchiveError.UnsupportedVersion);
   }
-  const decoded = decode(ManifestSchema, rawManifest);
+  const decoded = decode(BookclubArchiveManifest, rawManifest);
   if (!decoded) return invalid(BookclubArchiveError.InvalidArchive);
   const manifest = decoded as BookclubArchiveManifest;
   const manifestSourceIds = manifest.books.map((book) => book.sourceId);

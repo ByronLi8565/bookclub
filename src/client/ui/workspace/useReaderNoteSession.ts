@@ -167,27 +167,26 @@ export function useReaderNoteSession({
       const selectedSourceId = sourceIdRef.current;
       if (!selectedSourceId) return;
       if (intent === "note" && !isMobile) setDesktopExpandedPane(null);
-      Effect.runPromise(captureHighlight(selectedSourceId, anchor, range)).then((highlight) => {
-        if (intent === "highlight") {
-          agent.addNote(
-            selectedSourceId,
-            highlightMark(highlight.quote.exact),
-            [highlight],
-            [HIGHLIGHT_TAG],
-          );
-          setPane("notes");
-          return;
-        }
-        const previous = composingRef.current;
-        if (previous) {
-          view.eraseHighlight(previous.id);
-          drawnRef.current.delete(previous.id);
-        }
-        view.drawHighlight(highlight.id, highlight.anchor, () => void view.goTo(highlight.anchor));
-        drawnRef.current.set(highlight.id, highlight.anchor);
-        setComposing(highlight);
+      const highlight = captureHighlight(selectedSourceId, anchor, range);
+      if (intent === "highlight") {
+        agent.addNote(
+          selectedSourceId,
+          highlightMark(highlight.quote.exact),
+          [highlight],
+          [HIGHLIGHT_TAG],
+        );
         setPane("notes");
-      });
+        return;
+      }
+      const previous = composingRef.current;
+      if (previous) {
+        view.eraseHighlight(previous.id);
+        drawnRef.current.delete(previous.id);
+      }
+      view.drawHighlight(highlight.id, highlight.anchor, () => void view.goTo(highlight.anchor));
+      drawnRef.current.set(highlight.id, highlight.anchor);
+      setComposing(highlight);
+      setPane("notes");
     };
   });
 
@@ -266,12 +265,14 @@ export function useReaderNoteSession({
       draw: (id, anchor) => view.drawHighlight(id, anchor, () => void view.goTo(anchor)),
       erase: (id) => view.eraseHighlight(id),
     };
-    void updateHighlights(desired, drawnRef.current, {
-      reader: view.reader,
-      painter,
-      rebind: agent.rebindHighlight,
-      isCancelled: () => cancelled,
-    });
+    Effect.runFork(
+      updateHighlights(desired, drawnRef.current, {
+        reader: view.reader,
+        painter,
+        rebind: agent.rebindHighlight,
+        isCancelled: () => cancelled,
+      }),
+    );
     return () => {
       cancelled = true;
     };

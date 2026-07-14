@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+type SchemaType<S extends Schema.Top> = S["Type"];
+
 export const SmartArrows = Schema.Union([
   Schema.Literal("off"),
   Schema.Literal("smooth"),
@@ -27,10 +29,10 @@ export const UserPrefs = Schema.Struct({
 export const UserPrefsResponse = Schema.Struct({ prefs: UserPrefs });
 export const SetUserPrefsRequest = Schema.Struct({ prefs: UserPrefs });
 
-export type SmartArrows = Schema.Schema.Type<typeof SmartArrows>;
-export type ReadingPositionOpenPolicy = Schema.Schema.Type<typeof ReadingPositionOpenPolicy>;
-export type PdfPageLayout = Schema.Schema.Type<typeof PdfPageLayout>;
-export type UserPrefs = Schema.Schema.Type<typeof UserPrefs>;
+export type SmartArrows = typeof SmartArrows.Type;
+export type ReadingPositionOpenPolicy = typeof ReadingPositionOpenPolicy.Type;
+export type PdfPageLayout = typeof PdfPageLayout.Type;
+export interface UserPrefs extends SchemaType<typeof UserPrefs> {}
 
 export const DEFAULT_USER_PREFS: UserPrefs = {
   reader: {

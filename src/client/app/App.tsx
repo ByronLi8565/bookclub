@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import { useEffect } from "react";
 import { Route, Switch } from "wouter";
 import { useSession } from "./useSession.ts";
@@ -12,7 +13,10 @@ export default function App() {
   const session = useSession();
   useEffect(() => {
     if (session.status !== "authed") return;
-    void Effect.runPromise(hydrateUserPrefs());
+    const fiber = Effect.runFork(hydrateUserPrefs());
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
   }, [session.status]);
   return (
     <>

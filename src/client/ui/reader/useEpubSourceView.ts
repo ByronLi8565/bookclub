@@ -1,7 +1,5 @@
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
 import {
   useCallback,
   useEffect,
@@ -217,8 +215,7 @@ export function useEpubSourceView(
   });
   const swipeRef = useLatestRef(swipe.ref);
 
-  const viewRef = useRef<Ref.Ref<Option.Option<LiveView>>>(null!);
-  viewRef.current ??= Effect.runSync(Ref.make(Option.none<LiveView>()));
+  const viewRef = useRef<LiveView | null>(null);
   const [fontSize, setFontSizeState] = useState(100);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
   const drawnCfiRef = useRef<Map<string, { cfi: string; onClick: () => void }>>(null!);
@@ -241,9 +238,9 @@ export function useEpubSourceView(
     drawnCfiRef.current.clear();
   }
 
-  const publish = (view: Option.Option<LiveView>) => {
-    Effect.runSync(Ref.set(viewRef.current, view));
-    dispatchView({ type: "ready", ready: Option.isSome(view) });
+  const publish = (view: LiveView | null) => {
+    viewRef.current = view;
+    dispatchView({ type: "ready", ready: view !== null });
   };
 
   useEffect(() => {
@@ -352,7 +349,7 @@ export function useEpubSourceView(
       dispatchView({ type: "selection", selection: null });
     });
 
-    const load = Effect.gen(function* () {
+    const load = Effect.fn("EpubReader.open")(function* () {
       const buf = yield* Effect.tryPromise(() => file.arrayBuffer());
       yield* Effect.tryPromise(() => book.open(buf, "binary"));
       const metadata = yield* Effect.tryPromise(() => book.loaded.metadata).pipe(
@@ -388,20 +385,22 @@ export function useEpubSourceView(
         }
         throw new Error("No displayable section found in epub");
       });
-      yield* Effect.sync(() => publish(Option.some({ book, rendition })));
+      yield* Effect.sync(() => publish({ book, rendition }));
       yield* Effect.sync(showLocation);
-    }).pipe(
-      Effect.tapError((error) => Effect.sync(() => console.error("failed to open epub", error))),
-      Effect.ignore,
-    );
+    });
 
-    const fiber = Effect.runFork(load);
+    const fiber = Effect.runFork(
+      load().pipe(
+        Effect.tapError((error) => Effect.sync(() => console.error("failed to open epub", error))),
+        Effect.ignore,
+      ),
+    );
 
     return () => {
       clearInterval(poll);
       for (const removeContentKeydown of removeContentKeydowns) removeContentKeydown();
       Effect.runFork(Fiber.interrupt(fiber));
-      publish(Option.none());
+      publish(null);
       rendition.destroy();
       book.destroy();
     };
@@ -410,9 +409,9 @@ export function useEpubSourceView(
   useEffect(() => {
     if (!ready) return;
     const el = containerRef.current;
-    const liveView = Effect.runSync(Ref.get(viewRef.current));
-    if (!el || Option.isNone(liveView)) return;
-    const { rendition } = liveView.value;
+    const liveView = viewRef.current;
+    if (!el || !liveView) return;
+    const { rendition } = liveView;
     let resizeFrame: number | undefined;
     const resizeObserver = new ResizeObserver(() => {
       if (suspendResizeRef.current) return;
@@ -456,10 +455,10 @@ export function useEpubSourceView(
   useEffect(() => {
     if (!ready || suspendResize) return;
     const el = containerRef.current;
-    const liveView = Effect.runSync(Ref.get(viewRef.current));
-    if (!el || Option.isNone(liveView)) return;
+    const liveView = viewRef.current;
+    if (!el || !liveView) return;
     const frame = requestAnimationFrame(() => {
-      liveView.value.rendition.resize(el.clientWidth, el.clientHeight);
+      liveView.rendition.resize(el.clientWidth, el.clientHeight);
       dispatchView({ type: "viewport" });
     });
     return () => cancelAnimationFrame(frame);
@@ -472,26 +471,27 @@ export function useEpubSourceView(
   useEffect(() => {
     if (!ready) return;
     const el = containerRef.current;
-    const liveView = Effect.runSync(Ref.get(viewRef.current));
-    if (!el || Option.isNone(liveView)) return;
-    const { book } = liveView.value;
+    const liveView = viewRef.current;
+    if (!el || !liveView) return;
+    const { book } = liveView;
     const width = el.clientWidth;
     const height = el.clientHeight;
     const pct = fontSize;
     const spread = spreadModeRef.current;
 
     const seq = ++measureSeqRef.current;
+    const measure = Effect.fn("EpubReader.measurePagination")(function* () {
+      if (seq !== measureSeqRef.current) return;
+      const result = yield* Effect.tryPromise(() =>
+        measurePagination(book, width, height, pct, spread, () => seq !== measureSeqRef.current),
+      );
+      if (result && seq === measureSeqRef.current) {
+        yield* Effect.sync(() => dispatchView({ type: "pagination", pagination: result }));
+      }
+    });
     const fiber = Effect.runFork(
-      Effect.gen(function* () {
-        yield* Effect.sleep("250 millis");
-        if (seq !== measureSeqRef.current) return;
-        const result = yield* Effect.tryPromise(() =>
-          measurePagination(book, width, height, pct, spread, () => seq !== measureSeqRef.current),
-        );
-        if (result && seq === measureSeqRef.current) {
-          yield* Effect.sync(() => dispatchView({ type: "pagination", pagination: result }));
-        }
-      }).pipe(
+      measure().pipe(
+        Effect.delay("250 millis"),
         Effect.tapError((error) =>
           Effect.sync(() => console.error("failed to paginate epub", error)),
         ),
@@ -506,13 +506,10 @@ export function useEpubSourceView(
   }, [ready, fontSize, viewportTick, pdfPageLayout, spreadModeRef]);
 
   const onView = useCallback((f: (view: LiveView) => void) => {
-    const view = Effect.runSync(Ref.get(viewRef.current));
-    if (Option.isSome(view)) f(view.value);
+    const view = viewRef.current;
+    if (view) f(view);
   }, []);
-  const currentView = useCallback(
-    () => Option.getOrNull(Effect.runSync(Ref.get(viewRef.current))),
-    [],
-  );
+  const currentView = useCallback(() => viewRef.current, []);
 
   // Apply a live spread change (single ⇄ two-page) without reopening the book.
   // epub.js retains its annotation panes across this relayout, so repaint them
@@ -525,7 +522,7 @@ export function useEpubSourceView(
     }
     if (prevLayoutRef.current === pdfPageLayout) return;
     prevLayoutRef.current = pdfPageLayout;
-    const view = Option.getOrNull(Effect.runSync(Ref.get(viewRef.current)));
+    const view = viewRef.current;
     if (!view) return;
     let cancelled = false;
     void (async () => {
@@ -639,10 +636,7 @@ export function useEpubSourceView(
   );
 
   const reader = useMemo<SourceReader>(
-    () =>
-      makeEpubReader(
-        () => Option.getOrNull(Effect.runSync(Ref.get(viewRef.current)))?.book ?? null,
-      ),
+    () => makeEpubReader(() => viewRef.current?.book ?? null),
     [],
   );
 

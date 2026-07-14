@@ -52,8 +52,8 @@ export class NoteStore {
 
   hasPending = (): boolean => this.state.pendingOps.length > 0;
 
-  hydrate(): Effect.Effect<void> {
-    return loadNotes(this.groupId).pipe(
+  hydrate = Effect.fn("NoteStore.hydrate")({ self: this }, function* (this: NoteStore) {
+    yield* loadNotes(this.groupId).pipe(
       Effect.tap((stored) =>
         Effect.sync(() => {
           if (stored && stored.userId === this.author.id) {
@@ -77,63 +77,78 @@ export class NoteStore {
       ),
       Effect.asVoid,
     );
-  }
+  });
 
-  ingestServer(snapshot: NoteState): Effect.Effect<void> {
-    return Effect.sync(() => {
-      const applied = new Set(snapshot.appliedOpIds ?? []);
-      this.state = {
-        ...this.state,
-        hydrated: true,
-        snapshot,
-        pendingOps: this.state.pendingOps.filter((op) => !applied.has(op.opId)),
-      };
-      this.recompute();
-    }).pipe(Effect.andThen(this.persist()));
-  }
+  ingestServer = Effect.fn("NoteStore.ingestServer")(
+    { self: this },
+    function* (this: NoteStore, snapshot: NoteState) {
+      yield* Effect.sync(() => {
+        const applied = new Set(snapshot.appliedOpIds ?? []);
+        this.state = {
+          ...this.state,
+          hydrated: true,
+          snapshot,
+          pendingOps: this.state.pendingOps.filter((op) => !applied.has(op.opId)),
+        };
+        this.recompute();
+      });
+      yield* this.persist();
+    },
+  );
 
-  enqueue(op: NoteOp): Effect.Effect<void> {
-    return Effect.sync(() => {
+  enqueue = Effect.fn("NoteStore.enqueue")({ self: this }, function* (this: NoteStore, op: NoteOp) {
+    yield* Effect.sync(() => {
       this.state = { ...this.state, pendingOps: [...this.state.pendingOps, op] };
       this.recompute();
-    }).pipe(Effect.andThen(this.persist()));
-  }
-
-  settle(result: ApplyOpsResult): Effect.Effect<void> {
-    return Effect.sync(() => {
-      const applied = new Set(result.appliedOpIds);
-      const rejected = new Set(result.rejectedOps.map((r) => r.opId));
-      const failed = this.state.pendingOps.filter((op) => rejected.has(op.opId));
-      this.state = {
-        ...this.state,
-        pendingOps: this.state.pendingOps.filter(
-          (op) => !applied.has(op.opId) && !rejected.has(op.opId),
-        ),
-        failedOps: [...this.state.failedOps, ...failed],
-      };
-      this.recompute();
-    }).pipe(Effect.andThen(this.persist()));
-  }
-
-  mergeForeign(pendingOps: NoteOp[]): Effect.Effect<void> {
-    return Effect.sync(() => {
-      const seen = new Set(this.state.pendingOps.map((op) => op.opId));
-      const additions = pendingOps.filter((op) => !seen.has(op.opId));
-      if (additions.length === 0) return;
-      this.state = { ...this.state, pendingOps: [...this.state.pendingOps, ...additions] };
-      this.recompute();
     });
-  }
+    yield* this.persist();
+  });
 
-  private persist(): Effect.Effect<void> {
-    const record: StoredNotes = {
-      userId: this.author.id,
-      snapshot: this.state.snapshot,
-      pendingOps: this.state.pendingOps,
-      updatedAt: new Date().toISOString(),
-    };
-    return saveNotes(this.groupId, record).pipe(Effect.ignore);
-  }
+  settle = Effect.fn("NoteStore.settle")(
+    { self: this },
+    function* (this: NoteStore, result: ApplyOpsResult) {
+      yield* Effect.sync(() => {
+        const applied = new Set(result.appliedOpIds);
+        const rejected = new Set(result.rejectedOps.map((rejection) => rejection.opId));
+        const failed = this.state.pendingOps.filter((op) => rejected.has(op.opId));
+        this.state = {
+          ...this.state,
+          pendingOps: this.state.pendingOps.filter(
+            (op) => !applied.has(op.opId) && !rejected.has(op.opId),
+          ),
+          failedOps: [...this.state.failedOps, ...failed],
+        };
+        this.recompute();
+      });
+      yield* this.persist();
+    },
+  );
+
+  mergeForeign = Effect.fn("NoteStore.mergeForeign")(
+    { self: this },
+    function* (this: NoteStore, pendingOps: NoteOp[]) {
+      yield* Effect.sync(() => {
+        const seen = new Set(this.state.pendingOps.map((op) => op.opId));
+        const additions = pendingOps.filter((op) => !seen.has(op.opId));
+        if (additions.length === 0) return;
+        this.state = { ...this.state, pendingOps: [...this.state.pendingOps, ...additions] };
+        this.recompute();
+      });
+    },
+  );
+
+  private readonly persist = Effect.fn("NoteStore.persist")(
+    { self: this },
+    function* (this: NoteStore) {
+      const record: StoredNotes = {
+        userId: this.author.id,
+        snapshot: this.state.snapshot,
+        pendingOps: this.state.pendingOps,
+        updatedAt: new Date().toISOString(),
+      };
+      yield* saveNotes(this.groupId, record).pipe(Effect.ignore);
+    },
+  );
 
   private recompute(): void {
     const { snapshot, pendingOps, failedOps } = this.state;

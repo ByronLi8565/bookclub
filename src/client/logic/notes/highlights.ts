@@ -1,4 +1,4 @@
-import * as Effect from "effect/Effect";
+import type * as Effect from "effect/Effect";
 import type { Highlight, HighlightAnchor, QuoteSelector } from "../../../shared/types/notes.ts";
 
 export type {
@@ -123,18 +123,19 @@ function derivePdfQuote(range: Range): QuoteSelector {
   };
 }
 
-export const captureHighlight = (
+export function captureHighlight(
   sourceId: string,
   anchor: HighlightAnchor,
   range: Range,
-): Effect.Effect<Highlight> =>
-  Effect.sync(() => ({
+): Highlight {
+  return {
     id: crypto.randomUUID(),
     sourceId,
     anchor,
     quote: anchor.kind === "pdf-text" ? derivePdfQuote(range) : deriveQuote(range),
     createdAt: new Date().toISOString(),
-  }));
+  };
+}
 
 export interface SearchMatch {
   anchor: HighlightAnchor;

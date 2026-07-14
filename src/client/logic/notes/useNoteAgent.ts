@@ -1,7 +1,8 @@
 import { useAgent } from "agents/react";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ApplyOpsResult, Note, NoteAuthor } from "../../../shared/types/notes.ts";
 import type { NoteState } from "../../../shared/notes/noteState.ts";
@@ -31,10 +32,14 @@ export interface NoteSync {
   rebindHighlight: (noteId: string, highlightId: string, anchor: HighlightAnchor) => boolean;
 }
 
-class FlushError extends Data.TaggedError("FlushError")<{ readonly cause: unknown }> {}
+class FlushError extends Schema.TaggedErrorClass<FlushError>()("NoteSync.FlushError", {
+  cause: Schema.Defect(),
+}) {}
 
 const retrySchedule = Schedule.exponential("300 millis").pipe(
   Schedule.jittered,
+  // beta.83 does not yet expose Schedule.upTo; intersect with a counter to
+  // bound the exponential schedule to four retries.
   Schedule.both(Schedule.recurs(4)),
 );
 
@@ -66,7 +71,7 @@ export function useNoteAgent(
         }
       : {}),
     onStateUpdate: (state, source) => {
-      if (source === "server" && store) void Effect.runPromise(store.ingestServer(state));
+      if (source === "server" && store) Effect.runFork(store.ingestServer(state));
     },
     onMessage: (event) => {
       const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
@@ -79,7 +84,10 @@ export function useNoteAgent(
 
   useEffect(() => {
     if (!store) return;
-    void Effect.runPromise(store.hydrate());
+    const fiber = Effect.runFork(store.hydrate());
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
   }, [store]);
 
   const flush = (): void => {
@@ -89,29 +97,34 @@ export function useNoteAgent(
     const ops = store.pending();
     if (ops.length === 0) return;
     flushingRef.current = true;
-    const program = Effect.tryPromise({
-      try: () => live.stub.applyOperations(ops) as Promise<ApplyOpsResult>,
-      catch: (cause) => new FlushError({ cause }),
-    }).pipe(
-      Effect.tap((result) => store.settle(result)),
-      Effect.tap((result) =>
-        result.rejectedOps.length > 0
-          ? Effect.sync(() =>
-              spawnToast(
-                "Some changes couldn't sync",
-                "A note was edited or removed by someone else. Your change to it was skipped.",
-                { type: "error", durationMs: 5000 },
-              ),
-            )
-          : Effect.void,
-      ),
+    const sync = Effect.fn("NoteSync.flush")(function* () {
+      const result: ApplyOpsResult = yield* Effect.tryPromise({
+        try: () => live.stub.applyOperations(ops),
+        catch: (cause) => new FlushError({ cause }),
+      });
+      yield* store.settle(result);
+      if (result.rejectedOps.length > 0) {
+        yield* Effect.sync(() =>
+          spawnToast(
+            "Some changes couldn't sync",
+            "A note was edited or removed by someone else. Your change to it was skipped.",
+            { type: "error", durationMs: 5000 },
+          ),
+        );
+      }
+    });
+    const program = sync().pipe(
       Effect.retry(retrySchedule),
+      // Pending operations remain persisted and reconnect will retry them.
       Effect.catch(() => Effect.void),
       Effect.ensuring(Effect.sync(() => (flushingRef.current = false))),
+      Effect.andThen(
+        Effect.sync(() => {
+          if (store.hasPending()) flush();
+        }),
+      ),
     );
-    void Effect.runPromise(program).then(() => {
-      if (store.hasPending()) flush();
-    });
+    Effect.runFork(program);
   };
 
   const view = useSyncExternalStore(
@@ -126,7 +139,7 @@ export function useNoteAgent(
 
   const enqueue = (op: ReturnType<typeof addNoteOp>): boolean => {
     if (!store) return false;
-    void Effect.runPromise(store.enqueue(op)).then(() => flush());
+    Effect.runFork(store.enqueue(op).pipe(Effect.andThen(Effect.sync(flush))));
     return true;
   };
 

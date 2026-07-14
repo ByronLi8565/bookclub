@@ -14,14 +14,13 @@ import {
 import { type NoteViewer } from "../logic/notes/permissions.ts";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
 import { InfoScreen } from "../ui/shared/InfoScreen.tsx";
-import { MobilePager } from "../ui/shared/MobilePager.tsx";
-import { SplitPane } from "../ui/shared/SplitPane.tsx";
 import { spawnToast } from "../ui/shared/toast/toastStore.ts";
 import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
 import { SettingsModal } from "../ui/workspace/SettingsModal.tsx";
+import { WorkspaceLayout, type WorkspaceLayoutMode } from "../ui/workspace/WorkspaceLayout.tsx";
 import {
   useWorkspaceHotkeys,
   useWorkspaceLayout,
@@ -149,25 +148,21 @@ export function Workspace({
     />
   );
   const notePanel = <NotePanel {...session.notePanelProps} />;
-  const content = isMobile ? (
-    <MobilePager
-      pane={pane}
-      onPane={setPane}
-      reader={reader}
-      notes={notePanel}
-      selecting={view.selection !== null}
-      onAddNote={() => view.commitSelection("note")}
-      onHighlight={() => view.commitSelection("highlight")}
-      onChromeHiddenChange={(hidden) => stepChrome(hidden ? "hide" : "show")}
-    />
-  ) : (
-    <SplitPane
-      left={reader}
-      right={notePanel}
-      expandedPane={desktopExpandedPane}
-      onExpandedPaneChange={setDesktopExpandedPane}
-    />
-  );
+  const workspaceMode: WorkspaceLayoutMode = isMobile
+    ? {
+        kind: "mobile",
+        pane,
+        onPane: setPane,
+        selecting: view.selection !== null,
+        onAddNote: () => view.commitSelection("note"),
+        onHighlight: () => view.commitSelection("highlight"),
+        onChromeHiddenChange: (hidden) => stepChrome(hidden ? "hide" : "show"),
+      }
+    : {
+        kind: "desktop",
+        expandedPane: desktopExpandedPane,
+        onExpandedPaneChange: setDesktopExpandedPane,
+      };
 
   return (
     <div
@@ -190,7 +185,7 @@ export function Workspace({
         onShowSettings={() => setActiveModal("settings")}
         onShowInfo={() => setActiveModal("info")}
       />
-      {content}
+      <WorkspaceLayout mode={workspaceMode} reader={reader} notes={notePanel} />
       {activeModal === "group" && (
         <PresenceModal
           groupRef={groupRef}

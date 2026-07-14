@@ -1,20 +1,24 @@
 import * as Schema from "effect/Schema";
 
+type SchemaType<S extends Schema.Top> = S["Type"];
+
 const EpubReadingPosition = Schema.Struct({
-  kind: Schema.Literal("epub"),
+  kind: Schema.tag("epub"),
   cfi: Schema.String,
   percentage: Schema.Number,
 });
 
 const PdfReadingPosition = Schema.Struct({
-  kind: Schema.Literal("pdf"),
+  kind: Schema.tag("pdf"),
   page: Schema.Number,
   scrollRatio: Schema.Number,
   zoom: Schema.Number,
   percentage: Schema.Number,
 });
 
-export const SourceReadingPosition = Schema.Union([EpubReadingPosition, PdfReadingPosition]);
+export const SourceReadingPosition = Schema.Union([EpubReadingPosition, PdfReadingPosition]).pipe(
+  Schema.toTaggedUnion("kind"),
+);
 
 const StoredPositionMeta = {
   groupId: Schema.String,
@@ -23,21 +27,9 @@ const StoredPositionMeta = {
 };
 
 export const StoredReadingPosition = Schema.Union([
-  Schema.Struct({
-    ...StoredPositionMeta,
-    kind: Schema.Literal("epub"),
-    cfi: Schema.String,
-    percentage: Schema.Number,
-  }),
-  Schema.Struct({
-    ...StoredPositionMeta,
-    kind: Schema.Literal("pdf"),
-    page: Schema.Number,
-    scrollRatio: Schema.Number,
-    zoom: Schema.Number,
-    percentage: Schema.Number,
-  }),
-]);
+  Schema.Struct({ ...StoredPositionMeta, ...EpubReadingPosition.fields }),
+  Schema.Struct({ ...StoredPositionMeta, ...PdfReadingPosition.fields }),
+]).pipe(Schema.toTaggedUnion("kind"));
 
 export const SetReadingPositionRequest = Schema.Struct({
   groupId: Schema.String,
@@ -68,6 +60,6 @@ export const ReadingPositionRecord = Schema.Struct({
 
 export const ReadingPositionCache = Schema.Record(Schema.String, ReadingPositionRecord);
 
-export type SourceReadingPosition = Schema.Schema.Type<typeof SourceReadingPosition>;
-export type StoredReadingPosition = Schema.Schema.Type<typeof StoredReadingPosition>;
-export type ReadingPositionRecord = Schema.Schema.Type<typeof ReadingPositionRecord>;
+export type SourceReadingPosition = typeof SourceReadingPosition.Type;
+export type StoredReadingPosition = typeof StoredReadingPosition.Type;
+export interface ReadingPositionRecord extends SchemaType<typeof ReadingPositionRecord> {}

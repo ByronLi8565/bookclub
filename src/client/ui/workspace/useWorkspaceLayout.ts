@@ -192,7 +192,7 @@ export function useWorkspaceHotkeys({
     { enabled: readerKeys },
   );
   useHotkey("Mod+F", () => view.search.openSearch(), { enabled: readerKeys, preventDefault: true });
-  useHotkey("Mod+S", () => void Effect.runPromise(onSyncReadingPosition(sourceId)), {
+  useHotkey("Mod+S", () => Effect.runFork(onSyncReadingPosition(sourceId).pipe(Effect.ignore)), {
     enabled: readerKeys,
     preventDefault: true,
   });

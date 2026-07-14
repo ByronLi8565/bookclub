@@ -1,26 +1,33 @@
-import type {
-  ApplyOpsResult,
-  Highlight,
-  HighlightAnchor,
+import * as Schema from "effect/Schema";
+import {
   Note,
-  NoteAuthor,
-  NoteOp,
-  RejectedOp,
+  type ApplyOpsResult,
+  type Highlight,
+  type HighlightAnchor,
+  type NoteAuthor,
+  type NoteOp,
+  type RejectedOp,
 } from "../types/notes.ts";
 import { NoteRejectionReason } from "../types/notes.ts";
 import { extractReferences } from "../references.ts";
 
-export interface NoteState {
-  notes: Note[];
-  nextSeq: number;
+export const NoteState = Schema.Struct({
+  notes: Schema.mutable(Schema.Array(Note)),
+  nextSeq: Schema.Number,
   // R2 cleanup is retried with the originating local-first operation if the
   // object store is temporarily unavailable.
-  pendingImageDeletes?: string[];
+  pendingImageDeletes: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
   // Bounded ring of op ids the server has already applied. This is *defense in
   // depth* for idempotent replay — the primary guarantee comes from structural
   // checks (a note id that already exists is never re-added; edits are gated by
   // last-write-wins timestamps). Because it is only a safety net, its retention
   // bound can never cause data loss or duplication.
+  appliedOpIds: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+});
+export interface NoteState {
+  notes: Note[];
+  nextSeq: number;
+  pendingImageDeletes?: string[];
   appliedOpIds?: string[];
 }
 

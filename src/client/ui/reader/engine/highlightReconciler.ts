@@ -19,7 +19,7 @@ function sameAnchor(a: HighlightAnchor, b: HighlightAnchor): boolean {
   return false;
 }
 
-export async function updateHighlights(
+export const updateHighlights = Effect.fn("HighlightReconciler.update")(function* (
   desired: DesiredHighlight[],
   drawn: Map<string, HighlightAnchor>,
   deps: {
@@ -28,7 +28,7 @@ export async function updateHighlights(
     rebind: (noteId: string, highlightId: string, anchor: HighlightAnchor) => void;
     isCancelled: () => boolean;
   },
-): Promise<void> {
+) {
   const wanted = new Set(desired.map((d) => d.highlight.id));
   for (const [id] of drawn) {
     if (!wanted.has(id)) {
@@ -38,12 +38,15 @@ export async function updateHighlights(
   }
 
   const missing = desired.filter(({ highlight }) => !drawn.has(highlight.id));
-  const locatedHighlights = await Promise.all(
-    missing.map(async ({ noteId, highlight }) => {
-      if (deps.isCancelled()) return { noteId, highlight, located: null };
-      const located = await Effect.runPromise(deps.reader.locateHighlight(highlight));
-      return { noteId, highlight, located };
-    }),
+  const locatedHighlights = yield* Effect.forEach(
+    missing,
+    ({ noteId, highlight }) => {
+      if (deps.isCancelled()) return Effect.succeed({ noteId, highlight, located: null });
+      return deps.reader
+        .locateHighlight(highlight)
+        .pipe(Effect.map((located) => ({ noteId, highlight, located })));
+    },
+    { concurrency: "unbounded" },
   );
 
   for (const { noteId, highlight, located } of locatedHighlights) {
@@ -55,4 +58,4 @@ export async function updateHighlights(
     deps.painter.draw(highlight.id, located);
     drawn.set(highlight.id, located);
   }
-}
+});

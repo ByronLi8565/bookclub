@@ -42,7 +42,6 @@ import type {
   RenameResult,
   SetRoleResult,
 } from "../state/GroupAgent.ts";
-import type { NoteAgent } from "../state/NoteAgent.ts";
 import { REGISTRY_ID, type GroupRegistry } from "../state/GroupRegistry.ts";
 import { randomId } from "../../shared/crypto.ts";
 import { canonicalEmail, normalizeEmail } from "../../shared/email.ts";
@@ -58,9 +57,8 @@ import {
   tryPromise,
   WorkflowError,
   WorkflowReason,
-  type Async,
   type WorkflowEffect,
-  type WorkflowFailure,
+  type WorkflowFailureError,
   type WorkflowResult,
 } from "./runtime.ts";
 
@@ -73,77 +71,82 @@ const PUBLIC_ID_ATTEMPTS = 10;
 
 const ulid = monotonicFactory();
 
-type Group = Async<GroupAgent>;
-type Registry = Async<GroupRegistry>;
+type Group = DurableObjectStub<GroupAgent>;
+type Registry = DurableObjectStub<GroupRegistry>;
 type ResolvedGroup = { group: Group; summary: GroupSummary };
 
 function randomPublicId(): string {
   return randomId(PUBLIC_ID_LENGTH, PUBLIC_ID_ALPHABET);
 }
 
-const registryFor = (env: Env): WorkflowEffect<Registry> =>
-  Effect.map(
-    tryPromise(() => getAgentByName(env.GroupRegistry, REGISTRY_ID)),
-    (registry) => registry as unknown as Registry,
-  );
+const registryFor = Effect.fn("GroupWorkflows.registryFor")(function* (
+  env: Env,
+): Effect.fn.Return<Registry, WorkflowFailureError> {
+  const registry = yield* tryPromise(() => getAgentByName(env.GroupRegistry, REGISTRY_ID));
+  return registry;
+});
 
-const reservePublicId = (env: Env, groupId: string): WorkflowEffect<string> =>
-  Effect.gen(function* () {
-    const registry = yield* registryFor(env);
-    for (let attempt = 0; attempt < PUBLIC_ID_ATTEMPTS; attempt++) {
-      const publicId = randomPublicId();
-      const reserved = yield* tryPromise(() => registry.reservePublicId(publicId, groupId));
-      if (reserved.ok) return publicId;
-    }
-    return yield* Effect.fail(fail(503, WorkflowError.IdExhausted));
-  });
+const reservePublicId = Effect.fn("GroupWorkflows.reservePublicId")(function* (
+  env: Env,
+  groupId: string,
+): Effect.fn.Return<string, WorkflowFailureError> {
+  const registry = yield* registryFor(env);
+  for (let attempt = 0; attempt < PUBLIC_ID_ATTEMPTS; attempt++) {
+    const publicId = randomPublicId();
+    const reserved = yield* tryPromise(() => registry.reservePublicId(publicId, groupId));
+    if (reserved.ok) return publicId;
+  }
+  return yield* Effect.fail(fail(503, WorkflowError.IdExhausted));
+});
 
-const ensurePublicUrl = (
+const ensurePublicUrl = Effect.fn("GroupWorkflows.ensurePublicUrl")(function* (
   env: Env,
   group: Group,
   summary: GroupSummary,
-): WorkflowEffect<GroupSummary> =>
-  Effect.gen(function* () {
-    if (summary.publicId !== "") return summary;
-    const publicId = yield* reservePublicId(env, summary.groupId);
-    const updated = yield* tryPromise(() => group.assignPublicUrl(publicId));
-    return updated ?? summary;
-  });
+): Effect.fn.Return<GroupSummary, WorkflowFailureError> {
+  if (summary.publicId !== "") return summary;
+  const publicId = yield* reservePublicId(env, summary.groupId);
+  const updated = yield* tryPromise(() => group.assignPublicUrl(publicId));
+  return updated ?? summary;
+});
 
-const resolveGroup = (env: Env, groupRef: string): WorkflowEffect<Group> =>
-  Effect.gen(function* () {
-    const publicId = publicIdFromGroupUrl(groupRef);
-    if (!publicId) return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
-    const registry = yield* registryFor(env);
-    const groupId = yield* tryPromise(() => registry.resolvePublicId(publicId));
-    if (!groupId) return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
-    return (yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId))) as unknown as Group;
-  });
+const resolveGroup = Effect.fn("GroupWorkflows.resolveGroup")(function* (
+  env: Env,
+  groupRef: string,
+): Effect.fn.Return<Group, WorkflowFailureError> {
+  const publicId = publicIdFromGroupUrl(groupRef);
+  if (!publicId) return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
+  const registry = yield* registryFor(env);
+  const groupId = yield* tryPromise(() => registry.resolvePublicId(publicId));
+  if (!groupId) return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
+  return yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId));
+});
 
-const requireGroup = (env: Env, groupRef: string): WorkflowEffect<ResolvedGroup> =>
-  Effect.gen(function* () {
-    const group = yield* resolveGroup(env, groupRef);
-    const summary = yield* tryPromise(() => group.getSummary());
-    if (!summary) return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
-    return { group, summary };
-  });
+const requireGroup = Effect.fn("GroupWorkflows.requireGroup")(function* (
+  env: Env,
+  groupRef: string,
+): Effect.fn.Return<ResolvedGroup, WorkflowFailureError> {
+  const group = yield* resolveGroup(env, groupRef);
+  const summary = yield* tryPromise(() => group.getSummary());
+  if (!summary) return yield* Effect.fail(fail(404, GroupFailureReason.NotFound));
+  return { group, summary };
+});
 
-const requireGroupAction = (
+const requireGroupAction = Effect.fn("GroupWorkflows.requireGroupAction")(function* (
   env: Env,
   me: Identity,
   groupRef: string,
   action: GroupActionType,
   denyError: WorkflowError = GroupFailureReason.Forbidden,
-): WorkflowEffect<ResolvedGroup> =>
-  Effect.gen(function* () {
-    const resolved = yield* requireGroup(env, groupRef);
-    const membership = yield* tryPromise(() => resolved.group.membership(me.id));
-    if (!membership.isMember || membership.role === null) {
-      return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
-    }
-    if (!permits(membership.role, action)) return yield* Effect.fail(fail(403, denyError));
-    return resolved;
-  });
+): Effect.fn.Return<ResolvedGroup, WorkflowFailureError> {
+  const resolved = yield* requireGroup(env, groupRef);
+  const membership = yield* tryPromise(() => resolved.group.membership(me.id));
+  if (!membership.isMember || membership.role === null) {
+    return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
+  }
+  if (!permits(membership.role, action)) return yield* Effect.fail(fail(403, denyError));
+  return resolved;
+});
 
 type FailureReason = GroupFailureReason;
 
@@ -159,18 +162,21 @@ const REASON_STATUS: Record<FailureReason, number> = {
   [GroupFailureReason.BadMember]: 404,
 };
 
-const failReason = (reason: FailureReason): WorkflowFailure => fail(REASON_STATUS[reason], reason);
+const failReason = (reason: FailureReason): WorkflowFailureError =>
+  fail(REASON_STATUS[reason], reason);
 
 // Shared scaffold for the rename/resolve-title endpoints: authenticate, resolve
 // the group, run the caller-supplied agent rename (which also validates its
 // inputs), then map the agent result to a group summary or a failure.
 const titleWorkflow = (
+  operation: string,
   env: Env,
   request: Request,
   groupId: string,
   rename: (group: Group, callerId: string) => WorkflowEffect<RenameResult | RenameGroupResult>,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> =>
   runWorkflow(
+    operation,
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group } = yield* requireGroup(env, groupId);
@@ -185,6 +191,7 @@ export function listMyGroups(
   request: Request,
 ): Promise<WorkflowResult<{ groups: GroupSummary[] }>> {
   return runWorkflow(
+    "GroupWorkflows.listMyGroups",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const auth = yield* tryPromise(() => getAgentByName(env.AuthAgent, me.email));
@@ -193,9 +200,7 @@ export function listMyGroups(
         groupIds,
         (id) =>
           Effect.gen(function* () {
-            const group = (yield* tryPromise(() =>
-              getAgentByName(env.GroupAgent, id),
-            )) as unknown as Group;
+            const group = yield* tryPromise(() => getAgentByName(env.GroupAgent, id));
             const summary = yield* tryPromise(() => group.getSummary());
             return summary ? yield* ensurePublicUrl(env, group, summary) : null;
           }),
@@ -212,6 +217,7 @@ export function createGroup(
   rawDisplayName: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
   return runWorkflow(
+    "GroupWorkflows.createGroup",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof rawDisplayName !== "string") {
@@ -226,9 +232,7 @@ export function createGroup(
       }
       const groupId = ulid();
       const publicId = yield* reservePublicId(env, groupId);
-      const group = (yield* tryPromise(() =>
-        getAgentByName(env.GroupAgent, groupId),
-      )) as unknown as Group;
+      const group = yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId));
       const result = yield* tryPromise(() => group.create(displayName, publicId, me));
       if (!result.ok) return yield* Effect.fail(failReason(result.reason));
       return { group: result.summary };
@@ -244,6 +248,7 @@ export function resolveGroupView(
   WorkflowResult<{ group: GroupSummary; membership: Membership; members: RosterEntry[] }>
 > {
   return runWorkflow(
+    "GroupWorkflows.resolveGroupView",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, groupId);
@@ -273,6 +278,7 @@ export function inviteLink(
   rotate: boolean,
 ): Promise<WorkflowResult<{ token: string; link: string }>> {
   return runWorkflow(
+    "GroupWorkflows.inviteLink",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, groupId);
@@ -295,13 +301,18 @@ export function renameGroupTitle(
   groupId: string,
   title: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
-  return titleWorkflow(env, request, groupId, (group, callerId) =>
-    Effect.gen(function* () {
-      if (typeof title !== "string") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
-      }
-      return yield* tryPromise(() => group.renameGroup(callerId, title));
-    }),
+  return titleWorkflow(
+    "GroupWorkflows.renameGroupTitle",
+    env,
+    request,
+    groupId,
+    (group, callerId) =>
+      Effect.gen(function* () {
+        if (typeof title !== "string") {
+          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        }
+        return yield* tryPromise(() => group.renameGroup(callerId, title));
+      }),
   );
 }
 
@@ -312,7 +323,7 @@ export function renameBookTitle(
   sourceId: unknown,
   title: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
-  return titleWorkflow(env, request, groupId, (group, callerId) =>
+  return titleWorkflow("GroupWorkflows.renameBookTitle", env, request, groupId, (group, callerId) =>
     Effect.gen(function* () {
       if (typeof sourceId !== "string" || typeof title !== "string") {
         return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
@@ -329,13 +340,18 @@ export function resolveBookTitle(
   sourceId: unknown,
   title: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
-  return titleWorkflow(env, request, groupId, (group, callerId) =>
-    Effect.gen(function* () {
-      if (typeof sourceId !== "string" || typeof title !== "string") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
-      }
-      return yield* tryPromise(() => group.resolveBookTitle(callerId, sourceId, title));
-    }),
+  return titleWorkflow(
+    "GroupWorkflows.resolveBookTitle",
+    env,
+    request,
+    groupId,
+    (group, callerId) =>
+      Effect.gen(function* () {
+        if (typeof sourceId !== "string" || typeof title !== "string") {
+          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        }
+        return yield* tryPromise(() => group.resolveBookTitle(callerId, sourceId, title));
+      }),
   );
 }
 
@@ -346,6 +362,7 @@ export function inviteByEmail(
   rawEmail: unknown,
 ): Promise<WorkflowResult<null>> {
   return runWorkflow(
+    "GroupWorkflows.inviteByEmail",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const email = normalizeEmail(rawEmail);
@@ -374,6 +391,7 @@ export function redeemInvite(
   token: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
   return runWorkflow(
+    "GroupWorkflows.redeemInvite",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof token !== "string" || token === "")
@@ -392,6 +410,7 @@ export function uploadSource(
   groupId: string,
 ): Promise<WorkflowResult<{ hash: string }>> {
   return runWorkflow(
+    "GroupWorkflows.uploadSource",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group } = yield* requireGroupAction(env, me, groupId, GroupAction.UploadBook);
@@ -441,6 +460,7 @@ export function changeMemberRole(
   rawRole: unknown,
 ): Promise<WorkflowResult<{ members: RosterEntry[] }>> {
   return runWorkflow(
+    "GroupWorkflows.changeMemberRole",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (!isGroupRole(rawRole)) {
@@ -451,9 +471,7 @@ export function changeMemberRole(
         group.setMemberRole(me.id, memberId, rawRole),
       );
       if (!result.ok) return yield* Effect.fail(failReason(result.reason));
-      const notes = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, summary.groupId),
-      )) as unknown as Async<NoteAgent>;
+      const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, summary.groupId));
       yield* tryPromise(() => notes.updateMemberRole(memberId, rawRole));
       return { members: result.roster };
     }),
@@ -467,6 +485,7 @@ export function deleteBook(
   sourceId: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
   return runWorkflow(
+    "GroupWorkflows.deleteBook",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof sourceId !== "string") {
@@ -477,9 +496,7 @@ export function deleteBook(
         group.deleteSource(me.id, sourceId),
       );
       if (!result.ok) return yield* Effect.fail(failReason(result.reason));
-      const notes = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, summary.groupId),
-      )) as unknown as Async<NoteAgent>;
+      const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, summary.groupId));
       yield* tryPromise(() => notes.removeSource(sourceId));
       return { group: result.summary };
     }),
@@ -494,6 +511,7 @@ export function updateBookMetadata(
   body: unknown,
 ): Promise<WorkflowResult<{ group: GroupSummary }>> {
   return runWorkflow(
+    "GroupWorkflows.updateBookMetadata",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (!body || typeof body !== "object") {
@@ -537,6 +555,7 @@ export function deleteGroup(
   groupId: string,
 ): Promise<WorkflowResult<null>> {
   return runWorkflow(
+    "GroupWorkflows.deleteGroup",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroup(env, groupId);
@@ -556,9 +575,7 @@ export function deleteGroup(
           }),
         { concurrency: "unbounded", discard: true },
       );
-      const notes = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, summary.groupId),
-      )) as unknown as Async<NoteAgent>;
+      const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, summary.groupId));
       yield* tryPromise(() => notes.clear());
       yield* tryPromise(() => deleteImagesForScope(env, summary.groupId));
       return null;
@@ -573,6 +590,7 @@ export function fetchSource(
   sourceId?: string | null,
 ): Promise<WorkflowResult<{ hash: string; contentType: string; object: R2ObjectBody }>> {
   return runWorkflow(
+    "GroupWorkflows.fetchSource",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ReadBook);
@@ -591,6 +609,7 @@ export function uploadImage(
   groupId: string,
 ): Promise<WorkflowResult<{ id: string; contentType: string; size: number }>> {
   return runWorkflow(
+    "GroupWorkflows.uploadImage",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.UploadNoteImage);
@@ -622,6 +641,7 @@ export function listGroupImages(
   groupId: string,
 ): Promise<WorkflowResult<{ images: GroupImageSummary[]; totalSize: number }>> {
   return runWorkflow(
+    "GroupWorkflows.listGroupImages",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ViewClub);
@@ -650,6 +670,7 @@ export function deleteImageUpload(
   imageId: string,
 ): Promise<WorkflowResult<null>> {
   return runWorkflow(
+    "GroupWorkflows.deleteImageUpload",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { group, summary } = yield* requireGroupAction(
@@ -663,9 +684,7 @@ export function deleteImageUpload(
       }
       const object = yield* tryPromise(() => env.IMAGES.head(imageKey(summary.groupId, imageId)));
       if (!object) return null;
-      const notes = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, summary.groupId),
-      )) as unknown as Async<NoteAgent>;
+      const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, summary.groupId));
       const membership = yield* tryPromise(() => group.membership(me.id));
       if (membership.role && permits(membership.role, GroupAction.DeleteAnyImage)) {
         yield* tryPromise(() => notes.deleteImage(imageId));
@@ -689,6 +708,7 @@ export function fetchImage(
   imageId: string,
 ): Promise<WorkflowResult<{ object: R2ObjectBody; contentType: string }>> {
   return runWorkflow(
+    "GroupWorkflows.fetchImage",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ViewClub);
@@ -711,12 +731,11 @@ export function exportGroupBackup(
   groupId: string,
 ): Promise<WorkflowResult<{ bytes: Uint8Array; filename: string }>> {
   return runWorkflow(
+    "GroupWorkflows.exportGroupBackup",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ManageBackups);
-      const notesAgent = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, summary.groupId),
-      )) as unknown as Async<NoteAgent>;
+      const notesAgent = yield* tryPromise(() => getAgentByName(env.NoteAgent, summary.groupId));
       const state = yield* tryPromise(() => notesAgent.exportState());
       const imageIds = new Set(state.notes.flatMap((note) => [...noteImageIds(note.body)]));
       const images = yield* Effect.forEach(
@@ -765,6 +784,7 @@ export function restoreGroupBackup(
   groupId: string,
 ): Promise<WorkflowResult<{ notes: number; images: number; createdAt: string }>> {
   return runWorkflow(
+    "GroupWorkflows.restoreGroupBackup",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ManageBackups);
@@ -803,9 +823,7 @@ export function restoreGroupBackup(
           ),
         { concurrency: 8, discard: true },
       );
-      const notesAgent = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, summary.groupId),
-      )) as unknown as Async<NoteAgent>;
+      const notesAgent = yield* tryPromise(() => getAgentByName(env.NoteAgent, summary.groupId));
       yield* tryPromise(() =>
         notesAgent.importState({
           notes: backup.notes,

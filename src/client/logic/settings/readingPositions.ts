@@ -1,6 +1,5 @@
 import * as Effect from "effect/Effect";
 import type { SourceKind } from "../../../shared/types/sources.ts";
-import { apiFetch } from "../net/api.ts";
 import { decode } from "../../../shared/schema.ts";
 import {
   ReadingPositionCache,
@@ -10,6 +9,7 @@ import {
   type StoredReadingPosition,
 } from "../../../shared/types/readingPositions.ts";
 import { readVersionedLocal, writeLocal } from "../storage.ts";
+import { ApiRequestError, decodeJson, request } from "../net/request.ts";
 
 const STORAGE_KEY = "bookclub.readingPositions:v1";
 const LEGACY_STORAGE_KEY = "bookclub.readingPositions";
@@ -147,50 +147,52 @@ function mergeServerReadingPosition(
   });
 }
 
-export function fetchServerReadingPosition(
+export const fetchServerReadingPosition = Effect.fn("ReadingPositions.fetch")(function* (
   userId: string,
   groupId: string,
   sourceId: string,
-): Effect.Effect<StoredReadingPosition | null> {
-  return Effect.tryPromise(async () => {
-    const response = await apiFetch(
-      `/me/reading-position?groupId=${encodeURIComponent(groupId)}&sourceId=${encodeURIComponent(sourceId)}`,
-    );
-    if (!response.ok) throw new Error(`http_${response.status}`);
-    const body = decode(ReadingPositionResponse, await response.json());
-    if (!body) throw new Error("bad_response");
-    if (body.position) mergeServerReadingPosition(userId, body.position);
-    return body.position;
-  });
-}
+): Effect.fn.Return<StoredReadingPosition | null, ApiRequestError> {
+  const response = yield* request(
+    "ReadingPositions.fetch",
+    `/me/reading-position?groupId=${encodeURIComponent(groupId)}&sourceId=${encodeURIComponent(sourceId)}`,
+  );
+  const body = yield* decodeJson("ReadingPositions.decodeFetch", response, ReadingPositionResponse);
+  if (body.position) mergeServerReadingPosition(userId, body.position);
+  return body.position;
+});
 
-export function syncReadingPosition(
+export const syncReadingPosition = Effect.fn("ReadingPositions.sync")(function* (
   userId: string,
   groupId: string,
   sourceId: string,
   force = false,
-): Effect.Effect<boolean, unknown> {
-  return Effect.gen(function* () {
-    const record = getRecord(userId, groupId, sourceId);
-    if (!record || (!force && !needsReadingPositionSync(record))) return false;
-    if (!force && record.sync.status === "syncing") return false;
-    markSyncing(userId, groupId, sourceId, record);
-    const result = yield* Effect.tryPromise(async () => {
-      const response = await apiFetch("/me/reading-position", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ groupId, sourceId, position: record.position }),
-      });
-      if (!response.ok) throw new Error(`http_${response.status}`);
-      const body = decode(ReadingPositionResponse, await response.json());
-      if (!body?.position) throw new Error("bad_response");
-      return body.position;
-    }).pipe(
-      Effect.tapError((error) =>
-        Effect.sync(() => markFailed(userId, groupId, sourceId, record, String(error))),
-      ),
-    );
-    markSynced(userId, groupId, sourceId, result);
-    return true;
-  });
-}
+): Effect.fn.Return<boolean, ApiRequestError> {
+  const record = getRecord(userId, groupId, sourceId);
+  if (!record || (!force && !needsReadingPositionSync(record))) return false;
+  if (!force && record.sync.status === "syncing") return false;
+  markSyncing(userId, groupId, sourceId, record);
+  const result = yield* request("ReadingPositions.sync", "/me/reading-position", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ groupId, sourceId, position: record.position }),
+  }).pipe(
+    Effect.flatMap((response) =>
+      decodeJson("ReadingPositions.decodeSync", response, ReadingPositionResponse),
+    ),
+    Effect.flatMap((body) =>
+      body.position
+        ? Effect.succeed(body.position)
+        : Effect.fail(
+            new ApiRequestError({
+              operation: "ReadingPositions.decodeSync",
+              cause: new Error("missing_position"),
+            }),
+          ),
+    ),
+    Effect.tapError((error) =>
+      Effect.sync(() => markFailed(userId, groupId, sourceId, record, String(error))),
+    ),
+  );
+  markSynced(userId, groupId, sourceId, result);
+  return true;
+});

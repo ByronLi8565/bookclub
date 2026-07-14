@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import * as Effect from "effect/Effect";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { JSDOM } from "jsdom";
 import { captureHighlight, epubAnchor, pdfAnchor } from "../client/logic/notes/highlights.ts";
@@ -40,7 +39,7 @@ describe("PDF text extraction", () => {
     );
   });
 
-  it("inserts spaces between selected PDF text layer spans", async () => {
+  it("inserts spaces between selected PDF text layer spans", () => {
     const dom = new JSDOM(
       `<body><div><span>What is</span><span>the chief element</span></div></body>`,
     );
@@ -50,19 +49,19 @@ describe("PDF text extraction", () => {
     range.setStart(first, 0);
     range.setEnd(second, "the chief element".length);
 
-    const highlight = await Effect.runPromise(captureHighlight("book", pdfAnchor(1, []), range));
+    const highlight = captureHighlight("book", pdfAnchor(1, []), range);
 
     expect(highlight.quote.exact).toBe("What is the chief element");
   });
 
-  it("preserves ordinary same-node selections", async () => {
+  it("preserves ordinary same-node selections", () => {
     const dom = new JSDOM(`<body><p>What is the chief element</p></body>`);
     const range = dom.window.document.createRange();
     const text = dom.window.document.querySelector("p")!.firstChild!;
     range.setStart(text, 5);
     range.setEnd(text, 17);
 
-    const highlight = await Effect.runPromise(captureHighlight("book", pdfAnchor(1, []), range));
+    const highlight = captureHighlight("book", pdfAnchor(1, []), range);
 
     expect(highlight.quote.exact).toBe("is the chief");
   });
@@ -89,7 +88,7 @@ describe("PDF text extraction", () => {
     expect(formRect?.width).toBeCloseTo((2 / 4) * 0.04);
   });
 
-  it("keeps EPUB quote extraction unchanged", async () => {
+  it("keeps EPUB quote extraction unchanged", () => {
     const dom = new JSDOM(
       `<body><div><span>What is</span><span>the chief element</span></div></body>`,
     );
@@ -99,9 +98,7 @@ describe("PDF text extraction", () => {
     range.setStart(first, 0);
     range.setEnd(second, "the chief element".length);
 
-    const highlight = await Effect.runPromise(
-      captureHighlight("book", epubAnchor("epubcfi(/6/2)"), range),
-    );
+    const highlight = captureHighlight("book", epubAnchor("epubcfi(/6/2)"), range);
 
     expect(highlight.quote.exact).toBe("What isthe chief element");
   });

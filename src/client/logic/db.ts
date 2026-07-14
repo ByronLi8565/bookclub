@@ -1,5 +1,5 @@
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 // IndexedDB upgrades run cumulatively; preserve existing stores when bumping DB_VERSION.
 const DB_NAME = "bookclub";
@@ -8,10 +8,10 @@ const DB_VERSION = 2;
 export const BOOKS_STORE = "books";
 export const NOTES_STORE = "notes";
 
-export class PersistError extends Data.TaggedError("PersistError")<{
-  readonly op: string;
-  readonly cause: unknown;
-}> {}
+export class PersistError extends Schema.TaggedErrorClass<PersistError>()(
+  "IndexedDb.PersistError",
+  { operation: Schema.String, cause: Schema.Defect() },
+) {}
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -33,33 +33,36 @@ function open(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function request<T>(
+const request = Effect.fn("IndexedDb.request")(function* <T>(
   store: string,
   mode: IDBTransactionMode,
-  run: (s: IDBObjectStore) => IDBRequest,
-): Effect.Effect<T, PersistError> {
-  return Effect.tryPromise({
+  run: (store: IDBObjectStore) => IDBRequest,
+): Effect.fn.Return<T, PersistError> {
+  return yield* Effect.tryPromise({
     try: async () => {
       const db = await open();
       return await new Promise<T>((resolve, reject) => {
         const tx = db.transaction(store, mode);
-        const req = run(tx.objectStore(store));
-        req.addEventListener("success", () => resolve(req.result as T));
-        req.addEventListener("error", () => reject(req.error));
+        const dbRequest = run(tx.objectStore(store));
+        dbRequest.addEventListener("success", () => resolve(dbRequest.result));
+        dbRequest.addEventListener("error", () => reject(dbRequest.error));
       });
     },
-    catch: (cause) => new PersistError({ op: `${mode}:${store}`, cause }),
+    catch: (cause) => new PersistError({ operation: `IndexedDb.${mode}.${store}`, cause }),
   });
-}
+});
 
-export function idbGet<T>(store: string, key: string): Effect.Effect<T | undefined, PersistError> {
-  return request<T | undefined>(store, "readonly", (s) => s.get(key));
-}
+export const idbGet = Effect.fn("IndexedDb.get")(function* <T>(
+  store: string,
+  key: string,
+): Effect.fn.Return<T | undefined, PersistError> {
+  return yield* request<T | undefined>(store, "readonly", (objectStore) => objectStore.get(key));
+});
 
-export function idbPut(
+export const idbPut = Effect.fn("IndexedDb.put")(function* (
   store: string,
   key: string,
   value: unknown,
-): Effect.Effect<void, PersistError> {
-  return request<IDBValidKey>(store, "readwrite", (s) => s.put(value, key)).pipe(Effect.asVoid);
-}
+): Effect.fn.Return<void, PersistError> {
+  yield* request<IDBValidKey>(store, "readwrite", (objectStore) => objectStore.put(value, key));
+});

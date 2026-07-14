@@ -1,8 +1,72 @@
-export interface NoteAuthor {
-  id: string;
-  name: string;
+import * as Schema from "effect/Schema";
+
+type SchemaType<S extends Schema.Top> = S["Type"];
+
+export const NoteAuthor = Schema.Struct({ id: Schema.String, name: Schema.String });
+export interface NoteAuthor extends SchemaType<typeof NoteAuthor> {}
+
+// The one tag the app gives special meaning: a highlight is a note whose body
+// is just the quoted passage, surfaced with a "highlighted" verb instead of
+// "posted". Kept as a tag (not a distinct note kind) so it flows through the
+// existing note machinery unchanged.
+export const HIGHLIGHT_TAG = "highlight";
+
+export function isHighlight(note: Note): boolean {
+  return note.tags?.includes(HIGHLIGHT_TAG) ?? false;
 }
 
+export const PdfRect = Schema.Struct({
+  x: Schema.Number,
+  y: Schema.Number,
+  width: Schema.Number,
+  height: Schema.Number,
+});
+export interface PdfRect extends SchemaType<typeof PdfRect> {}
+
+const EpubHighlightAnchor = Schema.Struct({ kind: Schema.tag("epub-cfi"), value: Schema.String });
+const PdfHighlightAnchor = Schema.Struct({
+  kind: Schema.tag("pdf-text"),
+  page: Schema.Number,
+  rects: Schema.mutable(Schema.Array(PdfRect)),
+});
+export const HighlightAnchor = Schema.Union([EpubHighlightAnchor, PdfHighlightAnchor]).pipe(
+  Schema.toTaggedUnion("kind"),
+);
+export type HighlightAnchor = typeof HighlightAnchor.Type;
+
+export const QuoteSelector = Schema.Struct({
+  type: Schema.tag("TextQuoteSelector"),
+  exact: Schema.String,
+  prefix: Schema.String,
+  suffix: Schema.String,
+});
+export interface QuoteSelector extends SchemaType<typeof QuoteSelector> {}
+
+export const Highlight = Schema.Struct({
+  id: Schema.String,
+  sourceId: Schema.String,
+  anchor: HighlightAnchor,
+  quote: QuoteSelector,
+  createdAt: Schema.String,
+});
+export interface Highlight extends SchemaType<typeof Highlight> {}
+
+export const Note = Schema.Struct({
+  id: Schema.String,
+  seq: Schema.Number,
+  sourceId: Schema.String,
+  author: NoteAuthor,
+  parent: Schema.NullOr(Schema.String),
+  body: Schema.String,
+  highlights: Schema.mutable(Schema.Array(Highlight)),
+  createdAt: Schema.String,
+  editedAt: Schema.NullOr(Schema.String),
+  deletedAt: Schema.NullOr(Schema.String),
+  version: Schema.Number,
+  // Free-form markers on a note. Optional so notes persisted before tags
+  // existed (and the DO snapshots holding them) keep deserializing untouched.
+  tags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+});
 export interface Note {
   id: string;
   seq: number;
@@ -15,45 +79,7 @@ export interface Note {
   editedAt: string | null;
   deletedAt: string | null;
   version: number;
-  // Free-form markers on a note. Optional so notes persisted before tags
-  // existed (and the DO snapshots holding them) keep deserializing untouched.
   tags?: string[];
-}
-
-// The one tag the app gives special meaning: a highlight is a note whose body
-// is just the quoted passage, surfaced with a "highlighted" verb instead of
-// "posted". Kept as a tag (not a distinct note kind) so it flows through the
-// existing note machinery unchanged.
-export const HIGHLIGHT_TAG = "highlight";
-
-export function isHighlight(note: Note): boolean {
-  return note.tags?.includes(HIGHLIGHT_TAG) ?? false;
-}
-
-export interface PdfRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export type HighlightAnchor =
-  | { kind: "epub-cfi"; value: string }
-  | { kind: "pdf-text"; page: number; rects: PdfRect[] };
-
-export interface QuoteSelector {
-  type: "TextQuoteSelector";
-  exact: string;
-  prefix: string;
-  suffix: string;
-}
-
-export interface Highlight {
-  id: string;
-  sourceId: string;
-  anchor: HighlightAnchor;
-  quote: QuoteSelector;
-  createdAt: string;
 }
 
 export function epubAnchor(value: string): HighlightAnchor {
@@ -69,42 +95,60 @@ export function pdfAnchor(page: number, rects: PdfRect[]): HighlightAnchor {
 // acknowledges it — that is what makes replies/edits/deletes safe to author and
 // replay while disconnected. `seq` is never carried here: it stays
 // server-authoritative and is assigned when the op is first applied.
-export type NoteOp =
-  | {
-      opId: string;
-      kind: "add";
-      noteId: string;
-      sourceId: string;
-      body: string;
-      highlights: Highlight[];
-      createdAt: string;
-      tags?: string[];
-    }
-  | {
-      opId: string;
-      kind: "reply";
-      noteId: string;
-      sourceId: string;
-      parent: string;
-      body: string;
-      createdAt: string;
-    }
-  | { opId: string; kind: "edit"; noteId: string; body: string; at: string }
-  | { opId: string; kind: "remove"; noteId: string; at: string }
-  | { opId: string; kind: "rebind"; noteId: string; highlightId: string; anchor: HighlightAnchor };
+const NoteOpFields = { opId: Schema.String, noteId: Schema.String };
+export const NoteOp = Schema.Union([
+  Schema.Struct({
+    ...NoteOpFields,
+    kind: Schema.tag("add"),
+    sourceId: Schema.String,
+    body: Schema.String,
+    highlights: Schema.mutable(Schema.Array(Highlight)),
+    createdAt: Schema.String,
+    tags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+  }),
+  Schema.Struct({
+    ...NoteOpFields,
+    kind: Schema.tag("reply"),
+    sourceId: Schema.String,
+    parent: Schema.String,
+    body: Schema.String,
+    createdAt: Schema.String,
+  }),
+  Schema.Struct({
+    ...NoteOpFields,
+    kind: Schema.tag("edit"),
+    body: Schema.String,
+    at: Schema.String,
+  }),
+  Schema.Struct({ ...NoteOpFields, kind: Schema.tag("remove"), at: Schema.String }),
+  Schema.Struct({
+    ...NoteOpFields,
+    kind: Schema.tag("rebind"),
+    highlightId: Schema.String,
+    anchor: HighlightAnchor,
+  }),
+]).pipe(Schema.toTaggedUnion("kind"));
+export type NoteOp = typeof NoteOp.Type;
 
 export const NoteRejectionReason = { Forbidden: "forbidden", Gone: "gone" } as const;
 
 export type NoteRejectionReason = (typeof NoteRejectionReason)[keyof typeof NoteRejectionReason];
 
-export interface RejectedOp {
-  opId: string;
+const NoteRejectionReasonSchema = Schema.Union([
+  Schema.Literal(NoteRejectionReason.Forbidden),
+  Schema.Literal(NoteRejectionReason.Gone),
+]);
+
+export const RejectedOp = Schema.Struct({
+  opId: Schema.String,
   // Why the server refused the op. These are surfaced to the author rather than
   // silently dropped, so authored content never disappears without explanation.
-  reason: NoteRejectionReason;
-}
+  reason: NoteRejectionReasonSchema,
+});
+export interface RejectedOp extends SchemaType<typeof RejectedOp> {}
 
-export interface ApplyOpsResult {
-  appliedOpIds: string[];
-  rejectedOps: RejectedOp[];
-}
+export const ApplyOpsResult = Schema.Struct({
+  appliedOpIds: Schema.mutable(Schema.Array(Schema.String)),
+  rejectedOps: Schema.mutable(Schema.Array(RejectedOp)),
+});
+export interface ApplyOpsResult extends SchemaType<typeof ApplyOpsResult> {}

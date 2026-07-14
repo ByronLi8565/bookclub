@@ -1,8 +1,15 @@
 import * as Effect from "effect/Effect";
-import type { NoteOp } from "../../../shared/types/notes.ts";
-import type { NoteState } from "../../../shared/notes/noteState.ts";
-import { idbGet, idbPut, NOTES_STORE, type PersistError } from "../db.ts";
+import * as Schema from "effect/Schema";
+import { NoteOp } from "../../../shared/types/notes.ts";
+import { NoteState } from "../../../shared/notes/noteState.ts";
+import { idbGet, idbPut, NOTES_STORE, PersistError } from "../db.ts";
 
+export const StoredNotes = Schema.Struct({
+  userId: Schema.String,
+  snapshot: NoteState,
+  pendingOps: Schema.mutable(Schema.Array(NoteOp)),
+  updatedAt: Schema.String,
+});
 export interface StoredNotes {
   userId: string;
   snapshot: NoteState;
@@ -10,10 +17,19 @@ export interface StoredNotes {
   updatedAt: string;
 }
 
-export function loadNotes(groupId: string): Effect.Effect<StoredNotes | null, PersistError> {
-  return idbGet<StoredNotes>(NOTES_STORE, groupId).pipe(Effect.map((v) => v ?? null));
-}
+export const loadNotes = Effect.fn("NotesCache.load")(function* (
+  groupId: string,
+): Effect.fn.Return<StoredNotes | null, PersistError> {
+  const value = yield* idbGet<unknown>(NOTES_STORE, groupId);
+  if (value === undefined) return null;
+  return yield* Schema.decodeUnknownEffect(StoredNotes)(value).pipe(
+    Effect.mapError((cause) => new PersistError({ operation: "NotesCache.decode", cause })),
+  );
+});
 
-export function saveNotes(groupId: string, value: StoredNotes): Effect.Effect<void, PersistError> {
-  return idbPut(NOTES_STORE, groupId, value);
-}
+export const saveNotes = Effect.fn("NotesCache.save")(function* (
+  groupId: string,
+  value: StoredNotes,
+): Effect.fn.Return<void, PersistError> {
+  yield* idbPut(NOTES_STORE, groupId, value);
+});

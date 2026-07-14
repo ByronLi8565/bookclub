@@ -106,13 +106,15 @@ export function useReaderSearch({
       }
       setSearching(true);
       debounceRef.current = window.setTimeout(() => {
-        const run = Effect.gen(function* () {
+        const run = Effect.fn("ReaderSearch.search")(function* () {
           const found = yield* reader.search(q);
           setMatches(found);
           setSearching(false);
           showMatch(found, 0);
-        }).pipe(Effect.catchCause(() => Effect.sync(() => setSearching(false))));
-        fiberRef.current = Effect.runFork(run);
+        });
+        fiberRef.current = Effect.runFork(
+          run().pipe(Effect.catch(() => Effect.sync(() => setSearching(false)))),
+        );
       }, DEBOUNCE_MS);
     },
     [reader, cancelPending, clearPaint, showMatch],

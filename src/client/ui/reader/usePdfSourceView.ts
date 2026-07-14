@@ -1,4 +1,3 @@
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import {
@@ -15,6 +14,7 @@ import {
   pdfAnchor,
   popupPoint,
   scanText,
+  type Highlight,
   type HighlightAnchor,
   type PdfRect,
   type SearchMatch,
@@ -947,47 +947,47 @@ export function usePdfSourceView(
     wrapRef.current = wrap;
     panesRef.current = [];
 
+    const open = Effect.fn("PdfReader.open")(function* () {
+      const doc = yield* Effect.tryPromise(async () => {
+        const cached = renderCacheKey ? getCachedPdfDocument(renderCacheKey) : null;
+        if (cached) {
+          docRef.current = cached;
+          return cached;
+        }
+        const buffer = await file.arrayBuffer();
+        const loaded = await loadPdf(buffer);
+        if (renderCacheKey) putCachedPdfDocument(renderCacheKey, loaded, buffer.byteLength);
+        docRef.current = loaded;
+        return loaded;
+      });
+      const meta = yield* Effect.tryPromise(() => doc.getMetadata().catch(() => null));
+      const info = meta?.info as { Title?: string } | undefined;
+      dispatchView({ type: "title", title: info?.Title?.trim() || null });
+      if (initialPdfPage !== null) {
+        pageRef.current = Math.min(Math.max(1, pageRef.current), doc.numPages);
+      }
+      // Land on the saved page (already applied to pageRef above), but always
+      // frame it to fit the viewport — opening or swapping books resets the
+      // zoom to fit-to-page rather than restoring a stale zoom/scroll. We
+      // compute the fit zoom *before* the first raster (it only needs page
+      // geometry, no canvas) and render once at that zoom; previously we
+      // rendered at 100% and then re-rendered at the fit zoom, paying for two
+      // full canvas paints + text-layer builds on every open — costly on
+      // mobile. A scanned page (no text) yields a null fit and opens at 100%.
+      spreadActiveRef.current = computeSpreadEnabled();
+      const fitZoom = yield* Effect.tryPromise(() => computeFitZoomRef.current());
+      if (fitZoom !== null) {
+        setFontSizeState(fitZoom);
+        fontSizeRef.current = fitZoom;
+      }
+      yield* Effect.tryPromise(() => renderSpread());
+      yield* Effect.tryPromise(() => scrollToTextTop());
+      dispatchView({ type: "ready", ready: true });
+    });
     const fiber = Effect.runFork(
-      Effect.gen(function* () {
-        const doc = yield* Effect.promise(async () => {
-          const cached = renderCacheKey ? getCachedPdfDocument(renderCacheKey) : null;
-          if (cached) {
-            docRef.current = cached;
-            return cached;
-          }
-          const buffer = await file.arrayBuffer();
-          const loaded = await loadPdf(buffer);
-          if (renderCacheKey) putCachedPdfDocument(renderCacheKey, loaded, buffer.byteLength);
-          docRef.current = loaded;
-          return loaded;
-        });
-        const meta = yield* Effect.promise(() => doc.getMetadata().catch(() => null));
-        const info = meta?.info as { Title?: string } | undefined;
-        dispatchView({ type: "title", title: info?.Title?.trim() || null });
-        if (initialPdfPage !== null) {
-          pageRef.current = Math.min(Math.max(1, pageRef.current), doc.numPages);
-        }
-        // Land on the saved page (already applied to pageRef above), but always
-        // frame it to fit the viewport — opening or swapping books resets the
-        // zoom to fit-to-page rather than restoring a stale zoom/scroll. We
-        // compute the fit zoom *before* the first raster (it only needs page
-        // geometry, no canvas) and render once at that zoom; previously we
-        // rendered at 100% and then re-rendered at the fit zoom, paying for two
-        // full canvas paints + text-layer builds on every open — costly on
-        // mobile. A scanned page (no text) yields a null fit and opens at 100%.
-        spreadActiveRef.current = computeSpreadEnabled();
-        const fitZoom = yield* Effect.promise(() => computeFitZoomRef.current());
-        if (fitZoom !== null) {
-          setFontSizeState(fitZoom);
-          fontSizeRef.current = fitZoom;
-        }
-        yield* Effect.promise(() => renderSpread());
-        yield* Effect.promise(() => scrollToTextTop());
-        dispatchView({ type: "ready", ready: true });
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.sync(() => console.error("failed to open pdf", Cause.pretty(cause))),
-        ),
+      open().pipe(
+        Effect.tapError((error) => Effect.sync(() => console.error("failed to open pdf", error))),
+        Effect.ignore,
       ),
     );
 
@@ -1468,56 +1468,56 @@ export function usePdfSourceView(
       if (start < 0) return null;
       return rectsForRange(geom, start, start + quote.exact.length);
     };
-    return {
-      locateHighlight: (h) =>
-        Effect.tryPromise(async () => {
-          const anchor = h.anchor;
-          if (anchor.kind !== "pdf-text") return null;
-          const doc = docRef.current;
-          if (!doc) return anchor;
-          const order = [
-            anchor.page,
-            ...Array.from({ length: doc.numPages }, (_, i) => i + 1).filter(
-              (n) => n !== anchor.page,
-            ),
-          ];
-          const [preferredPage, ...fallbackPages] = order;
-          const preferredGeom = await geometryFor(preferredPage!);
-          if (preferredGeom) {
-            const rects = locateOnPage(preferredGeom, h.quote);
-            if (rects && rects.length > 0) return pdfAnchor(preferredPage!, rects);
-          }
-          const fallbackMatches = await Promise.all(
-            fallbackPages.map(async (pageNum) => {
-              const geom = await geometryFor(pageNum);
-              if (!geom) return null;
-              const rects = locateOnPage(geom, h.quote);
-              return rects && rects.length > 0 ? pdfAnchor(pageNum, rects) : null;
-            }),
-          );
-          for (const match of fallbackMatches) {
-            if (match) return match;
-          }
-          return anchor.rects.length > 0 ? anchor : null;
-        }).pipe(Effect.orElseSucceed(() => null)),
-      search: (query) =>
-        Effect.tryPromise(async () => {
-          const doc = docRef.current;
-          if (!doc || query.trim() === "") return [] as SearchMatch[];
-          const matchesByPage = await Promise.all(
-            Array.from({ length: doc.numPages }, async (_, index) => {
-              const pageNum = index + 1;
-              const geom = await geometryFor(pageNum);
-              if (!geom) return [];
-              return scanText(geom.text, query).map(({ start, excerpt }) => ({
-                anchor: pdfAnchor(pageNum, rectsForRange(geom, start, start + query.length)),
-                excerpt,
-              }));
-            }),
-          );
-          return matchesByPage.flat();
-        }).pipe(Effect.orElseSucceed(() => [] as SearchMatch[])),
-    };
+    const locateHighlight = Effect.fn("PdfReader.locateHighlight")(function* (h: Highlight) {
+      return yield* Effect.tryPromise(async () => {
+        const anchor = h.anchor;
+        if (anchor.kind !== "pdf-text") return null;
+        const doc = docRef.current;
+        if (!doc) return anchor;
+        const order = [
+          anchor.page,
+          ...Array.from({ length: doc.numPages }, (_, i) => i + 1).filter((n) => n !== anchor.page),
+        ];
+        const [preferredPage, ...fallbackPages] = order;
+        if (preferredPage === undefined) return null;
+        const preferredGeom = await geometryFor(preferredPage);
+        if (preferredGeom) {
+          const rects = locateOnPage(preferredGeom, h.quote);
+          if (rects && rects.length > 0) return pdfAnchor(preferredPage, rects);
+        }
+        const fallbackMatches = await Promise.all(
+          fallbackPages.map(async (pageNum) => {
+            const geom = await geometryFor(pageNum);
+            if (!geom) return null;
+            const rects = locateOnPage(geom, h.quote);
+            return rects && rects.length > 0 ? pdfAnchor(pageNum, rects) : null;
+          }),
+        );
+        for (const match of fallbackMatches) {
+          if (match) return match;
+        }
+        return anchor.rects.length > 0 ? anchor : null;
+      }).pipe(Effect.orElseSucceed(() => null));
+    });
+    const search = Effect.fn("PdfReader.search")(function* (query: string) {
+      return yield* Effect.tryPromise(async () => {
+        const doc = docRef.current;
+        if (!doc || query.trim() === "") return [] as SearchMatch[];
+        const matchesByPage = await Promise.all(
+          Array.from({ length: doc.numPages }, async (_, index) => {
+            const pageNum = index + 1;
+            const geom = await geometryFor(pageNum);
+            if (!geom) return [];
+            return scanText(geom.text, query).map(({ start, excerpt }) => ({
+              anchor: pdfAnchor(pageNum, rectsForRange(geom, start, start + query.length)),
+              excerpt,
+            }));
+          }),
+        );
+        return matchesByPage.flat();
+      }).pipe(Effect.orElseSucceed(() => [] as SearchMatch[]));
+    });
+    return { locateHighlight, search };
   }, [geometryFor]);
 
   const search = useReaderSearch({

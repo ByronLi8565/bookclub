@@ -9,17 +9,14 @@ import { decode } from "../../shared/schema.ts";
 import { MAX_DISPLAY_NAME_LENGTH, type ClubProfile } from "../../shared/types/profiles.ts";
 import { deleteImages, getImage, storeImage, validImageId } from "../services/images.ts";
 import type { Env } from "../env.ts";
-import type { GroupAgent, Identity } from "../state/GroupAgent.ts";
+import type { Identity } from "../state/GroupAgent.ts";
 import type { AuthAgent } from "../state/AuthAgent.ts";
-import type { NoteAgent } from "../state/NoteAgent.ts";
 import {
   fail,
   requireIdentity,
   runWorkflow,
   tryPromise,
-  type Async,
-  type WorkflowEffect,
-  type WorkflowFailure,
+  type WorkflowFailureError,
   type WorkflowResult,
   WorkflowError,
 } from "./runtime.ts";
@@ -27,47 +24,45 @@ import { GroupFailureReason } from "../../shared/types/groups.ts";
 
 export type { WorkflowFailure } from "./runtime.ts";
 
-type Auth = Async<AuthAgent>;
-type Group = Async<GroupAgent>;
-type Notes = Async<NoteAgent>;
+type Auth = DurableObjectStub<AuthAgent>;
 
 function avatarScope(userId: string): string {
   return `avatars/${userId}`;
 }
 
-const authFor = (env: Env, me: Identity): WorkflowEffect<Auth> =>
-  Effect.map(
-    tryPromise(() => getAgentByName(env.AuthAgent, me.email)),
-    (auth) => auth as unknown as Auth,
-  );
+const authFor = Effect.fn("UserWorkflows.authFor")(function* (
+  env: Env,
+  me: Identity,
+): Effect.fn.Return<Auth, WorkflowFailureError> {
+  const auth = yield* tryPromise(() => getAgentByName(env.AuthAgent, me.email));
+  return auth;
+});
 
-const requireSource = (
+const requireSource = Effect.fn("UserWorkflows.requireSource")(function* (
   env: Env,
   me: Identity,
   groupId: string,
   sourceId: string,
-): Effect.Effect<{ kind: "epub" | "pdf" }, WorkflowFailure> =>
-  Effect.gen(function* () {
-    const group = (yield* tryPromise(() =>
-      getAgentByName(env.GroupAgent, groupId),
-    )) as unknown as Group;
-    const membership = yield* tryPromise(() => group.membership(me.id));
-    if (!membership.isMember) {
-      return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
-    }
-    const summary = yield* tryPromise(() => group.getSummary());
-    const meta = summary?.sourceMeta[sourceId];
-    if (!summary || !summary.sources.includes(sourceId) || !meta) {
-      return yield* Effect.fail(fail(404, GroupFailureReason.BadSource));
-    }
-    return { kind: meta.kind };
-  });
+): Effect.fn.Return<{ kind: "epub" | "pdf" }, WorkflowFailureError> {
+  const group = yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId));
+  const membership = yield* tryPromise(() => group.membership(me.id));
+  if (!membership.isMember) {
+    return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
+  }
+  const summary = yield* tryPromise(() => group.getSummary());
+  const meta = summary?.sourceMeta[sourceId];
+  if (!summary || !summary.sources.includes(sourceId) || !meta) {
+    return yield* Effect.fail(fail(404, GroupFailureReason.BadSource));
+  }
+  return { kind: meta.kind };
+});
 
 export function getUserPrefs(
   env: Env,
   request: Request,
 ): Promise<WorkflowResult<{ prefs: UserPrefs }>> {
   return runWorkflow(
+    "UserWorkflows.getUserPrefs",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const auth = yield* authFor(env, me);
@@ -82,6 +77,7 @@ export function setUserPrefs(
   body: unknown,
 ): Promise<WorkflowResult<{ prefs: UserPrefs }>> {
   return runWorkflow(
+    "UserWorkflows.setUserPrefs",
     Effect.gen(function* () {
       const decoded = decode(SetUserPrefsRequest, body);
       if (!decoded) return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
@@ -99,6 +95,7 @@ export function getReadingPosition(
   sourceId: string | null,
 ): Promise<WorkflowResult<{ position: StoredReadingPosition | null }>> {
   return runWorkflow(
+    "UserWorkflows.getReadingPosition",
     Effect.gen(function* () {
       if (!groupId || !sourceId) {
         return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
@@ -117,6 +114,7 @@ export function setReadingPosition(
   body: unknown,
 ): Promise<WorkflowResult<{ position: StoredReadingPosition }>> {
   return runWorkflow(
+    "UserWorkflows.setReadingPosition",
     Effect.gen(function* () {
       const decoded = decode(SetReadingPositionRequest, body);
       if (!decoded) return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
@@ -140,6 +138,7 @@ export function uploadAvatar(
   request: Request,
 ): Promise<WorkflowResult<{ id: string; contentType: string; size: number }>> {
   return runWorkflow(
+    "UserWorkflows.uploadAvatar",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const auth = yield* authFor(env, me);
@@ -158,17 +157,13 @@ export function uploadAvatar(
         user.groupIds,
         (groupId) =>
           Effect.gen(function* () {
-            const group = (yield* tryPromise(() =>
-              getAgentByName(env.GroupAgent, groupId),
-            )) as unknown as Group;
+            const group = yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId));
             const displayName = user.clubDisplayNames?.[groupId] ?? user.displayName;
             const profile = yield* tryPromise(() =>
               group.setMemberProfile(user.id, displayName, stored.image.id),
             );
             if (!profile) return;
-            const notes = (yield* tryPromise(() =>
-              getAgentByName(env.NoteAgent, groupId),
-            )) as unknown as Notes;
+            const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, groupId));
             yield* tryPromise(() =>
               notes.updateMemberProfile(user.id, displayName, stored.image.id),
             );
@@ -191,6 +186,7 @@ export function setClubProfile(
   rawDisplayName: unknown,
 ): Promise<WorkflowResult<{ profile: ClubProfile }>> {
   return runWorkflow(
+    "UserWorkflows.setClubProfile",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof rawDisplayName !== "string") {
@@ -199,9 +195,7 @@ export function setClubProfile(
       const displayName = rawDisplayName.trim();
       if (!displayName) return yield* Effect.fail(fail(400, WorkflowError.InvalidName));
       const name = displayName.slice(0, MAX_DISPLAY_NAME_LENGTH);
-      const group = (yield* tryPromise(() =>
-        getAgentByName(env.GroupAgent, groupId),
-      )) as unknown as Group;
+      const group = yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId));
       const membership = yield* tryPromise(() => group.membership(me.id));
       if (!membership.isMember) {
         return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
@@ -213,9 +207,7 @@ export function setClubProfile(
         group.setMemberProfile(me.id, name, user.avatarImageId),
       );
       if (!member) return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
-      const notes = (yield* tryPromise(() =>
-        getAgentByName(env.NoteAgent, groupId),
-      )) as unknown as Notes;
+      const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, groupId));
       yield* tryPromise(() => notes.updateMemberProfile(me.id, name, user.avatarImageId));
       return {
         profile: {
@@ -235,6 +227,7 @@ export function fetchAvatar(
   imageId: string,
 ): Promise<WorkflowResult<{ object: R2ObjectBody; contentType: string }>> {
   return runWorkflow(
+    "UserWorkflows.fetchAvatar",
     Effect.gen(function* () {
       yield* requireIdentity(env, request);
       if (!validImageId(imageId)) {

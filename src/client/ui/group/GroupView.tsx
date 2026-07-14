@@ -1,4 +1,6 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Schedule from "effect/Schedule";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "../../app/useSession.ts";
 import {
@@ -18,11 +20,11 @@ import { useBookUpload } from "../../logic/groups/useBookUpload.ts";
 import { useLatestRef } from "../../logic/useLatestRef.ts";
 import { useResolvedGroup } from "../../logic/groups/useResolvedGroup.ts";
 import {
-  fetchServerReadingPosition,
-  getReadingPosition,
   setLocalReadingPosition,
   syncReadingPosition,
 } from "../../logic/settings/readingPositions.ts";
+import { useOpeningReadingPosition } from "../../logic/settings/useOpeningReadingPosition.ts";
+import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
 import { currentSource, currentSourceId, sourceById } from "../../../shared/sources.ts";
 import type { ClubProfile } from "../../../shared/types/profiles.ts";
 import { GroupRole as GroupRoles } from "../../../shared/types/groups.ts";
@@ -110,6 +112,7 @@ export function GroupView({
   const [uploadOpen, setUploadOpen] = useState(false);
   const userId = session.user?.id ?? null;
   const isMobile = useIsMobile();
+  const { readingPositionOpenPolicy } = useReaderPrefs();
   const loadKey = `${groupRef}:${session.status}:${userId ?? ""}`;
   const [loadedFor, setLoadedFor] = useState(loadKey);
 
@@ -275,30 +278,26 @@ export function GroupView({
   const restoreSourceId = source?.id ?? null;
   const sourceKind = source?.kind ?? null;
 
-  const initialPosition = useMemo(
-    () =>
-      userId && groupId && restoreSourceId && sourceKind
-        ? (getReadingPosition(userId, groupId, restoreSourceId, sourceKind)?.position ?? null)
-        : null,
-    [userId, groupId, restoreSourceId, sourceKind],
-  );
+  const openingPosition = useOpeningReadingPosition({
+    userId,
+    groupId,
+    sourceId: restoreSourceId,
+    sourceKind,
+    policy: readingPositionOpenPolicy,
+  });
 
   useEffect(() => {
     if (!userId || !groupId || !restoreSourceId) return;
-    void Effect.runPromise(
-      fetchServerReadingPosition(userId, groupId, restoreSourceId).pipe(
-        Effect.orElseSucceed(() => null),
+    const fiber = Effect.runFork(
+      syncReadingPosition(userId, groupId, restoreSourceId).pipe(
+        Effect.ignore,
+        Effect.delay("3 seconds"),
+        Effect.repeat(Schedule.spaced("3 seconds")),
       ),
     );
-  }, [userId, groupId, restoreSourceId]);
-
-  useEffect(() => {
-    if (!userId || !groupId || !restoreSourceId) return;
-    const sync = () => {
-      void Effect.runPromise(syncReadingPosition(userId, groupId, restoreSourceId)).catch(() => {});
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber));
     };
-    const interval = window.setInterval(sync, 3000);
-    return () => window.clearInterval(interval);
   }, [userId, groupId, restoreSourceId]);
 
   const loaded = source ? loadedFiles[source.id] : null;
@@ -328,6 +327,9 @@ export function GroupView({
   if (resolved.k === "refused") {
     return <GroupMessage title="Members only" body="You need an invite to join this club." />;
   }
+  if (group && source && !openingPosition.ready) {
+    return <WorkspaceLoadingShell isMobile={isMobile} />;
+  }
 
   const content =
     !group || !source ? (
@@ -342,7 +344,7 @@ export function GroupView({
         file={loaded ?? null}
         storedBookTitle={source.title}
         onTitleParsed={onTitleParsed}
-        initialReadingPosition={initialPosition}
+        initialReadingPosition={openingPosition.position}
         onReadingPosition={(sourceId, position) => {
           if (userId) setLocalReadingPosition(userId, group.groupId, sourceId, position);
         }}

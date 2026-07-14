@@ -1,7 +1,5 @@
 import * as Effect from "effect/Effect";
 import { useSyncExternalStore } from "react";
-import { apiFetch } from "../net/api.ts";
-import { decode } from "../../../shared/schema.ts";
 import {
   DEFAULT_USER_PREFS,
   mergeUserPrefs,
@@ -9,6 +7,7 @@ import {
   type UserPrefs,
 } from "../../../shared/types/userPrefs.ts";
 import { readVersionedLocal, writeLocal } from "../storage.ts";
+import { decodeJson, request, type ApiRequestError } from "../net/request.ts";
 
 export type {
   PdfPageLayout,
@@ -48,7 +47,7 @@ export function setReaderPref<K extends keyof UserPrefs["reader"]>(
   value: UserPrefs["reader"][K],
 ): void {
   publish({ ...prefs, reader: { ...prefs.reader, [key]: value } });
-  void Effect.runPromise(syncUserPrefs()).catch(() => {});
+  Effect.runFork(syncUserPrefs().pipe(Effect.ignore));
 }
 
 export function setNotesPref<K extends keyof UserPrefs["notes"]>(
@@ -56,36 +55,31 @@ export function setNotesPref<K extends keyof UserPrefs["notes"]>(
   value: UserPrefs["notes"][K],
 ): void {
   publish({ ...prefs, notes: { ...prefs.notes, [key]: value } });
-  void Effect.runPromise(syncUserPrefs()).catch(() => {});
+  Effect.runFork(syncUserPrefs().pipe(Effect.ignore));
 }
 
-export function hydrateUserPrefs(): Effect.Effect<UserPrefs> {
-  return Effect.tryPromise(async () => {
-    const response = await apiFetch("/me/prefs");
-    if (!response.ok) throw new Error(`http_${response.status}`);
-    const body = decode(UserPrefsResponse, await response.json());
-    if (!body) throw new Error("bad_response");
-    const next = mergeUserPrefs(body.prefs);
-    publish(next);
-    return next;
-  }).pipe(Effect.orElseSucceed(() => prefs));
-}
-
-function syncUserPrefs(): Effect.Effect<UserPrefs> {
-  return Effect.tryPromise(async () => {
-    const response = await apiFetch("/me/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prefs }),
-    });
-    if (!response.ok) throw new Error(`http_${response.status}`);
-    const body = decode(UserPrefsResponse, await response.json());
-    if (!body) throw new Error("bad_response");
-    const next = mergeUserPrefs(body.prefs);
-    publish(next);
-    return next;
+const requestUserPrefs = Effect.fn("UserPrefs.request")(function* (
+  method: "GET" | "PUT",
+): Effect.fn.Return<UserPrefs, ApiRequestError> {
+  const response = yield* request("UserPrefs.request", "/me/prefs", {
+    method,
+    ...(method === "PUT"
+      ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prefs }) }
+      : {}),
   });
-}
+  const body = yield* decodeJson("UserPrefs.decode", response, UserPrefsResponse);
+  const next = mergeUserPrefs(body.prefs);
+  publish(next);
+  return next;
+});
+
+export const hydrateUserPrefs = Effect.fn("UserPrefs.hydrate")(function* () {
+  return yield* requestUserPrefs("GET").pipe(Effect.orElseSucceed(() => prefs));
+});
+
+const syncUserPrefs = Effect.fn("UserPrefs.sync")(function* () {
+  return yield* requestUserPrefs("PUT");
+});
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);

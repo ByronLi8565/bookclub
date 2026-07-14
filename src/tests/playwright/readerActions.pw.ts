@@ -30,13 +30,25 @@ async function selectPdfText(page: Page): Promise<void> {
     .first()
     .evaluate((layer) => {
       const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
-      let node = walker.nextNode();
-      while (node && (node.textContent?.trim().length ?? 0) < 8) node = walker.nextNode();
-      if (!node?.textContent) throw new Error("No selectable PDF text");
-      const start = node.textContent.search(/\S/u);
+      let startNode: Node | null = null;
+      let startOffset = 0;
+      let endNode: Node | null = null;
+      let endOffset = 0;
+      let length = 0;
+      for (let node = walker.nextNode(); node && length < 8; node = walker.nextNode()) {
+        const text = node.textContent ?? "";
+        const offset = startNode ? 0 : text.search(/\S/u);
+        if (offset < 0 || offset >= text.length) continue;
+        startNode ??= node;
+        if (node === startNode) startOffset = offset;
+        endNode = node;
+        endOffset = Math.min(text.length, offset + (8 - length));
+        length += endOffset - offset;
+      }
+      if (!startNode || !endNode || length === 0) throw new Error("No selectable PDF text");
       const range = document.createRange();
-      range.setStart(node, start);
-      range.setEnd(node, Math.min(node.textContent.length, start + 8));
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
       const selection = window.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(range);

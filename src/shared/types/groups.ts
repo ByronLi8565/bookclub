@@ -1,4 +1,7 @@
-import type { SourceKind } from "./sources.ts";
+import * as Schema from "effect/Schema";
+import { SourceKind } from "./sources.ts";
+
+type SchemaType<S extends Schema.Top> = S["Type"];
 
 export const GroupRole = {
   Owner: "owner",
@@ -9,8 +12,15 @@ export const GroupRole = {
 
 export type GroupRole = (typeof GroupRole)[keyof typeof GroupRole];
 
+export const GroupRoleSchema = Schema.Union([
+  Schema.Literal(GroupRole.Owner),
+  Schema.Literal(GroupRole.Admin),
+  Schema.Literal(GroupRole.Member),
+  Schema.Literal(GroupRole.Visitor),
+]);
+
 export function isGroupRole(value: unknown): value is GroupRole {
-  return typeof value === "string" && Object.values(GroupRole).includes(value as GroupRole);
+  return Schema.is(GroupRoleSchema)(value);
 }
 
 export const GroupFailureReason = {
@@ -27,42 +37,50 @@ export const GroupFailureReason = {
 
 export type GroupFailureReason = (typeof GroupFailureReason)[keyof typeof GroupFailureReason];
 
-export interface SourceMeta {
-  kind: SourceKind;
-  contentType: string;
-  size: number;
-  title?: string | null;
-  author?: string | null;
-  wordCount?: number | null;
-  addedBy: string;
-}
+export const SourceMeta = Schema.Struct({
+  kind: SourceKind,
+  contentType: Schema.String,
+  size: Schema.Number,
+  title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  addedBy: Schema.String,
+});
+
+export interface SourceMeta extends SchemaType<typeof SourceMeta> {}
 
 export interface BookMetadataPatch {
   author?: string | null;
   wordCount?: number | null;
 }
 
-export interface GroupSummary {
-  groupId: string;
-  slug: string;
-  publicId: string;
-  displayName: string;
-  ownerId: string;
-  sources: string[];
-  bookTitles: Record<string, string>;
-  sourceMeta: Record<string, SourceMeta>;
-  memberCount: number;
-}
+export const GroupSummary = Schema.Struct({
+  groupId: Schema.String,
+  slug: Schema.String,
+  publicId: Schema.String,
+  displayName: Schema.String,
+  ownerId: Schema.String,
+  sources: Schema.mutable(Schema.Array(Schema.String)),
+  bookTitles: Schema.Record(Schema.String, Schema.String),
+  sourceMeta: Schema.Record(Schema.String, SourceMeta),
+  memberCount: Schema.Number,
+});
 
-export interface Membership {
-  isMember: boolean;
-  role: GroupRole | null;
-}
+export interface GroupSummary extends SchemaType<typeof GroupSummary> {}
 
-export interface RosterEntry {
-  id: string;
-  name: string;
-  email: string;
-  role: GroupRole;
-  avatarImageId?: string;
-}
+export const Membership = Schema.Struct({
+  isMember: Schema.Boolean,
+  role: Schema.NullOr(GroupRoleSchema),
+});
+
+export interface Membership extends SchemaType<typeof Membership> {}
+
+export const RosterEntry = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  email: Schema.String,
+  role: GroupRoleSchema,
+  avatarImageId: Schema.optionalKey(Schema.String),
+});
+
+export interface RosterEntry extends SchemaType<typeof RosterEntry> {}
