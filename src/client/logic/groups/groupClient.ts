@@ -7,7 +7,6 @@ import {
   type BookMetadataPatch,
   type GroupRole,
 } from "../../../shared/types/groups.ts";
-import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../../shared/types/sources.ts";
 import { parseHttpError } from "../../http.ts";
 import { decode } from "../../../shared/schema.ts";
@@ -128,7 +127,11 @@ async function parseJson<S extends Schema.Decoder<unknown>>(
   response: Response,
   schema: S,
 ): Promise<S["Type"] | null> {
-  return decode(schema, await response.json());
+  try {
+    return decode(schema, await response.json());
+  } catch {
+    return null;
+  }
 }
 
 export async function listMyGroups(): Promise<ApiResult<GroupSummary[]>> {
@@ -277,15 +280,11 @@ export async function resolveBookTitle(
 export async function uploadSource(
   groupRef: string,
   file: File,
-  health: SourceHealth,
   title: string | null,
   author: string | null,
   wordCount: number | null,
 ): Promise<ApiResult<string>> {
-  const headers: Record<string, string> = {
-    "Content-Type": file.type || EPUB_CONTENT_TYPE,
-    "X-Source-Health": encodeURIComponent(JSON.stringify(health)),
-  };
+  const headers: Record<string, string> = { "Content-Type": file.type || EPUB_CONTENT_TYPE };
   if (title) headers["X-Source-Title"] = encodeURIComponent(title);
   if (author) headers["X-Source-Author"] = encodeURIComponent(author);
   if (wordCount !== null) headers["X-Source-Word-Count"] = String(wordCount);

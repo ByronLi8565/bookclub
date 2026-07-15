@@ -18,7 +18,7 @@ export function expandToWordBoundaries(range: Range): Range {
   if (sc.nodeType === Node.TEXT_NODE) {
     const text = sc.textContent ?? "";
     let start = r.startOffset;
-    while (start > 0 && WORD.test(text[start - 1]!)) start--;
+    while (start > 0 && WORD.test(text.charAt(start - 1))) start--;
     r.setStart(sc, start);
   }
 
@@ -26,7 +26,7 @@ export function expandToWordBoundaries(range: Range): Range {
   if (ec.nodeType === Node.TEXT_NODE) {
     const text = ec.textContent ?? "";
     let end = r.endOffset;
-    while (end < text.length && WORD.test(text[end]!)) end++;
+    while (end < text.length && WORD.test(text.charAt(end))) end++;
     r.setEnd(ec, end);
   }
 

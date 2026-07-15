@@ -4,6 +4,7 @@ import type { Highlight, HighlightAnchor, SourceReader } from "../../../logic/no
 export interface DesiredHighlight {
   noteId: string | null;
   highlight: Highlight;
+  canRebind: boolean;
 }
 
 export interface HighlightPainter {
@@ -37,22 +38,32 @@ export const updateHighlights = Effect.fn("HighlightReconciler.update")(function
     }
   }
 
-  const missing = desired.filter(({ highlight }) => !drawn.has(highlight.id));
+  const changed = desired.filter(({ highlight }) => {
+    const current = drawn.get(highlight.id);
+    return current === undefined || !sameAnchor(current, highlight.anchor);
+  });
+  for (const { highlight } of changed) {
+    if (!drawn.has(highlight.id)) continue;
+    deps.painter.erase(highlight.id);
+    drawn.delete(highlight.id);
+  }
   const locatedHighlights = yield* Effect.forEach(
-    missing,
-    ({ noteId, highlight }) => {
-      if (deps.isCancelled()) return Effect.succeed({ noteId, highlight, located: null });
+    changed,
+    ({ noteId, highlight, canRebind }) => {
+      if (deps.isCancelled()) {
+        return Effect.succeed({ noteId, highlight, canRebind, located: null });
+      }
       return deps.reader
         .locateHighlight(highlight)
-        .pipe(Effect.map((located) => ({ noteId, highlight, located })));
+        .pipe(Effect.map((located) => ({ noteId, highlight, canRebind, located })));
     },
-    { concurrency: "unbounded" },
+    { concurrency: 8 },
   );
 
-  for (const { noteId, highlight, located } of locatedHighlights) {
+  for (const { noteId, highlight, canRebind, located } of locatedHighlights) {
     if (deps.isCancelled()) return;
-    if (deps.isCancelled() || !located) continue;
-    if (!sameAnchor(located, highlight.anchor) && noteId !== null) {
+    if (!located) continue;
+    if (!sameAnchor(located, highlight.anchor) && noteId !== null && canRebind) {
       deps.rebind(noteId, highlight.id, located);
     }
     deps.painter.draw(highlight.id, located);

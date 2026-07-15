@@ -7,6 +7,45 @@ import type { UploadedNoteImage } from "../client/ui/notes/editor/NoteImageNode.
 
 const IMAGE_ID = "01JH0000000000000000000000";
 
+describe("NoteEditor markdown", () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = window.document.createElement("div");
+    window.document.documentElement.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(() => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("renders and preserves highlights", async () => {
+    const save = vi.fn();
+    await act(() =>
+      root.render(
+        <NoteEditor
+          initialBody="A ==highlighted passage== here"
+          submitLabel="Save"
+          onSave={save}
+          onCancel={vi.fn()}
+          validSeqs={new Set()}
+        />,
+      ),
+    );
+
+    expect(container.querySelector(".bc-highlight")?.textContent).toBe("highlighted passage");
+    expect(container.querySelector(".note-editor-input")?.textContent).not.toContain("==");
+
+    await act(() => container.querySelector<HTMLButtonElement>("button.primary")?.click());
+    expect(save).toHaveBeenCalledWith("A ==highlighted passage== here");
+  });
+});
+
 describe("NoteEditor images", () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;

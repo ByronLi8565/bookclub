@@ -11,7 +11,7 @@ import type { HighlightAnchor } from "../../client/logic/notes/highlights.ts";
 import { setReaderPref, useReaderPrefs } from "../../client/logic/settings/userPrefs.ts";
 import { Reader } from "../../client/ui/reader/Reader.tsx";
 import { useSourceView, type SourceView } from "../../client/ui/reader/useSourceView.ts";
-import { MobilePager, type Pane } from "../../client/ui/shared/MobilePager.tsx";
+import { WorkspaceLayout, type Pane } from "../../client/ui/workspace/WorkspaceLayout.tsx";
 import {
   stepChromeVisibility,
   type ChromeVisibilityLevel,
@@ -50,7 +50,7 @@ export function ReaderHarness() {
     () => harnessBook,
     () => harnessBook,
   );
-  // `?mobile=1` renders the reader inside the real mobile shell (MobilePager:
+  // `?mobile=1` renders the reader inside the real mobile workspace layout:
   // react-swipeable + a translateX pane track) so the harness matches what
   // ships on phones, instead of mounting <Reader> bare.
   const params = new URLSearchParams(window.location.search);
@@ -143,17 +143,19 @@ export function ReaderHarness() {
         search
       </button>
       {mobile ? (
-        <MobilePager
-          pane={pane}
-          onPane={setPane}
+        <WorkspaceLayout
+          mode={{
+            kind: "mobile",
+            pane,
+            onPane: setPane,
+            selecting: view.selection !== null,
+            onAddNote: () => view.commitSelection("note"),
+            onHighlight: () => view.commitSelection("highlight"),
+            onChromeHiddenChange: (hidden) =>
+              setChromeLevel((level) => stepChromeVisibility(level, hidden ? "hide" : "show")),
+          }}
           reader={reader}
           notes={<div className="harness-notes">notes</div>}
-          selecting={view.selection !== null}
-          onAddNote={() => view.commitSelection("note")}
-          onHighlight={() => view.commitSelection("highlight")}
-          onChromeHiddenChange={(hidden) =>
-            setChromeLevel((level) => stepChromeVisibility(level, hidden ? "hide" : "show"))
-          }
         />
       ) : (
         reader

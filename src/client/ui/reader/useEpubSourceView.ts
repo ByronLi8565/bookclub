@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Schedule from "effect/Schedule";
 import {
   useCallback,
   useEffect,
@@ -24,7 +25,6 @@ import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
 import { useLatestRef } from "../../logic/useLatestRef.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
-import { bumpSeq } from "./engine/seq.ts";
 import { type OnSelect, type SelectIntent } from "./types.ts";
 import { type SourceView } from "./types.ts";
 import { type SourceLocation } from "./types.ts";
@@ -218,8 +218,7 @@ export function useEpubSourceView(
   const viewRef = useRef<LiveView | null>(null);
   const [fontSize, setFontSizeState] = useState(100);
   const pendingRef = useRef<{ cfi: string; range: Range; clear: () => void } | null>(null);
-  const drawnCfiRef = useRef<Map<string, { cfi: string; onClick: () => void }>>(null!);
-  drawnCfiRef.current ??= new Map<string, { cfi: string; onClick: () => void }>();
+  const drawnCfiRef = useRef(new Map<string, { cfi: string; onClick: () => void }>());
   const measureSeqRef = useRef(0);
   const [viewState, dispatchView] = useReducer(epubViewReducer, {
     openedSource: { file, initialEpubCfi },
@@ -282,15 +281,21 @@ export function useEpubSourceView(
       dispatchView({ type: "selection", selection: null });
     };
 
-    const poll = window.setInterval(() => {
-      const views = rendition.getContents() as unknown as Contents[];
-      const active = views.find((c) => {
-        const s = c.window.getSelection();
-        return s !== null && !s.isCollapsed && s.toString().trim() !== "";
-      });
-      if (active) onSelection(active);
-      else clearSelection();
-    }, 300);
+    const selectionFiber = Effect.runFork(
+      Effect.sync(() => {
+        const views = rendition.getContents() as unknown as Contents[];
+        const active = views.find((c) => {
+          const currentSelection = c.window.getSelection();
+          return (
+            currentSelection !== null &&
+            !currentSelection.isCollapsed &&
+            currentSelection.toString().trim() !== ""
+          );
+        });
+        if (active) onSelection(active);
+        else clearSelection();
+      }).pipe(Effect.repeat(Schedule.spaced("300 millis"))),
+    );
 
     const removeContentKeydowns: (() => void)[] = [];
     rendition.on("rendered", (_section: unknown, view: ResizableView) => {
@@ -397,7 +402,7 @@ export function useEpubSourceView(
     );
 
     return () => {
-      clearInterval(poll);
+      Effect.runFork(Fiber.interrupt(selectionFiber));
       for (const removeContentKeydown of removeContentKeydowns) removeContentKeydown();
       Effect.runFork(Fiber.interrupt(fiber));
       publish(null);
@@ -500,7 +505,7 @@ export function useEpubSourceView(
     );
 
     return () => {
-      bumpSeq(measureSeqRef);
+      measureSeqRef.current += 1;
       Effect.runFork(Fiber.interrupt(fiber));
     };
   }, [ready, fontSize, viewportTick, pdfPageLayout, spreadModeRef]);

@@ -1,5 +1,6 @@
 import { getAgentByName } from "agents";
 import { Effect } from "effect";
+import * as Schema from "effect/Schema";
 import { monotonicFactory } from "ulidx";
 import { groupUrlName, publicIdFromGroupUrl } from "../../shared/groupUrls.ts";
 import {
@@ -52,6 +53,7 @@ import {
 } from "../../shared/groupPermissions.ts";
 import {
   fail,
+  decodeRequest,
   requireIdentity,
   runWorkflow,
   tryPromise,
@@ -70,6 +72,11 @@ const PUBLIC_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const PUBLIC_ID_ATTEMPTS = 10;
 
 const ulid = monotonicFactory();
+
+const BookMetadataPatchRequest = Schema.Struct({
+  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+});
 
 type Group = DurableObjectStub<GroupAgent>;
 type Registry = DurableObjectStub<GroupRegistry>;
@@ -514,10 +521,7 @@ export function updateBookMetadata(
     "GroupWorkflows.updateBookMetadata",
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
-      if (!body || typeof body !== "object") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
-      }
-      const input = body as Record<string, unknown>;
+      const input = yield* decodeRequest(BookMetadataPatchRequest, body);
       const patch: BookMetadataPatch = {};
       if (Object.hasOwn(input, "author")) {
         if (input.author !== null && typeof input.author !== "string") {
@@ -527,13 +531,14 @@ export function updateBookMetadata(
         patch.author = author ? author.slice(0, 200) : null;
       }
       if (Object.hasOwn(input, "wordCount")) {
+        const wordCount = input.wordCount;
         if (
-          input.wordCount !== null &&
-          (!Number.isSafeInteger(input.wordCount) || (input.wordCount as number) < 0)
+          wordCount === undefined ||
+          (wordCount !== null && (!Number.isSafeInteger(wordCount) || wordCount < 0))
         ) {
           return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
         }
-        patch.wordCount = input.wordCount as number | null;
+        patch.wordCount = wordCount;
       }
       if (!Object.hasOwn(patch, "author") && !Object.hasOwn(patch, "wordCount")) {
         return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));

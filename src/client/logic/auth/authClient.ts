@@ -4,17 +4,25 @@ import {
 } from "@simplewebauthn/browser";
 import { parseHttpError } from "../../http.ts";
 import { apiFetch } from "../net/api.ts";
-import type { PasskeyInfo } from "../../../shared/types/passkeys.ts";
+import * as Schema from "effect/Schema";
+import { PasskeyInfo } from "../../../shared/types/passkeys.ts";
+import { decode } from "../../../shared/schema.ts";
 
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 
 const json = { "Content-Type": "application/json" };
+const AccountSecurity = Schema.Struct({
+  passkeys: Schema.mutable(Schema.Array(PasskeyInfo)),
+  hasPassword: Schema.Boolean,
+});
 
-export async function listPasskeys(): Promise<Result<PasskeyInfo[]>> {
+export async function loadAccountSecurity(): Promise<
+  Result<{ passkeys: PasskeyInfo[]; hasPassword: boolean }>
+> {
   const r = await apiFetch("/me/passkeys");
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
-  const body = (await r.json()) as { passkeys: PasskeyInfo[] };
-  return { ok: true, value: body.passkeys };
+  const body = decode(AccountSecurity, await r.json());
+  return body ? { ok: true, value: body } : { ok: false, error: "bad_response" };
 }
 
 // Registration ceremony: fetch creation options, prompt the authenticator, then

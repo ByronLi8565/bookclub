@@ -52,7 +52,6 @@ import {
   spreadPages,
   spreadStart,
 } from "./engine/pdfSpread.ts";
-import { bumpSeq } from "./engine/seq.ts";
 import { type OnSelect, type SelectIntent } from "./types.ts";
 import { type SourceView } from "./types.ts";
 import { type SourceLocation } from "./types.ts";
@@ -993,7 +992,7 @@ export function usePdfSourceView(
 
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
-      bumpSeq(renderSeqRef);
+      renderSeqRef.current += 1;
       clearFlash();
       for (const pane of panesRef.current) pane.builder?.cancel();
       panesRef.current = [];

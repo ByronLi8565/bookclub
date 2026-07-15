@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   authenticateContext,
   BASE_URL,
@@ -6,40 +6,8 @@ import {
   joinGroup,
   openWorkspace,
   seedWorkspace,
+  selectPdfText,
 } from "./browserSupport.ts";
-
-async function selectPdfText(page: Page): Promise<void> {
-  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30_000 });
-  await page
-    .locator(".textLayer")
-    .first()
-    .evaluate((layer) => {
-      const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
-      let startNode: Node | null = null;
-      let startOffset = 0;
-      let endNode: Node | null = null;
-      let endOffset = 0;
-      let length = 0;
-      for (let node = walker.nextNode(); node && length < 12; node = walker.nextNode()) {
-        const text = node.textContent ?? "";
-        const offset = startNode ? 0 : text.search(/\S/u);
-        if (offset < 0 || offset >= text.length) continue;
-        startNode ??= node;
-        if (node === startNode) startOffset = offset;
-        endNode = node;
-        endOffset = Math.min(text.length, offset + (12 - length));
-        length += endOffset - offset;
-      }
-      if (!startNode || !endNode || length === 0) throw new Error("No selectable PDF text");
-      const range = document.createRange();
-      range.setStart(startNode, startOffset);
-      range.setEnd(endNode, endOffset);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      document.dispatchEvent(new Event("selectionchange"));
-    });
-}
 
 test("Collaboration · an invited reader joins and receives the owner's note live", async ({
   browser,

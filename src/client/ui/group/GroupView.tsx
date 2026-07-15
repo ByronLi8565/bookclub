@@ -291,7 +291,6 @@ export function GroupView({
     const fiber = Effect.runFork(
       syncReadingPosition(userId, groupId, restoreSourceId).pipe(
         Effect.ignore,
-        Effect.delay("3 seconds"),
         Effect.repeat(Schedule.spaced("3 seconds")),
       ),
     );

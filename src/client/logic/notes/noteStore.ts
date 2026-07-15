@@ -22,6 +22,13 @@ interface Internal {
   failedOps: NoteOp[];
 }
 
+export interface NotePersistence {
+  load: (groupId: string) => Effect.Effect<StoredNotes | null, unknown>;
+  save: (groupId: string, value: StoredNotes) => Effect.Effect<void, unknown>;
+}
+
+const indexedDbPersistence: NotePersistence = { load: loadNotes, save: saveNotes };
+
 // Incoming server snapshots never clear pending ops except by confirmed opId.
 export class NoteStore {
   private state: Internal = {
@@ -37,6 +44,7 @@ export class NoteStore {
     private readonly groupId: string,
     private readonly author: NoteAuthor,
     private readonly isOwner: boolean,
+    private readonly persistence: NotePersistence = indexedDbPersistence,
   ) {}
 
   subscribe = (listener: () => void): (() => void) => {
@@ -53,15 +61,21 @@ export class NoteStore {
   hasPending = (): boolean => this.state.pendingOps.length > 0;
 
   hydrate = Effect.fn("NoteStore.hydrate")({ self: this }, function* (this: NoteStore) {
-    yield* loadNotes(this.groupId).pipe(
+    yield* this.persistence.load(this.groupId).pipe(
       Effect.tap((stored) =>
         Effect.sync(() => {
           if (stored && stored.userId === this.author.id) {
+            const snapshot = this.state.hydrated ? this.state.snapshot : stored.snapshot;
+            const applied = new Set(snapshot.appliedOpIds ?? []);
+            const seen = new Set(this.state.pendingOps.map((op) => op.opId));
+            const cachedPending = stored.pendingOps.filter(
+              (op) => !seen.has(op.opId) && !applied.has(op.opId),
+            );
             this.state = {
+              ...this.state,
               hydrated: true,
-              snapshot: stored.snapshot,
-              pendingOps: stored.pendingOps,
-              failedOps: [],
+              snapshot,
+              pendingOps: [...this.state.pendingOps, ...cachedPending],
             };
           } else {
             this.state = { ...this.state, hydrated: true };
@@ -124,19 +138,6 @@ export class NoteStore {
     },
   );
 
-  mergeForeign = Effect.fn("NoteStore.mergeForeign")(
-    { self: this },
-    function* (this: NoteStore, pendingOps: NoteOp[]) {
-      yield* Effect.sync(() => {
-        const seen = new Set(this.state.pendingOps.map((op) => op.opId));
-        const additions = pendingOps.filter((op) => !seen.has(op.opId));
-        if (additions.length === 0) return;
-        this.state = { ...this.state, pendingOps: [...this.state.pendingOps, ...additions] };
-        this.recompute();
-      });
-    },
-  );
-
   private readonly persist = Effect.fn("NoteStore.persist")(
     { self: this },
     function* (this: NoteStore) {
@@ -146,7 +147,7 @@ export class NoteStore {
         pendingOps: this.state.pendingOps,
         updatedAt: new Date().toISOString(),
       };
-      yield* saveNotes(this.groupId, record).pipe(Effect.ignore);
+      yield* this.persistence.save(this.groupId, record).pipe(Effect.ignore);
     },
   );
 

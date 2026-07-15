@@ -13,6 +13,7 @@ import { ApiRequestError, decodeJson, request } from "../net/request.ts";
 
 const STORAGE_KEY = "bookclub.readingPositions:v1";
 const LEGACY_STORAGE_KEY = "bookclub.readingPositions";
+const syncingKeys = new Set<string>();
 
 function positionKey(userId: string, groupId: string, sourceId: string): string {
   return `${userId}:${groupId}:${sourceId}`;
@@ -88,19 +89,6 @@ function needsReadingPositionSync(record: ReadingPositionRecord | null): boolean
   return !!record && !samePosition(record.position, record.lastSyncedPosition);
 }
 
-function markSynced(
-  userId: string,
-  groupId: string,
-  sourceId: string,
-  position: StoredReadingPosition,
-): ReadingPositionRecord {
-  return saveRecord(userId, groupId, sourceId, {
-    position,
-    lastSyncedPosition: position,
-    sync: { status: "clean", lastSyncAttemptAt: new Date().toISOString(), lastSyncError: null },
-  });
-}
-
 function markFailed(
   userId: string,
   groupId: string,
@@ -108,8 +96,9 @@ function markFailed(
   record: ReadingPositionRecord,
   error: string,
 ): ReadingPositionRecord {
+  const current = getRecord(userId, groupId, sourceId) ?? record;
   return saveRecord(userId, groupId, sourceId, {
-    ...record,
+    ...current,
     sync: { status: "error", lastSyncAttemptAt: new Date().toISOString(), lastSyncError: error },
   });
 }
@@ -167,10 +156,12 @@ export const syncReadingPosition = Effect.fn("ReadingPositions.sync")(function* 
   sourceId: string,
   force = false,
 ): Effect.fn.Return<boolean, ApiRequestError> {
+  const key = positionKey(userId, groupId, sourceId);
+  if (syncingKeys.has(key)) return false;
   const record = getRecord(userId, groupId, sourceId);
   if (!record || (!force && !needsReadingPositionSync(record))) return false;
-  if (!force && record.sync.status === "syncing") return false;
   markSyncing(userId, groupId, sourceId, record);
+  syncingKeys.add(key);
   const result = yield* request("ReadingPositions.sync", "/me/reading-position", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -192,7 +183,8 @@ export const syncReadingPosition = Effect.fn("ReadingPositions.sync")(function* 
     Effect.tapError((error) =>
       Effect.sync(() => markFailed(userId, groupId, sourceId, record, String(error))),
     ),
+    Effect.ensuring(Effect.sync(() => syncingKeys.delete(key))),
   );
-  markSynced(userId, groupId, sourceId, result);
+  mergeServerReadingPosition(userId, result);
   return true;
 });

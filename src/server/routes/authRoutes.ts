@@ -189,7 +189,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
     const me = await currentIdentity(c.req.raw, c.env);
     if (!me) return c.json({ error: "unauthenticated" }, 401);
     const auth = await getAgentByName(c.env.AuthAgent, me.email);
-    return c.json({ passkeys: await auth.listPasskeys() });
+    return c.json({ passkeys: await auth.listPasskeys(), hasPassword: await auth.hasPassword() });
   });
 
   app.delete("/me/passkeys/:id", async (c) => {

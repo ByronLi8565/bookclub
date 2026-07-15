@@ -5,18 +5,8 @@ import {
   MAX_BOOKCLUB_ARCHIVE_BYTES,
 } from "../../../shared/backups/bookclubArchive.ts";
 import { isNative } from "../net/api.ts";
+import { downloadFile } from "../files/browserDownload.ts";
 import type { ApiResult } from "./groupClient.ts";
-
-function triggerBrowserDownload(file: File): void {
-  const url = URL.createObjectURL(file);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = file.name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
 
 function base64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -41,7 +31,7 @@ export async function saveGroupBackup(file: File): Promise<ApiResult<{ name: str
       return { ok: false, error: "save_failed" };
     }
   } else {
-    triggerBrowserDownload(file);
+    downloadFile(file);
   }
   return { ok: true, value: { name: file.name } };
 }

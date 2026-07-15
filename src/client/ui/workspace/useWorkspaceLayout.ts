@@ -1,7 +1,7 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import * as Effect from "effect/Effect";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Pane } from "../shared/MobilePager.tsx";
+import type { Pane } from "./WorkspaceLayout.tsx";
 import { useAnyModalOpen } from "../shared/modalLayer.ts";
 import { useIsMobile } from "../shared/hooks/useIsMobile.ts";
 import { setReaderPref, useReaderPrefs } from "../../logic/settings/userPrefs.ts";

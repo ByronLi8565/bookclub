@@ -55,6 +55,21 @@ describe("club user settings", () => {
     );
   });
 
+  it("loads the existing password state from account security", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(Response.json({ passkeys: [], hasPassword: true }))),
+    );
+
+    await act(async () => {
+      root.render(<SettingsModal signedIn onClose={vi.fn()} />);
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector("[aria-label='Current password']")).not.toBeNull();
+    expect(container.textContent).toContain("A password is set");
+  });
+
   it("uses live profile names and avatars in the people list", async () => {
     await act(() =>
       root.render(

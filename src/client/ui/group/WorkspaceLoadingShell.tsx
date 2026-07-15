@@ -1,6 +1,5 @@
 import { Loading } from "../shared/Loading.tsx";
-import { MobilePager } from "../shared/MobilePager.tsx";
-import { SplitPane } from "../shared/SplitPane.tsx";
+import { WorkspaceLayout, type WorkspaceLayoutMode } from "../workspace/WorkspaceLayout.tsx";
 
 const LOADING_READER = (
   <div className="reader">
@@ -24,6 +23,17 @@ const LOADING_NOTES = (
 );
 
 export function WorkspaceLoadingShell({ isMobile }: { isMobile: boolean }): React.ReactElement {
+  const mode: WorkspaceLayoutMode = isMobile
+    ? {
+        kind: "mobile",
+        pane: "reader",
+        onPane: () => {},
+        selecting: false,
+        onAddNote: () => {},
+        onHighlight: () => {},
+        onChromeHiddenChange: () => {},
+      }
+    : { kind: "desktop", expandedPane: null, onExpandedPaneChange: () => {} };
   return (
     <div className="app">
       <header className="topbar">
@@ -35,19 +45,7 @@ export function WorkspaceLoadingShell({ isMobile }: { isMobile: boolean }): Reac
           <span className="presence-dot" />
         </span>
       </header>
-      {isMobile ? (
-        <MobilePager
-          pane="reader"
-          onPane={() => {}}
-          reader={LOADING_READER}
-          notes={LOADING_NOTES}
-          selecting={false}
-          onAddNote={() => {}}
-          onHighlight={() => {}}
-        />
-      ) : (
-        <SplitPane left={LOADING_READER} right={LOADING_NOTES} />
-      )}
+      <WorkspaceLayout mode={mode} reader={LOADING_READER} notes={LOADING_NOTES} />
     </div>
   );
 }

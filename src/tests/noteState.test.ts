@@ -11,7 +11,7 @@ import {
   removeSourceNotes,
   type NoteStamp,
   type NoteState,
-} from "../server/state/noteState.ts";
+} from "../shared/notes/noteState.ts";
 
 function fakeStamp(now = "2026-01-01T00:00:00.000Z"): NoteStamp {
   let n = 0;
@@ -58,6 +58,13 @@ describe("addNote", () => {
 
     const tagged = addNote(emptyNoteState(), "book", ALICE, "> q", [], fakeStamp(), ["highlight"]);
     expect(tagged.notes[0]?.tags).toEqual(["highlight"]);
+  });
+
+  it("preserves pending image cleanup while changing notes", () => {
+    const state = { ...emptyNoteState(), pendingImageDeletes: ["image-1"] };
+    const next = addNote(state, "book", ALICE, "hi", [], fakeStamp());
+
+    expect(next.pendingImageDeletes).toEqual(["image-1"]);
   });
 });
 

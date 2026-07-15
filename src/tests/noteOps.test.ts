@@ -70,6 +70,48 @@ describe("applyOperations", () => {
     expect(r.state.notes[0]?.tags).toEqual(["highlight"]);
   });
 
+  describe("tag updates", () => {
+    it("composes delta updates while preserving reserved semantic tags", () => {
+      const taggedAdd: NoteOp = {
+        opId: "op1",
+        kind: "add",
+        noteId: "n1",
+        sourceId: "src",
+        body: "highlight",
+        highlights: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        tags: ["highlight", "Question"],
+      };
+      const base = applyOperations(emptyNoteState(), [taggedAdd], alice).state;
+      const result = applyOperations(
+        base,
+        [
+          {
+            opId: "op2",
+            kind: "update-tags",
+            noteId: "n1",
+            add: ["Theme / Identity"],
+            remove: ["question", "highlight"],
+          },
+        ],
+        alice,
+      );
+      expect(result.state.notes[0]?.tags).toEqual(["highlight", "theme/identity"]);
+      expect(result.state.notes[0]?.version).toBe(2);
+      expect(result.state.notes[0]?.editedAt).toBeNull();
+    });
+
+    it("rejects updates by a non-author", () => {
+      const base = applyOperations(emptyNoteState(), [addOp("op1", "n1", "body")], alice).state;
+      const result = applyOperations(
+        base,
+        [{ opId: "op2", kind: "update-tags", noteId: "n1", add: ["joke"], remove: [] }],
+        bob,
+      );
+      expect(result.rejectedOps).toEqual([{ opId: "op2", reason: "forbidden" }]);
+    });
+  });
+
   describe("idempotent replay (no data loss / no duplication)", () => {
     it("re-applying the same add does not duplicate or consume a new seq", () => {
       const once = applyOperations(emptyNoteState(), [addOp("op1", "n1", "hi")], alice);
@@ -118,6 +160,29 @@ describe("applyOperations", () => {
         alice,
       );
       expect(r.state.notes[0]?.body).toBe("v2");
+    });
+
+    it("adds hashtags processed from the edited body atomically", () => {
+      const base = applyOperations(emptyNoteState(), [addOp("op1", "n1", "v1")], alice).state;
+      const result = applyOperations(
+        base,
+        [
+          {
+            opId: "op2",
+            kind: "edit",
+            noteId: "n1",
+            body: "body without hashtag text",
+            addTags: ["question"],
+            at: "2026-01-02T00:00:00.000Z",
+          },
+        ],
+        alice,
+      );
+      expect(result.state.notes[0]).toMatchObject({
+        body: "body without hashtag text",
+        tags: ["question"],
+        version: 2,
+      });
     });
 
     it("silently supersedes a stale edit without error or change", () => {
@@ -250,7 +315,12 @@ describe("applyOperations", () => {
 
     it("only lets the author or a moderator rebind a highlight", () => {
       const base = applyOperations(emptyNoteState(), [addOp("op1", "n1", "body")], alice).state;
-      base.notes[0]!.highlights = [highlight("h1")];
+      const withHighlight = {
+        ...base,
+        notes: base.notes.map((note, index) =>
+          index === 0 ? { ...note, highlights: [highlight("h1")] } : note,
+        ),
+      };
       const op: NoteOp = {
         opId: "op2",
         kind: "rebind",
@@ -259,10 +329,10 @@ describe("applyOperations", () => {
         anchor: epubAnchor("new"),
       };
 
-      const refused = applyOperations(base, [op], bob);
+      const refused = applyOperations(withHighlight, [op], bob);
       expect(refused.rejectedOps).toEqual([{ opId: "op2", reason: NoteRejectionReason.Forbidden }]);
 
-      const moderated = applyOperations(base, [op], ownerBob);
+      const moderated = applyOperations(withHighlight, [op], ownerBob);
       expect(moderated.state.notes[0]?.highlights[0]?.anchor).toEqual(epubAnchor("new"));
     });
   });

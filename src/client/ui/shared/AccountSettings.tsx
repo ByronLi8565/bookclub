@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from "react";
 import type { PasskeyInfo } from "../../../shared/types/passkeys.ts";
 import {
-  listPasskeys,
+  loadAccountSecurity,
   passkeysSupported,
   registerPasskey,
   removePasskey,
@@ -64,13 +64,15 @@ export function AccountSettings(): React.ReactElement {
   const { passkeys, loaded, hasPassword, label, current, next, busy } = state;
   const canUsePasskeys = passkeysSupported();
 
-  async function refreshPasskeys(): Promise<void> {
-    const result = await listPasskeys();
-    if (result.ok) dispatch({ type: "passkeys", passkeys: result.value });
+  async function refreshAccountSecurity(): Promise<void> {
+    const result = await loadAccountSecurity();
+    if (!result.ok) return;
+    dispatch({ type: "passkeys", passkeys: result.value.passkeys });
+    dispatch({ type: "hasPassword", value: result.value.hasPassword });
   }
 
   useEffect(() => {
-    void refreshPasskeys();
+    void refreshAccountSecurity();
   }, []);
 
   async function onAddPasskey(): Promise<void> {
@@ -83,7 +85,7 @@ export function AccountSettings(): React.ReactElement {
     }
     dispatch({ type: "field", key: "label", value: "" });
     spawnToast("Passkey added", "You can now sign in with this passkey.", { type: "info" });
-    void refreshPasskeys();
+    void refreshAccountSecurity();
   }
 
   async function onRemovePasskey(id: string): Promise<void> {
@@ -92,7 +94,7 @@ export function AccountSettings(): React.ReactElement {
       spawnToast("Passkey", msg(result.error), { type: "error" });
       return;
     }
-    void refreshPasskeys();
+    void refreshAccountSecurity();
   }
 
   async function onSavePassword(e: React.FormEvent): Promise<void> {

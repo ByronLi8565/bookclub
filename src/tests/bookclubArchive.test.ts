@@ -39,6 +39,7 @@ function source(): CreateBookclubArchiveInput {
         editedAt: null,
         deletedAt: null,
         version: 1,
+        tags: ["highlight", "theme/identity"],
       },
       {
         id: "note-two",

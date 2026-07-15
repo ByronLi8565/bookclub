@@ -56,7 +56,7 @@ scenario(
 ## Surfaces
 
 - **`api`** (`src/surfaces/api.ts`): `newIdentity()` mints a fresh logged-in user
-  via dev-auth (works because the e2e worker has no EMAIL binding); plus
+  via the e2e worker's explicit `DEV_AUTH=true`; plus
   `createGroup` / `inviteLink` / `join` / `refFor` and a raw `request()` escape
   hatch. NOTE: `/groups/:ref/*` routes take the URL ref (`slug-publicId`, via
   `refFor`), while the NoteAgent websocket takes the internal `group.groupId`.
@@ -74,19 +74,19 @@ throwaway persist dir. Adding a target = a factory in `src/targets/registry.ts`
 
 - a `setup/<name>.globalsetup.ts` + a project in `vitest.config.ts`.
 
-> There is intentionally no `vite`/`dev` target yet: `bun run dev` currently
-> 500s because the plain dev config has no SQLite migration for the DO classes.
-> That is a separate app-dev-env fix; the wrangler target sidesteps it safely.
+> There is intentionally no `vite`/`dev` target yet. Vite local development now
+> injects the SQLite migrations, but this harness still uses a fresh isolated
+> Wrangler target so runs never share developer state.
 
 ## Running
 
 ```sh
-npm run e2e            # boots wrangler dev on a derived port, runs all scenarios
-npm run e2e:watch      # watch mode
+bun run e2e            # boots wrangler dev on a derived port, runs all scenarios
+bun run e2e:watch      # watch mode
 
 # Fast iteration against an already-running instance:
 bunx wrangler dev --config wrangler.e2e.jsonc --port 8842 --persist-to /tmp/bc-e2e
-E2E_WRANGLER_URL=http://127.0.0.1:8842 npm run e2e
+E2E_WRANGLER_URL=http://127.0.0.1:8842 bun run e2e
 ```
 
 Ports are derived from the checkout path (`src/ports.ts`), so two worktrees

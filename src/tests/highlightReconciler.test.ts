@@ -51,12 +51,16 @@ describe("updateHighlights", () => {
     const { painter, draws } = fakePainter();
     const drawn = new Map<string, HighlightAnchor>();
 
-    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
-      reader: fakeReader(new Set(["cfi-1"])),
-      painter,
-      rebind: noRebind,
-      isCancelled: notCancelled,
-    });
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-1"), canRebind: true }],
+      drawn,
+      {
+        reader: fakeReader(new Set(["cfi-1"])),
+        painter,
+        rebind: noRebind,
+        isCancelled: notCancelled,
+      },
+    );
 
     expect(draws).toEqual([{ id: "h1", anchor: epubAnchor("cfi-1") }]);
     expect(drawn.get("h1")).toEqual(epubAnchor("cfi-1"));
@@ -89,16 +93,35 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
-      reader,
-      painter,
-      rebind: noRebind,
-      isCancelled: notCancelled,
-    });
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-1"), canRebind: true }],
+      drawn,
+      { reader, painter, rebind: noRebind, isCancelled: notCancelled },
+    );
 
     expect(draws).toEqual([]);
     expect(erases).toEqual([]);
     expect(located).toBe(0);
+  });
+
+  it("repaints an existing highlight when its stored anchor changes", async () => {
+    const { painter, draws, erases } = fakePainter();
+    const drawn = new Map<string, HighlightAnchor>([["h1", epubAnchor("cfi-old")]]);
+
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-new"), canRebind: true }],
+      drawn,
+      {
+        reader: fakeReader(new Set(["cfi-new"])),
+        painter,
+        rebind: noRebind,
+        isCancelled: notCancelled,
+      },
+    );
+
+    expect(erases).toEqual(["h1"]);
+    expect(draws).toEqual([{ id: "h1", anchor: epubAnchor("cfi-new") }]);
+    expect(drawn.get("h1")).toEqual(epubAnchor("cfi-new"));
   });
 
   it("rebinds and paints at the fresh anchor when the stored one has drifted", async () => {
@@ -111,16 +134,43 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
-      reader,
-      painter,
-      rebind: (noteId, highlightId, anchor) => void rebinds.push({ noteId, highlightId, anchor }),
-      isCancelled: notCancelled,
-    });
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-old"), canRebind: true }],
+      drawn,
+      {
+        reader,
+        painter,
+        rebind: (noteId, highlightId, anchor) => void rebinds.push({ noteId, highlightId, anchor }),
+        isCancelled: notCancelled,
+      },
+    );
 
     expect(rebinds).toEqual([{ noteId: "n1", highlightId: "h1", anchor: epubAnchor("cfi-fresh") }]);
     expect(draws).toEqual([{ id: "h1", anchor: epubAnchor("cfi-fresh") }]);
     expect(drawn.get("h1")).toEqual(epubAnchor("cfi-fresh"));
+  });
+
+  it("paints but does not rebind another author's drifting highlight", async () => {
+    const { painter, draws } = fakePainter();
+    const rebinds: string[] = [];
+    const reader: SourceReader = {
+      locateHighlight: () => Effect.succeed(epubAnchor("cfi-fresh")),
+      search: () => Effect.succeed([]),
+    };
+
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-old"), canRebind: false }],
+      new Map(),
+      {
+        reader,
+        painter,
+        rebind: (_noteId, highlightId) => void rebinds.push(highlightId),
+        isCancelled: notCancelled,
+      },
+    );
+
+    expect(rebinds).toEqual([]);
+    expect(draws).toEqual([{ id: "h1", anchor: epubAnchor("cfi-fresh") }]);
   });
 
   it("skips a highlight that cannot be located", async () => {
@@ -132,12 +182,11 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-old") }], drawn, {
-      reader,
-      painter,
-      rebind: (_n, id) => void rebinds.push(id),
-      isCancelled: notCancelled,
-    });
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-old"), canRebind: true }],
+      drawn,
+      { reader, painter, rebind: (_n, id) => void rebinds.push(id), isCancelled: notCancelled },
+    );
 
     expect(draws).toEqual([]);
     expect(rebinds).toEqual([]);
@@ -153,12 +202,11 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await runUpdateHighlights([{ noteId: null, highlight: highlight("draft", "cfi-old") }], drawn, {
-      reader,
-      painter,
-      rebind: (_n, id) => void rebinds.push(id),
-      isCancelled: notCancelled,
-    });
+    await runUpdateHighlights(
+      [{ noteId: null, highlight: highlight("draft", "cfi-old"), canRebind: false }],
+      drawn,
+      { reader, painter, rebind: (_n, id) => void rebinds.push(id), isCancelled: notCancelled },
+    );
 
     expect(rebinds).toEqual([]);
     expect(draws).toEqual([{ id: "draft", anchor: epubAnchor("cfi-fresh") }]);
@@ -170,8 +218,8 @@ describe("updateHighlights", () => {
 
     await runUpdateHighlights(
       [
-        { noteId: "n1", highlight: highlight("h1", "cfi-1") },
-        { noteId: "n2", highlight: highlight("h2", "cfi-2") },
+        { noteId: "n1", highlight: highlight("h1", "cfi-1"), canRebind: true },
+        { noteId: "n2", highlight: highlight("h2", "cfi-2"), canRebind: true },
       ],
       drawn,
       {
@@ -200,12 +248,11 @@ describe("updateHighlights", () => {
       search: () => Effect.succeed([]),
     };
 
-    await runUpdateHighlights([{ noteId: "n1", highlight: highlight("h1", "cfi-1") }], drawn, {
-      reader,
-      painter,
-      rebind: noRebind,
-      isCancelled: () => cancelled,
-    });
+    await runUpdateHighlights(
+      [{ noteId: "n1", highlight: highlight("h1", "cfi-1"), canRebind: true }],
+      drawn,
+      { reader, painter, rebind: noRebind, isCancelled: () => cancelled },
+    );
 
     expect(draws).toEqual([]);
     expect(drawn.has("h1")).toBe(false);

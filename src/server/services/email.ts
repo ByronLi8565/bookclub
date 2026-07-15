@@ -1,4 +1,5 @@
 import type { Env } from "../env.ts";
+import { escapeHtml } from "../../shared/format.ts";
 
 // Send an email when a provider is configured; otherwise log it (dev fallback).
 // `logLine` is what gets printed when no provider is bound.
@@ -40,6 +41,8 @@ export async function sendInvite(
   groupDisplayName: string,
   link: string,
 ): Promise<void> {
+  const safeDisplayName = escapeHtml(groupDisplayName);
+  const safeLink = escapeHtml(link);
   await sendEmail(
     env,
     {
@@ -51,8 +54,8 @@ export async function sendInvite(
         `If you didn't expect this invite, ignore this email.`,
       html:
         `<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#000;font-size:14px;line-height:1.5;">` +
-        `<p style="margin:0;">You've been invited to join the "${groupDisplayName}" book club.</p>` +
-        `<p style="margin:12px 0;"><a href="${link}">${link}</a></p>` +
+        `<p style="margin:0;">You've been invited to join the "${safeDisplayName}" book club.</p>` +
+        `<p style="margin:12px 0;"><a href="${safeLink}">${safeLink}</a></p>` +
         `<p style="margin:0;">If you didn't expect this invite, ignore this email.</p>` +
         `</div>`,
     },

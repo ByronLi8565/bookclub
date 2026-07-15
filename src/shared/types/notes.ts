@@ -67,20 +67,7 @@ export const Note = Schema.Struct({
   // existed (and the DO snapshots holding them) keep deserializing untouched.
   tags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
 });
-export interface Note {
-  id: string;
-  seq: number;
-  sourceId: string;
-  author: NoteAuthor;
-  parent: string | null;
-  body: string;
-  highlights: Highlight[];
-  createdAt: string;
-  editedAt: string | null;
-  deletedAt: string | null;
-  version: number;
-  tags?: string[];
-}
+export interface Note extends SchemaType<typeof Note> {}
 
 export function epubAnchor(value: string): HighlightAnchor {
   return { kind: "epub-cfi", value };
@@ -113,12 +100,21 @@ export const NoteOp = Schema.Union([
     parent: Schema.String,
     body: Schema.String,
     createdAt: Schema.String,
+    tags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
   }),
   Schema.Struct({
     ...NoteOpFields,
     kind: Schema.tag("edit"),
     body: Schema.String,
     at: Schema.String,
+    addTags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+    removeTags: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+  }),
+  Schema.Struct({
+    ...NoteOpFields,
+    kind: Schema.tag("update-tags"),
+    add: Schema.mutable(Schema.Array(Schema.String)),
+    remove: Schema.mutable(Schema.Array(Schema.String)),
   }),
   Schema.Struct({ ...NoteOpFields, kind: Schema.tag("remove"), at: Schema.String }),
   Schema.Struct({

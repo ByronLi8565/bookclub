@@ -1,6 +1,21 @@
 import { expect, test } from "@playwright/test";
 import { books, currentPage, openWorkspace, seedWorkspace } from "./browserSupport.ts";
 
+test("Workspace · a global toast is rendered exactly once", async ({ page }) => {
+  const { ref } = await seedWorkspace(page.context());
+  await openWorkspace(page, ref);
+  await page.route(`**/groups/${ref}/title`, (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"failed"}' }),
+  );
+
+  await page.getByTitle("Double-click to rename the club").dblclick();
+  await page.getByLabel("club name").fill("A rename that will fail");
+  await page.getByLabel("club name").press("Enter");
+
+  await expect(page.locator(".toast-viewport")).toHaveCount(1);
+  await expect(page.locator(".toast").filter({ hasText: "Rename failed" })).toHaveCount(1);
+});
+
 test("Workspace · resize and pane-removal controls preserve a usable layout", async ({ page }) => {
   const { ref } = await seedWorkspace(page.context());
   await openWorkspace(page, ref);

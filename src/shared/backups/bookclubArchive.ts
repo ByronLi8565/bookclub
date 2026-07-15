@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { strToU8, unzipSync, zipSync, type Zippable } from "fflate";
 import { decode } from "../schema.ts";
 import { noteImageIds } from "../notes/images.ts";
+import { sha256Hex } from "../crypto.ts";
 import { Highlight, Note, type Note as NoteType } from "../types/notes.ts";
 import { SourceMeta } from "../types/groups.ts";
 
@@ -111,11 +112,6 @@ function imageExtension(contentType: string): string {
   return "webp";
 }
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes).buffer);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 function notePath(note: NoteType): string {
   return `notes/${String(note.seq).padStart(6, "0")}-${note.id}.md`;
 }
@@ -153,7 +149,7 @@ export async function createBookclubArchive(
           file,
           contentType: image.contentType,
           size: image.bytes.byteLength,
-          sha256: await sha256(image.bytes),
+          sha256: await sha256Hex(Uint8Array.from(image.bytes).buffer),
           uploadedBy: image.uploadedBy,
         } satisfies ManifestImage;
       }),
@@ -225,7 +221,7 @@ export async function decodeBookclubArchive(
   }
   const decoded = decode(BookclubArchiveManifest, rawManifest);
   if (!decoded) return invalid(BookclubArchiveError.InvalidArchive);
-  const manifest = decoded as BookclubArchiveManifest;
+  const manifest = decoded;
   const manifestSourceIds = manifest.books.map((book) => book.sourceId);
   if (
     !manifest.club.id ||
@@ -305,7 +301,10 @@ export async function decodeBookclubArchive(
     }
     const imageBytes = entries[metadata.file];
     if (!imageBytes) return invalid(BookclubArchiveError.MissingEntry);
-    if (imageBytes.byteLength !== metadata.size || (await sha256(imageBytes)) !== metadata.sha256) {
+    if (
+      imageBytes.byteLength !== metadata.size ||
+      (await sha256Hex(Uint8Array.from(imageBytes).buffer)) !== metadata.sha256
+    ) {
       return invalid(BookclubArchiveError.IntegrityMismatch);
     }
     images.push({

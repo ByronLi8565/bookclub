@@ -25,7 +25,7 @@ export function useSourceView(
     initialPosition?.kind === "epub" ? initialPosition : null,
     suspendResize,
   );
-  // PDF pane-switching is handled solely by MobilePager's swiper; the PDF view
+  // PDF pane-switching is handled solely by WorkspaceLayout's swiper; the PDF view
   // intentionally takes no onSwipe so sideways drags pan the page instead.
   const pdf = usePdfSourceView(
     isPdf ? (source?.id ?? null) : null,

@@ -9,7 +9,14 @@ import type { NoteState } from "../../../shared/notes/noteState.ts";
 import type { NoteAgent } from "../../../server/state/NoteAgent.ts";
 import type { OnlinePeer } from "../../../server/state/NoteAgent.ts";
 import type { Highlight, HighlightAnchor } from "./highlights.ts";
-import { addNoteOp, addReplyOp, editNoteOp, rebindOp, removeNoteOp } from "./noteOps.ts";
+import {
+  addNoteOp,
+  addReplyOp,
+  editNoteOp,
+  rebindOp,
+  removeNoteOp,
+  updateTagsOp,
+} from "./noteOps.ts";
 import { NoteStore } from "./noteStore.ts";
 import { spawnToast } from "../../ui/shared/toast/toastStore.ts";
 import { apiOrigin, isNative, loadSessionToken } from "../net/api.ts";
@@ -26,8 +33,9 @@ export interface NoteSync {
   failedNoteIds: ReadonlySet<string>;
   online: OnlinePeer[];
   addNote: (sourceId: string, body: string, highlights: Highlight[], tags?: string[]) => boolean;
-  addReply: (sourceId: string, parent: string, body: string) => boolean;
-  editNote: (id: string, body: string) => boolean;
+  addReply: (sourceId: string, parent: string, body: string, tags?: string[]) => boolean;
+  editNote: (id: string, body: string, addTags?: string[], removeTags?: string[]) => boolean;
+  updateTags: (id: string, add: string[], remove: string[]) => boolean;
   removeNote: (id: string) => boolean;
   rebindHighlight: (noteId: string, highlightId: string, anchor: HighlightAnchor) => boolean;
 }
@@ -160,8 +168,9 @@ export function useNoteAgent(
     ),
     addNote: (sourceId, body, highlights, tags) =>
       enqueue(addNoteOp(sourceId, body, highlights, tags)),
-    addReply: (sourceId, parent, body) => enqueue(addReplyOp(sourceId, parent, body)),
-    editNote: (id, body) => enqueue(editNoteOp(id, body)),
+    addReply: (sourceId, parent, body, tags) => enqueue(addReplyOp(sourceId, parent, body, tags)),
+    editNote: (id, body, addTags, removeTags) => enqueue(editNoteOp(id, body, addTags, removeTags)),
+    updateTags: (id, add, remove) => enqueue(updateTagsOp(id, add, remove)),
     removeNote: (id) => enqueue(removeNoteOp(id)),
     rebindHighlight: (noteId, highlightId, anchor) =>
       enqueue(rebindOp(noteId, highlightId, anchor)),

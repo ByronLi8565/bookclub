@@ -4,18 +4,15 @@ import { NoteOp } from "../../../shared/types/notes.ts";
 import { NoteState } from "../../../shared/notes/noteState.ts";
 import { idbGet, idbPut, NOTES_STORE, PersistError } from "../db.ts";
 
+type SchemaType<S extends Schema.Top> = S["Type"];
+
 export const StoredNotes = Schema.Struct({
   userId: Schema.String,
   snapshot: NoteState,
   pendingOps: Schema.mutable(Schema.Array(NoteOp)),
   updatedAt: Schema.String,
 });
-export interface StoredNotes {
-  userId: string;
-  snapshot: NoteState;
-  pendingOps: NoteOp[];
-  updatedAt: string;
-}
+export interface StoredNotes extends SchemaType<typeof StoredNotes> {}
 
 export const loadNotes = Effect.fn("NotesCache.load")(function* (
   groupId: string,

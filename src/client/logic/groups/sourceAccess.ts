@@ -3,8 +3,8 @@ import { groupUrlName } from "../../../shared/groupUrls.ts";
 import { getCachedSource, putCachedSource } from "./sourceCache.ts";
 import { isNative } from "../net/api.ts";
 import { sourceById, sourceRefById } from "../../../shared/sources.ts";
-import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { sourceKindFor, type SourceSummary } from "../../../shared/types/sources.ts";
+import { downloadFile } from "../files/browserDownload.ts";
 
 export { books, currentSource } from "../../../shared/sources.ts";
 
@@ -46,12 +46,11 @@ export async function loadSource(
 export async function uploadCurrentSource(
   group: GroupSummary,
   file: File,
-  health: SourceHealth,
   title: string | null,
   author: string | null,
   wordCount: number | null,
 ): Promise<ApiResult<LoadedSource>> {
-  const uploaded = await uploadSource(groupUrlName(group), file, health, title, author, wordCount);
+  const uploaded = await uploadSource(groupUrlName(group), file, title, author, wordCount);
   if (!uploaded.ok) return uploaded;
   await putCachedSource(uploaded.value, file);
   return {
@@ -90,17 +89,6 @@ export async function downloadGroupForOffline(
   return { done, total };
 }
 
-function triggerBrowserDownload(file: File): void {
-  const url = URL.createObjectURL(file);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = file.name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
 export async function downloadSourceCopy(
   groupRef: string,
   sourceId: string,
@@ -115,6 +103,6 @@ export async function downloadSourceCopy(
   const cached = await getCachedSource(sourceId);
   const file = cached ?? (await fetchSource(groupRef, sourceId))?.file ?? null;
   if (!file) return { ok: false, error: "no_source" };
-  triggerBrowserDownload(file);
+  downloadFile(file);
   return { ok: true, value: { name: file.name } };
 }

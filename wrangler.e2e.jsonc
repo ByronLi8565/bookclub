@@ -28,10 +28,8 @@
     "directory": "public",
     "not_found_handling": "single-page-application",
   },
-  // NOTE: intentionally NO `send_email` binding and NO EMAIL_FROM var. The worker
-  // treats a missing EMAIL binding as "dev auth" (see isDevAuth in worker.ts), so
-  // `POST /auth/start` auto-signs-in and returns a session cookie — which is what
-  // lets the harness mint isolated identities without a real mailbox.
+  // NOTE: intentionally NO `send_email` binding and NO EMAIL_FROM var. DEV_AUTH
+  // explicitly enables the local auto-sign-in flow used by the harness.
   "durable_objects": {
     "bindings": [
       { "name": "NoteAgent", "class_name": "NoteAgent" },
@@ -57,5 +55,6 @@
   "vars": {
     "ADMIN_EMAIL": "admin@example.com",
     "SESSION_HMAC_SECRET": "e2e-only-not-a-real-secret",
+    "DEV_AUTH": "true",
   },
 }

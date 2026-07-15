@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { HIGHLIGHT_TAG, type Note } from "../shared/types/notes.ts";
-import { renderNoteBody } from "../client/logic/notes/renderHtml.ts";
 import { blockquote, highlightMark, noteSnippet, noteTitle } from "../client/logic/notes/format.ts";
 
 function note(over: Partial<Note>): Note {
@@ -19,28 +18,6 @@ function note(over: Partial<Note>): Note {
     ...over,
   };
 }
-
-describe("renderNoteBody", () => {
-  it("wraps a paragraph and renders bold and italic", () => {
-    expect(renderNoteBody("hello **bold** and *it*")).toBe(
-      "<p>hello <strong>bold</strong> and <em>it</em></p>",
-    );
-  });
-
-  it("renders a run of > lines as a single blockquote", () => {
-    expect(renderNoteBody("> a\n> b")).toBe("<blockquote>a b</blockquote>");
-  });
-
-  it("escapes HTML in the body", () => {
-    expect(renderNoteBody("a < b & c")).toBe("<p>a &lt; b &amp; c</p>");
-  });
-
-  it("renders a resolvable [[n]] as a chip and leaves an unknown one as text", () => {
-    const html = renderNoteBody("see [[1]] and [[9]]", new Map([[1, "the first note"]]));
-    expect(html).toContain('data-seq="1"');
-    expect(html).toContain("[[9]]");
-  });
-});
 
 describe("noteSnippet", () => {
   it("renders references as #n and strips markdown", () => {

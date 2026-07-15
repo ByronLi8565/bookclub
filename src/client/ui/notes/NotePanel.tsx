@@ -10,6 +10,8 @@ import {
   type NoteViewer,
 } from "./NoteThread.tsx";
 
+const NO_CONTEXT_NOTES: ReadonlySet<string> = new Set();
+
 export function NotePanel({
   conversation,
   canWrite,
@@ -23,6 +25,13 @@ export function NotePanel({
   refs,
   viewer,
   context,
+  filters,
+  hasActiveFilters,
+  showBookTitles,
+  showHashtags,
+  hashtagsAddTags,
+  bookTitleFor,
+  contextNoteIds,
   imageUrlBase,
   avatarFor,
 }: {
@@ -31,13 +40,20 @@ export function NotePanel({
   composing: boolean;
   loading: boolean;
   composeInitialBody: string;
-  onComposeSave: (body: string) => void;
+  onComposeSave: (body: string, tags?: string[]) => void;
   onComposeCancel: () => void;
   onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   actions: NoteActions;
   refs: NoteRefs;
   viewer: NoteViewer;
   context?: React.ReactNode;
+  filters?: React.ReactNode;
+  hasActiveFilters?: boolean;
+  showBookTitles?: boolean;
+  showHashtags?: boolean;
+  hashtagsAddTags?: boolean;
+  bookTitleFor?: (sourceId: string) => string;
+  contextNoteIds?: ReadonlySet<string>;
   imageUrlBase?: string;
   avatarFor?: AvatarResolver;
 }) {
@@ -46,10 +62,15 @@ export function NotePanel({
   return (
     <aside className="note-panel">
       {context}
-      <h2 className="label">Notes</h2>
+      <div className="note-panel-toolbar">
+        <h2 className="label">Notes</h2>
+        {filters}
+      </div>
       {loading && !composing && <Loading className="loading--note-panel" />}
       {!loading && roots.length === 0 && !composing && (
-        <p className="empty">Select text to add a note.</p>
+        <p className="empty">
+          {hasActiveFilters ? "No notes match these filters." : "Select text to add a note."}
+        </p>
       )}
       <ul>
         {!loading &&
@@ -65,12 +86,19 @@ export function NotePanel({
               imageUrlBase={imageUrlBase}
               onPasteImage={onPasteImage}
               avatarFor={avatarFor}
+              showBookTitles={showBookTitles ?? false}
+              showHashtags={showHashtags ?? true}
+              hashtagsAddTags={hashtagsAddTags ?? false}
+              bookTitleFor={bookTitleFor}
+              contextNoteIds={contextNoteIds ?? NO_CONTEXT_NOTES}
             />
           ))}
         {composing && (
           <li className="note compose">
             <NoteEditor
               initialBody={composeInitialBody}
+              hashtagsAddTags={hashtagsAddTags}
+              showHashtags={showHashtags}
               submitLabel="Publish"
               onSave={onComposeSave}
               onCancel={onComposeCancel}

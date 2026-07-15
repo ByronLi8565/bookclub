@@ -95,7 +95,6 @@ export function useBookUpload(
     const result = await uploadCurrentSource(
       group,
       inspected.file,
-      inspected.health,
       inspected.metadata.title,
       inspected.metadata.author,
       inspected.metadata.wordCount,

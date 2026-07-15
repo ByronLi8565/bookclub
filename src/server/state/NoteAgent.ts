@@ -21,9 +21,6 @@ import {
   removeNoteImageReferences,
   unreferencedImageIds,
 } from "../../shared/notes/images.ts";
-import type { Env } from "../env.ts";
-import { currentIdentity } from "../auth/cookies.ts";
-import { deleteImages } from "../services/images.ts";
 import {
   addNote,
   addReply,
@@ -35,9 +32,11 @@ import {
   removeSourceNotes,
   type NoteStamp,
   type NoteState,
-} from "./noteState.ts";
-
-export type { NoteState } from "./noteState.ts";
+} from "../../shared/notes/noteState.ts";
+import type { Env } from "../env.ts";
+import { currentIdentity } from "../auth/cookies.ts";
+import { deleteImages } from "../services/images.ts";
+export type { NoteState } from "../../shared/notes/noteState.ts";
 
 const ulid = monotonicFactory();
 
@@ -131,10 +130,12 @@ export class NoteAgent extends Agent<Env, NoteState> {
   }
 
   @callable()
-  addReply(sourceId: string, parent: string, body: string): void {
+  addReply(sourceId: string, parent: string, body: string, tags: string[] = []): void {
     const { userId, name, role } = this.me;
     if (!permits(role, GroupAction.ReplyToNote)) return;
-    this.setState(addReply(this.state, sourceId, { id: userId, name }, parent, body, this.stamp));
+    this.setState(
+      addReply(this.state, sourceId, { id: userId, name }, parent, body, this.stamp, tags),
+    );
   }
 
   @callable()

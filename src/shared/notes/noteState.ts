@@ -10,6 +10,9 @@ import {
 } from "../types/notes.ts";
 import { NoteRejectionReason } from "../types/notes.ts";
 import { extractReferences } from "../references.ts";
+import { isReservedTag, normalizeTags } from "./tags.ts";
+
+type SchemaType<S extends Schema.Top> = S["Type"];
 
 export const NoteState = Schema.Struct({
   notes: Schema.mutable(Schema.Array(Note)),
@@ -24,12 +27,7 @@ export const NoteState = Schema.Struct({
   // bound can never cause data loss or duplication.
   appliedOpIds: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
 });
-export interface NoteState {
-  notes: Note[];
-  nextSeq: number;
-  pendingImageDeletes?: string[];
-  appliedOpIds?: string[];
-}
+export interface NoteState extends SchemaType<typeof NoteState> {}
 
 export interface NoteStamp {
   id(): string;
@@ -63,8 +61,37 @@ export function addReply(
   parent: string,
   body: string,
   stamp: NoteStamp,
+  tags: string[] = [],
 ): NoteState {
-  return append(state, stamp.id(), sourceId, author, parent, body, [], stamp.now(), []);
+  return append(state, stamp.id(), sourceId, author, parent, body, [], stamp.now(), tags);
+}
+
+export function updateNoteTags(
+  state: NoteState,
+  id: string,
+  delta: { add: readonly string[]; remove: readonly string[] },
+  callerId: string,
+  bumpVersion = true,
+): NoteState {
+  const additions = normalizeTags(delta.add).filter((tag) => !isReservedTag(tag));
+  const removals = new Set(normalizeTags(delta.remove).filter((tag) => !isReservedTag(tag)));
+  return setNotes(
+    state,
+    state.notes.map((note) => {
+      if (note.id !== id || note.deletedAt !== null || note.author.id !== callerId) return note;
+      const current = normalizeTags(note.tags ?? []);
+      const next = normalizeTags([...current.filter((tag) => !removals.has(tag)), ...additions]);
+      if (current.length === next.length && current.every((tag, index) => tag === next[index])) {
+        return note;
+      }
+      const { tags: _tags, ...withoutTags } = note;
+      return {
+        ...withoutTags,
+        ...(next.length > 0 ? { tags: next } : {}),
+        version: bumpVersion ? note.version + 1 : note.version,
+      };
+    }),
+  );
 }
 
 export function editNote(
@@ -153,7 +180,7 @@ export function rebindHighlight(
 }
 
 function setNotes(state: NoteState, notes: Note[]): NoteState {
-  return { notes, nextSeq: state.nextSeq ?? 1, appliedOpIds: state.appliedOpIds ?? [] };
+  return { ...state, notes, nextSeq: state.nextSeq ?? 1, appliedOpIds: state.appliedOpIds ?? [] };
 }
 
 function append(
@@ -182,9 +209,10 @@ function append(
     version: 1,
     // Only carry the field when there's something to say, so untagged notes
     // stay byte-for-byte identical to their pre-tags shape.
-    ...(tags.length > 0 ? { tags } : {}),
+    ...(normalizeTags(tags).length > 0 ? { tags: normalizeTags(tags) } : {}),
   };
   return {
+    ...state,
     notes: [...state.notes, note],
     nextSeq: seq + 1,
     appliedOpIds: state.appliedOpIds ?? [],
@@ -225,7 +253,7 @@ function applyOp(state: NoteState, op: NoteOp, ctx: ApplyContext): OpOutcome {
           op.body,
           op.kind === "add" ? op.highlights : [],
           op.createdAt,
-          op.kind === "add" ? (op.tags ?? []) : [],
+          op.tags ?? [],
         ),
       };
     }
@@ -240,7 +268,30 @@ function applyOp(state: NoteState, op: NoteOp, ctx: ApplyContext): OpOutcome {
       // silently superseded (a no-op to prune), never an error.
       const current = note.editedAt ?? note.createdAt;
       if (op.at <= current) return { kind: "noop" };
-      return { kind: "applied", state: editNote(state, op.noteId, op.body, op.at, ctx.author.id) };
+      const edited = editNote(state, op.noteId, op.body, op.at, ctx.author.id);
+      return {
+        kind: "applied",
+        state:
+          (op.addTags?.length ?? 0) > 0 || (op.removeTags?.length ?? 0) > 0
+            ? updateNoteTags(
+                edited,
+                op.noteId,
+                { add: op.addTags ?? [], remove: op.removeTags ?? [] },
+                ctx.author.id,
+                false,
+              )
+            : edited,
+      };
+    }
+    case "update-tags": {
+      const note = state.notes.find((n) => n.id === op.noteId);
+      if (!note || note.deletedAt !== null) {
+        return { kind: "rejected", reason: NoteRejectionReason.Gone };
+      }
+      if (note.author.id !== ctx.author.id) {
+        return { kind: "rejected", reason: NoteRejectionReason.Forbidden };
+      }
+      return { kind: "applied", state: updateNoteTags(state, op.noteId, op, ctx.author.id) };
     }
     case "remove": {
       const note = state.notes.find((n) => n.id === op.noteId);

@@ -5,7 +5,7 @@ import { groupUrlName } from "../../../src/shared/groupUrls.ts";
 // The typed HTTP surface — the same public routes the SPA calls. Everything here
 // is black-box `fetch` against the running worker; nothing imports server
 // internals. Identity is a real signed session cookie minted via dev-auth
-// (`POST /auth/start` auto-signs-in when the worker has no EMAIL binding), so a
+// (`POST /auth/start` auto-signs-in when `DEV_AUTH=true`), so a
 // scenario can create as many isolated users as it likes with no mailbox.
 
 export interface Identity {
@@ -73,7 +73,7 @@ export function makeApiSurface(baseUrl: string): ApiSurface {
       if (!res.ok || !raw) {
         const body = await res.text();
         throw new ApiError(
-          `newIdentity failed: ${res.status} ${body} — is dev-auth on? (worker must have no EMAIL binding)`,
+          `newIdentity failed: ${res.status} ${body} — is DEV_AUTH=true?`,
           res.status,
           body,
         );

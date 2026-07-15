@@ -15,7 +15,6 @@ import { type NoteViewer } from "../logic/notes/permissions.ts";
 import { PresenceModal } from "../ui/group/PresenceModal.tsx";
 import { InfoScreen } from "../ui/shared/InfoScreen.tsx";
 import { spawnToast } from "../ui/shared/toast/toastStore.ts";
-import { ToastViewport } from "../ui/shared/toast/ToastViewport.tsx";
 import { NotePanel } from "../ui/notes/NotePanel.tsx";
 import { Reader } from "../ui/reader/Reader.tsx";
 import { WorkspaceHeader } from "../ui/workspace/WorkspaceHeader.tsx";
@@ -114,6 +113,7 @@ export function Workspace({
     file,
     storedBookTitle,
     initialReadingPosition,
+    books,
     members,
     viewer,
     layout,
@@ -207,7 +207,6 @@ export function Workspace({
         />
       )}
       {activeModal === "info" && <InfoScreen onClose={() => setActiveModal(null)} />}
-      <ToastViewport />
     </div>
   );
 }

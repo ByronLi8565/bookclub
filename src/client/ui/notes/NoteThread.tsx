@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import editIcon from "@assets/edit.svg";
+import { isHiddenTag } from "../../../shared/notes/tags.ts";
 import type { Note, NoteAuthor } from "../../../shared/types/notes.ts";
 import { effectiveHighlight } from "../../logic/notes/conversation.ts";
 import { noteTitle } from "../../logic/notes/format.ts";
@@ -7,6 +8,7 @@ import { canDeleteNote, canEditNote, type NoteViewer } from "../../logic/notes/p
 import { NoteEditor } from "./editor/NoteEditor.tsx";
 import type { UploadedNoteImage } from "./editor/NoteImageNode.tsx";
 import { NoteBodyView } from "./editor/NoteBodyView.tsx";
+import { NoteTagInput } from "./NoteTagInput.tsx";
 
 export type { NoteViewer } from "../../logic/notes/permissions.ts";
 
@@ -51,10 +53,12 @@ export interface NoteActions {
   onReference: (seq: number) => void;
   onDelete: (note: Note) => void;
   onEdit: (note: Note) => void;
-  onEditSave: (note: Note, body: string) => void;
+  onEditSave: (note: Note, body: string, tags?: string[]) => void;
   onEditCancel: () => void;
+  onTagFilter: (tag: string) => void;
+  onBookFilter: (sourceId: string) => void;
   onReply: (note: Note) => void;
-  onReplySave: (parentId: string, body: string) => void;
+  onReplySave: (parentId: string, body: string, tags?: string[]) => void;
   onReplyCancel: () => void;
 }
 
@@ -69,6 +73,10 @@ export function NoteCardView({
   deleted = false,
   jump,
   actions,
+  tags = [],
+  tagsEditable = false,
+  onTagRemove,
+  onTagFilter,
 }: {
   seq: number;
   title: string;
@@ -80,26 +88,43 @@ export function NoteCardView({
   deleted?: boolean;
   jump?: { onClick: () => void; disabled: boolean; title?: string };
   actions?: ReactNode;
+  tags?: readonly string[];
+  tagsEditable?: boolean;
+  onTagRemove?: (tag: string) => void;
+  onTagFilter?: (tag: string) => void;
 }): React.ReactElement {
+  const visibleTags = tags.filter((tag) => !isHiddenTag(tag));
   return (
     <div className={deleted ? "note note--deleted" : "note"} id={id}>
-      <div className="note-head">
-        <span className="note-seq">{seq}</span>
-        {jump ? (
-          <button
-            type="button"
-            className="quote truncate"
-            onClick={jump.onClick}
-            disabled={jump.disabled}
-            title={jump.title}
-          >
-            {title}
-          </button>
-        ) : (
-          <div className="quote truncate">{title}</div>
-        )}
-        {actions}
+      <div className="note-header">
+        <div className="note-head">
+          <span className="note-seq">{seq}</span>
+          {jump ? (
+            <button
+              type="button"
+              className="quote truncate"
+              onClick={jump.onClick}
+              disabled={jump.disabled}
+              title={jump.title}
+            >
+              {title}
+            </button>
+          ) : (
+            <div className="quote truncate">{title}</div>
+          )}
+          {actions}
+        </div>
       </div>
+      {visibleTags.length > 0 && (
+        <div className="note-card-tags">
+          <NoteTagInput
+            tags={visibleTags}
+            editable={tagsEditable}
+            onRemove={onTagRemove}
+            onFilter={onTagFilter}
+          />
+        </div>
+      )}
       {body && (
         <NoteBodyView
           body={body}
@@ -121,6 +146,11 @@ function NoteRow({
   imageUrlBase,
   onPasteImage,
   avatarFor,
+  showBookTitles,
+  showHashtags,
+  hashtagsAddTags,
+  bookTitleFor,
+  contextNoteIds,
 }: {
   note: Note;
   actions: NoteActions;
@@ -130,6 +160,11 @@ function NoteRow({
   imageUrlBase?: string;
   onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   avatarFor?: AvatarResolver;
+  showBookTitles: boolean;
+  showHashtags: boolean;
+  hashtagsAddTags: boolean;
+  bookTitleFor?: (sourceId: string) => string;
+  contextNoteIds: ReadonlySet<string>;
 }) {
   // Chat-style layout: the author's picture floats to the left of the card and
   // all of the row's content (card + any inline editor) shares one column so
@@ -181,8 +216,11 @@ function NoteRow({
         </div>
         <NoteEditor
           initialBody={note.body}
+          initialTags={note.tags}
+          hashtagsAddTags={hashtagsAddTags}
+          showHashtags={showHashtags}
           submitLabel="Save"
-          onSave={(body) => actions.onEditSave(note, body)}
+          onSave={(body, tags) => actions.onEditSave(note, body, tags)}
           onCancel={actions.onEditCancel}
           validSeqs={refs.validSeqs}
           canSubmit={canWrite}
@@ -195,7 +233,9 @@ function NoteRow({
   }
 
   return withAvatar(
-    <>
+    <div
+      className={contextNoteIds.has(note.id) ? "note-result note-result--context" : "note-result"}
+    >
       <NoteCardView
         seq={note.seq}
         title={noteTitle(note)}
@@ -210,6 +250,8 @@ function NoteRow({
           disabled: !anchored,
           title: anchored ? "Jump to highlight" : undefined,
         }}
+        tags={showHashtags ? note.tags : undefined}
+        onTagFilter={actions.onTagFilter}
         actions={
           <>
             {syncState && (
@@ -292,12 +334,26 @@ function NoteRow({
           </>
         }
       />
+      {showBookTitles && (
+        <div className="note-metadata">
+          <button
+            type="button"
+            className="note-book-property"
+            title="Filter by book"
+            onClick={() => actions.onBookFilter(note.sourceId)}
+          >
+            {bookTitleFor?.(note.sourceId) ?? "Untitled book"}
+          </button>
+        </div>
+      )}
       {!deleted && actions.replyingTo === note.id && (
         <div className="note reply-compose">
           <NoteEditor
             initialBody=""
+            hashtagsAddTags={hashtagsAddTags}
+            showHashtags={showHashtags}
             submitLabel="Reply"
-            onSave={(body) => actions.onReplySave(note.id, body)}
+            onSave={(body, tags) => actions.onReplySave(note.id, body, tags)}
             onCancel={actions.onReplyCancel}
             validSeqs={refs.validSeqs}
             canSubmit={canWrite}
@@ -307,7 +363,7 @@ function NoteRow({
           />
         </div>
       )}
-    </>,
+    </div>,
   );
 }
 
@@ -321,6 +377,11 @@ function Replies({
   imageUrlBase,
   onPasteImage,
   avatarFor,
+  showBookTitles,
+  showHashtags,
+  hashtagsAddTags,
+  bookTitleFor,
+  contextNoteIds,
   depth,
 }: {
   parent: Note;
@@ -332,6 +393,11 @@ function Replies({
   imageUrlBase?: string;
   onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   avatarFor?: AvatarResolver;
+  showBookTitles: boolean;
+  showHashtags: boolean;
+  hashtagsAddTags: boolean;
+  bookTitleFor?: (sourceId: string) => string;
+  contextNoteIds: ReadonlySet<string>;
   depth: number;
 }) {
   const children = childrenOf(parent.id);
@@ -348,6 +414,11 @@ function Replies({
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
         avatarFor={avatarFor}
+        showBookTitles={showBookTitles}
+        showHashtags={showHashtags}
+        hashtagsAddTags={hashtagsAddTags}
+        bookTitleFor={bookTitleFor}
+        contextNoteIds={contextNoteIds}
       />
       <Replies
         parent={child}
@@ -359,6 +430,11 @@ function Replies({
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
         avatarFor={avatarFor}
+        showBookTitles={showBookTitles}
+        showHashtags={showHashtags}
+        hashtagsAddTags={hashtagsAddTags}
+        bookTitleFor={bookTitleFor}
+        contextNoteIds={contextNoteIds}
         depth={depth + 1}
       />
     </Fragment>
@@ -377,6 +453,11 @@ export function NoteThread({
   imageUrlBase,
   onPasteImage,
   avatarFor,
+  showBookTitles,
+  showHashtags,
+  hashtagsAddTags,
+  bookTitleFor,
+  contextNoteIds,
 }: {
   root: Note;
   childrenOf: (id: string) => Note[];
@@ -387,6 +468,11 @@ export function NoteThread({
   imageUrlBase?: string;
   onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   avatarFor?: AvatarResolver;
+  showBookTitles: boolean;
+  showHashtags: boolean;
+  hashtagsAddTags: boolean;
+  bookTitleFor?: (sourceId: string) => string;
+  contextNoteIds: ReadonlySet<string>;
 }) {
   return (
     <li className="note-thread">
@@ -399,6 +485,11 @@ export function NoteThread({
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
         avatarFor={avatarFor}
+        showBookTitles={showBookTitles}
+        showHashtags={showHashtags}
+        hashtagsAddTags={hashtagsAddTags}
+        bookTitleFor={bookTitleFor}
+        contextNoteIds={contextNoteIds}
       />
       <Replies
         parent={root}
@@ -410,6 +501,11 @@ export function NoteThread({
         imageUrlBase={imageUrlBase}
         onPasteImage={onPasteImage}
         avatarFor={avatarFor}
+        showBookTitles={showBookTitles}
+        showHashtags={showHashtags}
+        hashtagsAddTags={hashtagsAddTags}
+        bookTitleFor={bookTitleFor}
+        contextNoteIds={contextNoteIds}
         depth={1}
       />
     </li>

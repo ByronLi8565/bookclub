@@ -1,6 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useSwipeable } from "react-swipeable";
-import type { Pane } from "../shared/MobilePager.tsx";
 import type { ExpandedPane } from "./visibility.ts";
 
 const MIN_PCT = 25;
@@ -8,6 +7,8 @@ const MAX_PCT = 80;
 const PANE_SWIPE_DELTA_PX = 50;
 const CHROME_SWIPE_DELTA_PX = 80;
 const PANE_SWIPE_DURATION_MS = 500;
+
+export type Pane = "reader" | "notes";
 
 export type WorkspaceLayoutMode =
   | {

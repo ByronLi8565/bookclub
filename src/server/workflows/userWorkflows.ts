@@ -5,7 +5,6 @@ import {
   type StoredReadingPosition,
 } from "../../shared/types/readingPositions.ts";
 import { SetUserPrefsRequest, type UserPrefs } from "../../shared/types/userPrefs.ts";
-import { decode } from "../../shared/schema.ts";
 import { MAX_DISPLAY_NAME_LENGTH, type ClubProfile } from "../../shared/types/profiles.ts";
 import { deleteImages, getImage, storeImage, validImageId } from "../services/images.ts";
 import type { Env } from "../env.ts";
@@ -13,6 +12,7 @@ import type { Identity } from "../state/GroupAgent.ts";
 import type { AuthAgent } from "../state/AuthAgent.ts";
 import {
   fail,
+  decodeRequest,
   requireIdentity,
   runWorkflow,
   tryPromise,
@@ -79,8 +79,7 @@ export function setUserPrefs(
   return runWorkflow(
     "UserWorkflows.setUserPrefs",
     Effect.gen(function* () {
-      const decoded = decode(SetUserPrefsRequest, body);
-      if (!decoded) return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+      const decoded = yield* decodeRequest(SetUserPrefsRequest, body);
       const me = yield* requireIdentity(env, request);
       const auth = yield* authFor(env, me);
       return { prefs: yield* tryPromise(() => auth.setPrefs(decoded.prefs)) };
@@ -116,8 +115,7 @@ export function setReadingPosition(
   return runWorkflow(
     "UserWorkflows.setReadingPosition",
     Effect.gen(function* () {
-      const decoded = decode(SetReadingPositionRequest, body);
-      if (!decoded) return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+      const decoded = yield* decodeRequest(SetReadingPositionRequest, body);
       const { position } = decoded;
       if (position.groupId !== decoded.groupId || position.sourceId !== decoded.sourceId) {
         return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));

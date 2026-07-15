@@ -21,8 +21,6 @@ export interface ReaderSearch {
   prev: () => void;
 }
 
-const DEBOUNCE_MS = 250;
-
 interface Deps {
   reader: SourceReader;
   ready: boolean;
@@ -50,7 +48,7 @@ export function useReaderSearch({
 
   const paintedRef = useRef<HighlightAnchor | null>(null);
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null);
-  const debounceRef = useRef<number | null>(null);
+  const navigationRef = useRef(0);
 
   if (readySnapshot !== ready) {
     setReadySnapshot(ready);
@@ -72,12 +70,14 @@ export function useReaderSearch({
   }, [eraseSearchHighlight, onSearchHighlightCleared]);
 
   const showMatch = useCallback(
-    (list: SearchMatch[], index: number) => {
+    async (list: SearchMatch[], index: number) => {
+      const navigation = ++navigationRef.current;
       clearPaint();
       const match = list[index];
       setActive(match ? index : -1);
       if (!match) return;
-      void goTo(match.anchor);
+      await goTo(match.anchor).catch(() => {});
+      if (navigation !== navigationRef.current) return;
       drawSearchHighlight(match.anchor);
       paintedRef.current = match.anchor;
     },
@@ -85,8 +85,7 @@ export function useReaderSearch({
   );
 
   const cancelPending = useCallback(() => {
-    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-    debounceRef.current = null;
+    navigationRef.current += 1;
     if (fiberRef.current) {
       Effect.runFork(Fiber.interrupt(fiberRef.current));
       fiberRef.current = null;
@@ -105,29 +104,32 @@ export function useReaderSearch({
         return;
       }
       setSearching(true);
-      debounceRef.current = window.setTimeout(() => {
-        const run = Effect.fn("ReaderSearch.search")(function* () {
-          const found = yield* reader.search(q);
+      const run = Effect.fn("ReaderSearch.search")(function* () {
+        const found = yield* reader.search(q);
+        yield* Effect.sync(() => {
           setMatches(found);
           setSearching(false);
-          showMatch(found, 0);
         });
-        fiberRef.current = Effect.runFork(
-          run().pipe(Effect.catch(() => Effect.sync(() => setSearching(false)))),
-        );
-      }, DEBOUNCE_MS);
+        yield* Effect.promise(() => showMatch(found, 0));
+      });
+      fiberRef.current = Effect.runFork(
+        run().pipe(
+          Effect.delay("250 millis"),
+          Effect.catch(() => Effect.sync(() => setSearching(false))),
+        ),
+      );
     },
     [reader, cancelPending, clearPaint, showMatch],
   );
 
   const next = useCallback(() => {
     if (matches.length === 0) return;
-    showMatch(matches, (active + 1) % matches.length);
+    void showMatch(matches, (active + 1) % matches.length);
   }, [matches, active, showMatch]);
 
   const prev = useCallback(() => {
     if (matches.length === 0) return;
-    showMatch(matches, (active - 1 + matches.length) % matches.length);
+    void showMatch(matches, (active - 1 + matches.length) % matches.length);
   }, [matches, active, showMatch]);
 
   const openSearch = useCallback(() => {

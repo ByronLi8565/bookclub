@@ -1,5 +1,7 @@
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import {
+  createElement,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,8 +11,9 @@ import {
   type ComponentProps,
 } from "react";
 import { HIGHLIGHT_TAG, type Note, type NoteAuthor } from "../../../shared/types/notes.ts";
+import { normalizeTags, processNoteHashtags } from "../../../shared/notes/tags.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
-import type { SourceRef } from "../../../shared/types/sources.ts";
+import type { SourceRef, SourceSummary } from "../../../shared/types/sources.ts";
 import type { RosterEntry } from "../../logic/groups/groupClient.ts";
 import {
   avatarImagePath,
@@ -24,6 +27,15 @@ import {
   referenceSpace,
   selectNotes,
 } from "../../logic/notes/conversation.ts";
+import {
+  EMPTY_NOTE_QUERY,
+  filterConversation,
+  filterTermKey,
+  noteFilterSuggestions,
+  type NoteQuery,
+  type NoteQueryContext,
+  type NotesScope,
+} from "../../logic/notes/noteQuery.ts";
 import { blockquote, highlightMark } from "../../logic/notes/format.ts";
 import {
   captureHighlight,
@@ -34,6 +46,7 @@ import type { NoteViewer } from "../../logic/notes/permissions.ts";
 import { useNoteAgent } from "../../logic/notes/useNoteAgent.ts";
 import { useLatestRef } from "../../logic/useLatestRef.ts";
 import { useNotesPrefs } from "../../logic/settings/userPrefs.ts";
+import { NoteFilterBar } from "../notes/NoteFilterBar.tsx";
 import type { NotePanel } from "../notes/NotePanel.tsx";
 import type { AvatarResolver, NoteRefs } from "../notes/NoteThread.tsx";
 import {
@@ -65,6 +78,7 @@ export function useReaderNoteSession({
   file,
   storedBookTitle,
   initialReadingPosition,
+  books,
   members,
   viewer,
   layout,
@@ -78,6 +92,7 @@ export function useReaderNoteSession({
   file: File | null;
   storedBookTitle: string | null;
   initialReadingPosition: SourceReadingPosition | null;
+  books: SourceSummary[];
   members: RosterEntry[];
   viewer: NoteViewer;
   layout: ReturnType<typeof useWorkspaceLayout>;
@@ -92,7 +107,7 @@ export function useReaderNoteSession({
     const me = members.find((member) => member.id === viewer.userId);
     return { id: viewer.userId, name: me?.name ?? "You" };
   }, [members, viewer.userId]);
-  const { showAvatars } = useNotesPrefs();
+  const { showAvatars, hashtagsAddTags, showHashtags } = useNotesPrefs();
   const avatarFor = useMemo<AvatarResolver>(() => {
     const byId = new Map(members.map((member) => [member.id, member]));
     return (noteAuthor) => {
@@ -108,6 +123,32 @@ export function useReaderNoteSession({
   const notes = useMemo(
     () => selectNotes(agent.notes, { sources: [sourceId] }),
     [agent.notes, sourceId],
+  );
+  const [notesScopeKind, setNotesScopeKind] = useState<NotesScope["kind"]>("current-book");
+  const [noteQuery, setNoteQuery] = useState<NoteQuery>(EMPTY_NOTE_QUERY);
+  useEffect(() => {
+    setNotesScopeKind("current-book");
+    setNoteQuery(EMPTY_NOTE_QUERY);
+  }, [groupId]);
+  const notesScope = useMemo<NotesScope>(
+    () =>
+      notesScopeKind === "all-books" ? { kind: "all-books" } : { kind: "current-book", sourceId },
+    [notesScopeKind, sourceId],
+  );
+  const noteQueryContext = useMemo<NoteQueryContext>(
+    () => ({
+      sources: new Map(books.map((book) => [book.id, book.title ?? "Untitled book"])),
+      authors: new Map(members.map((member) => [member.id, member.name])),
+    }),
+    [books, members],
+  );
+  const filteredNotes = useMemo(
+    () => filterConversation(agent.notes, notesScope, noteQuery),
+    [agent.notes, notesScope, noteQuery],
+  );
+  const filterSuggestions = useMemo(
+    () => noteFilterSuggestions(agent.notes, noteQueryContext),
+    [agent.notes, noteQueryContext],
   );
   const canReference = agent.syncStatus !== "offline";
   const canUploadImages = agent.syncStatus !== "offline";
@@ -190,10 +231,12 @@ export function useReaderNoteSession({
     };
   });
 
-  function onComposeSave(body: string): void {
+  function onComposeSave(body: string, editorTags: string[] = []): void {
     const highlight = composingRef.current;
     if (!sourceIdRef.current || !highlight) return;
-    if (agent.addNote(sourceId, body, [highlight])) setComposing(null);
+    const processed = hashtagsAddTags ? processNoteHashtags(body) : { body, tags: [] };
+    const tags = normalizeTags([...editorTags, ...processed.tags]);
+    if (agent.addNote(sourceId, processed.body, [highlight], tags)) setComposing(null);
   }
 
   function onComposeCancel(): void {
@@ -232,16 +275,21 @@ export function useReaderNoteSession({
     return null;
   }
 
-  function onEditSave(note: Note, body: string): void {
-    if (agent.editNote(note.id, body)) setEditingId(null);
+  function onEditSave(note: Note, body: string, editorTags?: string[]): void {
+    const processed = hashtagsAddTags ? processNoteHashtags(body) : { body, tags: [] };
+    const tags = normalizeTags([...(editorTags ?? note.tags ?? []), ...processed.tags]);
+    const removed = editorTags ? (note.tags ?? []).filter((tag) => !tags.includes(tag)) : [];
+    if (agent.editNote(note.id, processed.body, tags, removed)) setEditingId(null);
   }
 
-  function onReplySave(parentId: string, body: string): void {
+  function onReplySave(parentId: string, body: string, editorTags: string[] = []): void {
     if (body === "") {
       setReplyingTo(null);
       return;
     }
-    if (agent.addReply(sourceId, parentId, body)) setReplyingTo(null);
+    const processed = hashtagsAddTags ? processNoteHashtags(body) : { body, tags: [] };
+    const tags = normalizeTags([...editorTags, ...processed.tags]);
+    if (agent.addReply(sourceId, parentId, processed.body, tags)) setReplyingTo(null);
   }
 
   useEffect(() => {
@@ -257,15 +305,21 @@ export function useReaderNoteSession({
     }
     const desired: DesiredHighlight[] = [];
     for (const note of notes) {
-      for (const highlight of note.highlights) desired.push({ noteId: note.id, highlight });
+      for (const highlight of note.highlights) {
+        desired.push({
+          noteId: note.id,
+          highlight,
+          canRebind: note.author.id === viewer.userId || viewer.isOwner,
+        });
+      }
     }
     const pending = composingRef.current;
-    if (pending) desired.push({ noteId: null, highlight: pending });
+    if (pending) desired.push({ noteId: null, highlight: pending, canRebind: false });
     const painter: HighlightPainter = {
       draw: (id, anchor) => view.drawHighlight(id, anchor, () => void view.goTo(anchor)),
       erase: (id) => view.eraseHighlight(id),
     };
-    Effect.runFork(
+    const fiber = Effect.runFork(
       updateHighlights(desired, drawnRef.current, {
         reader: view.reader,
         painter,
@@ -275,8 +329,18 @@ export function useReaderNoteSession({
     );
     return () => {
       cancelled = true;
+      Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [notes, view.ready, sourceId, view, agent.rebindHighlight, composingRef]);
+  }, [
+    notes,
+    view.ready,
+    sourceId,
+    view,
+    agent.rebindHighlight,
+    composingRef,
+    viewer.userId,
+    viewer.isOwner,
+  ]);
   useEffect(() => {
     drawnRef.current.clear();
   }, [sourceId]);
@@ -300,7 +364,7 @@ export function useReaderNoteSession({
     setReplyingTo((id) => (id === note.id ? null : id));
   }
 
-  const conversation = useMemo(() => buildConversation(notes), [notes]);
+  const conversation = filteredNotes.conversation;
   const { byId } = conversation;
   const allConversation = useMemo(() => buildConversation(agent.notes), [agent.notes]);
   const { byId: allById, bySeq: allBySeq } = allConversation;
@@ -319,6 +383,7 @@ export function useReaderNoteSession({
 
   const { flashHighlight, goTo, reader: sourceReader } = view;
   const pendingReferenceSeqRef = useRef<number | null>(null);
+  const pendingJumpSeqRef = useRef<number | null>(null);
   const jumpToHighlight = useCallback(
     (highlight: Highlight) => {
       const expectedSourceId = highlight.sourceId;
@@ -337,14 +402,47 @@ export function useReaderNoteSession({
   );
   const onJump = useCallback(
     (note: Note) => {
-      const highlight = effectiveHighlight(note, byId);
+      if (note.sourceId !== sourceId) {
+        pendingJumpSeqRef.current = note.seq;
+        onSelectBook(note.sourceId);
+        setPane(effectiveHighlight(note, allById) ? "reader" : "notes");
+        return;
+      }
+      const highlight = effectiveHighlight(note, allById);
       if (highlight) {
         setPane("reader");
         jumpToHighlight(highlight);
       }
     },
-    [byId, jumpToHighlight, setPane],
+    [sourceId, onSelectBook, allById, jumpToHighlight, setPane],
   );
+  const addFilterTerm = useCallback((term: NoteQuery["terms"][number]) => {
+    const key = filterTermKey(term);
+    setNoteQuery((current) =>
+      current.terms.some((candidate) => filterTermKey(candidate) === key)
+        ? current
+        : { ...current, terms: [...current.terms, term] },
+    );
+  }, []);
+  useEffect(() => {
+    const pendingJumpSeq = pendingJumpSeqRef.current;
+    if (pendingJumpSeq === null) return;
+    const target = allBySeq.get(pendingJumpSeq);
+    if (!target) {
+      pendingJumpSeqRef.current = null;
+      return;
+    }
+    if (target.sourceId !== sourceId || !file || !view.ready) return;
+    const highlight = effectiveHighlight(target, allById);
+    if (highlight) {
+      setPane("reader");
+      jumpToHighlight(highlight);
+    } else {
+      setPane("notes");
+      scrollNoteIntoView(target.seq);
+    }
+    pendingJumpSeqRef.current = null;
+  }, [allBySeq, allById, sourceId, file, view.ready, jumpToHighlight, setPane]);
   useEffect(() => {
     const pendingReferenceSeq = pendingReferenceSeqRef.current;
     if (pendingReferenceSeq === null) return;
@@ -399,6 +497,21 @@ export function useReaderNoteSession({
     onComposeSave,
     onComposeCancel,
     onPasteImage,
+    filters: createElement(NoteFilterBar, {
+      scope: notesScope,
+      query: noteQuery,
+      context: noteQueryContext,
+      suggestions: filterSuggestions,
+      currentSourceId: sourceId,
+      onScopeChange: (scope) => setNotesScopeKind(scope.kind),
+      onQueryChange: setNoteQuery,
+    }),
+    hasActiveFilters: noteQuery.terms.length > 0,
+    showBookTitles: notesScopeKind === "all-books",
+    showHashtags,
+    hashtagsAddTags,
+    bookTitleFor: (id: string) => noteQueryContext.sources.get(id) ?? "Untitled book",
+    contextNoteIds: filteredNotes.contextIds,
     refs: noteRefs,
     viewer,
     avatarFor: showAvatars ? avatarFor : undefined,
@@ -412,6 +525,11 @@ export function useReaderNoteSession({
       onEdit: (note: Note) => setEditingId(note.id),
       onEditSave,
       onEditCancel: () => setEditingId(null),
+      onTagFilter: (tag: string) => addFilterTerm({ kind: "tag", value: tag, negated: false }),
+      onBookFilter: (id: string) => {
+        setNotesScopeKind("all-books");
+        addFilterTerm({ kind: "property", property: "book", value: id, negated: false });
+      },
       onReply: (note: Note) => setReplyingTo(note.id),
       onReplySave,
       onReplyCancel: () => setReplyingTo(null),

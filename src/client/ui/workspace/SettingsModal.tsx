@@ -128,7 +128,7 @@ export function SettingsModal({
   const [category, setCategory] = useState<Category>(categories[0]?.id ?? "account");
 
   const { readingPositionOpenPolicy, smartArrows, pdfPageLayout } = useReaderPrefs();
-  const { showAvatars } = useNotesPrefs();
+  const { showAvatars, hashtagsAddTags, showHashtags } = useNotesPrefs();
 
   return (
     <Modal title={book ? "settings" : "account settings"} onClose={onClose}>
@@ -166,6 +166,16 @@ export function SettingsModal({
               label="Show profile pics"
               checked={showAvatars}
               onChange={(v) => setNotesPref("showAvatars", v)}
+            />
+            <SettingCheckbox
+              label="Hashtags add tags"
+              checked={hashtagsAddTags}
+              onChange={(v) => setNotesPref("hashtagsAddTags", v)}
+            />
+            <SettingCheckbox
+              label="Show hashtags"
+              checked={showHashtags}
+              onChange={(v) => setNotesPref("showHashtags", v)}
             />
           </>
         )}

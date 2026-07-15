@@ -1,8 +1,11 @@
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import { describe, expect, it } from "vitest";
 import type { NoteOp } from "../shared/types/notes.ts";
 import { applyOperations, emptyNoteState } from "../shared/notes/noteState.ts";
-import { NoteStore } from "../client/logic/notes/noteStore.ts";
+import { NoteStore, type NotePersistence } from "../client/logic/notes/noteStore.ts";
+import type { StoredNotes } from "../client/logic/notes/notesCache.ts";
 
 const author = { id: "u1", name: "Alice" };
 const run = <A>(e: Effect.Effect<A>) => Effect.runPromise(e);
@@ -61,6 +64,42 @@ describe("NoteStore", () => {
     expect(store.getView().notes.map((n) => n.body)).toEqual(["hi"]);
   });
 
+  it("keeps a newer server snapshot when IndexedDB hydration finishes later", async () => {
+    const cached = applyOperations(emptyNoteState(), [addOp("old", "old", "cached snapshot")], {
+      author,
+      isOwner: false,
+    }).state;
+    const server = applyOperations(emptyNoteState(), [addOp("live", "live", "server snapshot")], {
+      author: { id: "u2", name: "Bob" },
+      isOwner: false,
+    }).state;
+    const hydration = await run(Deferred.make<StoredNotes | null>());
+    const persistence: NotePersistence = {
+      load: () => Deferred.await(hydration),
+      save: () => Effect.void,
+    };
+    const store = new NoteStore("g1", author, false, persistence);
+    const fiber = Effect.runFork(store.hydrate());
+
+    await run(store.ingestServer(server));
+    await run(
+      Deferred.succeed(hydration, {
+        userId: author.id,
+        snapshot: cached,
+        pendingOps: [addOp("pending", "pending", "offline note")],
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await run(Fiber.join(fiber));
+
+    expect(
+      store
+        .getView()
+        .notes.map((note) => note.body)
+        .toSorted(),
+    ).toEqual(["offline note", "server snapshot"]);
+  });
+
   it("moves rejected ops to the failed set instead of dropping them", async () => {
     const store = new NoteStore("g1", author, false);
     await run(store.enqueue(addOp("op1", "n1", "ok")));
@@ -73,15 +112,5 @@ describe("NoteStore", () => {
     const view = store.getView();
     expect(view.pendingCount).toBe(0);
     expect(view.failedNoteIds.has("n2")).toBe(true);
-  });
-
-  it("merges a sibling tab's queue by opId without duplication", async () => {
-    const store = new NoteStore("g1", author, false);
-    await run(store.enqueue(addOp("op1", "n1", "a")));
-    await run(store.mergeForeign([addOp("op1", "n1", "a"), addOp("op2", "n2", "b")]));
-
-    const view = store.getView();
-    expect(view.pendingCount).toBe(2);
-    expect(view.notes.map((n) => n.body).toSorted()).toEqual(["a", "b"]);
   });
 });

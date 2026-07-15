@@ -1,7 +1,11 @@
 import { useHotkey } from "@tanstack/react-hotkeys";
 import {
+  BOLD_STAR,
   $convertFromMarkdownString,
   $convertToMarkdownString,
+  HIGHLIGHT,
+  ITALIC_STAR,
+  QUOTE,
   type Transformer,
 } from "@lexical/markdown";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
@@ -15,17 +19,26 @@ import { $isQuoteNode, QuoteNode } from "@lexical/rich-text";
 import {
   $getNodeByKey,
   $getRoot,
+  $getSelection,
+  $isRangeSelection,
   $insertNodes,
   $nodesOfType,
   $createParagraphNode,
   CLEAR_HISTORY_COMMAND,
   FORMAT_TEXT_COMMAND,
+  TextNode,
   type NodeKey,
 } from "lexical";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useLatestRef } from "../../../logic/useLatestRef.ts";
-import { NOTE_TRANSFORMERS } from "../../../logic/notes/renderHtml.ts";
 import { noteImageIds } from "../../../../shared/notes/images.ts";
+import {
+  completedNoteHashtagCursor,
+  isHiddenTag,
+  normalizeTags,
+  processCompletedNoteHashtags,
+  processNoteHashtags,
+} from "../../../../shared/notes/tags.ts";
 import {
   $createNoteImageNode,
   $isNoteImageNode,
@@ -34,6 +47,7 @@ import {
   NoteImageNode,
   type UploadedNoteImage,
 } from "./NoteImageNode.tsx";
+import { NoteTagInput } from "../NoteTagInput.tsx";
 import { ReferenceNode } from "./ReferenceNode.ts";
 import { createReferenceTransformer } from "./referenceTransformer.ts";
 
@@ -41,8 +55,62 @@ const editorConfig = {
   namespace: "note",
   nodes: [QuoteNode, ReferenceNode, NoteImageNode],
   onError: (error: Error) => console.error("lexical error", error),
-  theme: { text: { bold: "bc-bold", italic: "bc-italic" }, quote: "bc-quote" },
+  theme: {
+    text: { bold: "bc-bold", highlight: "bc-highlight", italic: "bc-italic" },
+    quote: "bc-quote",
+  },
 };
+
+const NOTE_TRANSFORMERS: Transformer[] = [QUOTE, HIGHLIGHT, BOLD_STAR, ITALIC_STAR];
+const HASHTAG_UPDATE_TAG = "note-hashtag";
+
+function HashtagPlugin({
+  enabled,
+  onTags,
+}: {
+  enabled: boolean;
+  onTags: (tags: string[]) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const onTagsEvent = useEffectEvent(onTags);
+  useEffect(
+    () =>
+      editor.registerUpdateListener(({ editorState, tags: updateTags }) => {
+        if (!enabled || updateTags.has(HASHTAG_UPDATE_TAG)) return;
+        const replacements = editorState.read(() => {
+          const selection = $getSelection();
+          const focusKey = $isRangeSelection(selection) ? selection.focus.key : null;
+          return $nodesOfType(TextNode)
+            .map((node) => {
+              const text = node.getTextContent();
+              return {
+                key: node.getKey(),
+                cursor: node.getKey() === focusKey ? completedNoteHashtagCursor(text) : null,
+                ...processCompletedNoteHashtags(text),
+              };
+            })
+            .filter((replacement) => replacement.tags.length > 0);
+        });
+        if (replacements.length === 0) return;
+        editor.update(
+          () => {
+            for (const replacement of replacements) {
+              const node = $getNodeByKey(replacement.key);
+              if (node instanceof TextNode) {
+                node.setTextContent(replacement.body);
+                if (replacement.cursor !== null)
+                  node.select(replacement.cursor, replacement.cursor);
+              }
+            }
+          },
+          { tag: HASHTAG_UPDATE_TAG },
+        );
+        onTagsEvent(replacements.flatMap((replacement) => replacement.tags));
+      }),
+    [editor, enabled],
+  );
+  return null;
+}
 
 function buildInitialState(initialBody: string, transformers: Transformer[]) {
   return () => {
@@ -68,7 +136,6 @@ function Chrome({
   onPasteImage,
   imageUrlBase,
   transformers,
-  referenceTransformer,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   submitLabel: string;
@@ -78,7 +145,6 @@ function Chrome({
   onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   imageUrlBase?: string;
   transformers: Transformer[];
-  referenceTransformer: Transformer;
 }) {
   const [editor] = useLexicalComposerContext();
   const [unresolvedImages, setUnresolvedImages] = useState(0);
@@ -242,7 +308,7 @@ function Chrome({
         ErrorBoundary={LexicalErrorBoundary}
       />
       <HistoryPlugin />
-      <MarkdownShortcutPlugin transformers={[NOTE_IMAGE_TRANSFORMER, referenceTransformer]} />
+      <MarkdownShortcutPlugin transformers={transformers} />
       {unresolvedImages > 0 && (
         <p className="note-editor-hint">Finish or remove image uploads before saving.</p>
       )}
@@ -284,18 +350,29 @@ export function NoteEditor({
   validSeqs,
   canSubmit = true,
   canReference = true,
+  initialTags = [],
+  hashtagsAddTags = false,
+  showHashtags = true,
 }: {
   initialBody: string;
   submitLabel: string;
-  onSave: (body: string) => void;
+  onSave: (body: string, tags?: string[]) => void;
   onCancel: () => void;
   onPasteImage?: (file: File) => Promise<UploadedNoteImage | null>;
   imageUrlBase?: string;
   validSeqs: Set<number>;
   canSubmit?: boolean;
   canReference?: boolean;
+  initialTags?: readonly string[];
+  hashtagsAddTags?: boolean;
+  showHashtags?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [tags, setTags] = useState(() => normalizeTags(initialTags));
+  const addTags = useCallback(
+    (added: string[]) => setTags((current) => normalizeTags([...current, ...added])),
+    [],
+  );
   // Offline, the target note's seq is unknowable, so we feed the reference
   // transformer an empty set — `@N` simply stays plain text — and tell the user
   // why below the editor.
@@ -312,19 +389,37 @@ export function NoteEditor({
     ...editorConfig,
     editorState: buildInitialState(initialBody, transformers),
   };
+  const visibleTags = tags.filter((tag) => !isHiddenTag(tag));
   return (
     <div className="note-editor" ref={containerRef}>
+      {showHashtags && visibleTags.length > 0 && (
+        <div className="note-editor-header">
+          <NoteTagInput
+            tags={visibleTags}
+            editable
+            onRemove={(tag) => setTags((current) => current.filter((item) => item !== tag))}
+          />
+        </div>
+      )}
       <LexicalComposer initialConfig={initialConfig}>
+        <HashtagPlugin enabled={hashtagsAddTags} onTags={addTags} />
         <Chrome
           containerRef={containerRef}
           submitLabel={submitLabel}
           canSubmit={canSubmit}
-          onSubmit={onSave}
+          onSubmit={(body) => {
+            if (!hashtagsAddTags) {
+              if (initialTags.length > 0) onSave(body, tags);
+              else onSave(body);
+              return;
+            }
+            const processed = processNoteHashtags(body);
+            onSave(processed.body, normalizeTags([...tags, ...processed.tags]));
+          }}
           onCancel={onCancel}
           onPasteImage={onPasteImage}
           imageUrlBase={imageUrlBase}
           transformers={transformers}
-          referenceTransformer={referenceTransformer}
         />
       </LexicalComposer>
       {!canReference && (

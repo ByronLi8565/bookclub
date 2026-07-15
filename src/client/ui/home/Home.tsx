@@ -152,11 +152,6 @@ export function Home({ session }: { session: Session }): React.ReactElement {
 
   useEffect(() => {
     loadGroups(authed, userId);
-  }, [authed, userId]);
-
-  // Refresh the club list when connectivity returns.
-  useEffect(() => {
-    if (online && authed) loadGroups(authed, userId);
   }, [online, authed, userId]);
 
   async function onCreate(e: React.FormEvent): Promise<void> {

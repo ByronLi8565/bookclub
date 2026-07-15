@@ -129,3 +129,11 @@ export const requireIdentity = Effect.fn("Workflow.requireIdentity")(function* (
   if (!me) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
   return me;
 });
+
+export const decodeRequest = Effect.fn("Workflow.decodeRequest")(function* <
+  S extends Schema.Decoder<unknown>,
+>(schema: S, value: unknown): Effect.fn.Return<S["Type"], WorkflowFailureError> {
+  return yield* Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError(() => fail(400, WorkflowError.InvalidRequest)),
+  );
+});
