@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { shouldBoot, targetBaseUrl, targetPort } from "../src/ports.ts";
 
 // Boots the `wrangler` target: `wrangler dev` on the e2e-only config
-// (wrangler.e2e.jsonc — the one with the SQLite migration, never deployed)
+// (wrangler.e2e.jsonc — the one with isolated SQLite exports, never deployed)
 // against a throwaway persist dir, so every run starts from clean DO state.
 // Set E2E_WRANGLER_URL to attach to an already-running instance instead (fast
 // iteration: `bunx wrangler dev --config wrangler.e2e.jsonc --port <p>` then

@@ -63,17 +63,11 @@ export default defineConfig(({ command }) => ({
     lowerDecorators(),
     pdfjsWasm(),
     react(),
-    // Local DOs need a dev-only migration for SQLite-backed agents; prod config stays untouched.
+    // Local development inherits the declarative SQLite DO exports from wrangler.jsonc.
     command === "serve"
       ? cloudflare({
           config: (config) => {
             config.vars = { ...config.vars, DEV_AUTH: "true" };
-            config.migrations = [
-              {
-                tag: "dev-sqlite-v1",
-                new_sqlite_classes: ["NoteAgent", "AuthAgent", "GroupAgent", "GroupRegistry"],
-              },
-            ];
           },
         })
       : cloudflare(),

@@ -68,14 +68,14 @@ scenario(
 ## Targets
 
 One target today: **`wrangler`** — the built worker under `wrangler dev` on the
-e2e-only `wrangler.e2e.jsonc` (which adds the `new_sqlite_classes` migration the
-agents SDK needs locally; it is NEVER deployed). Each run starts from a fresh
-throwaway persist dir. Adding a target = a factory in `src/targets/registry.ts`
+e2e-only `wrangler.e2e.jsonc` (which declares the SQLite exports the agents SDK
+needs locally; it is NEVER deployed). Each run starts from a fresh throwaway
+persist dir. Adding a target = a factory in `src/targets/registry.ts`
 
 - a `setup/<name>.globalsetup.ts` + a project in `vitest.config.ts`.
 
-> There is intentionally no `vite`/`dev` target yet. Vite local development now
-> injects the SQLite migrations, but this harness still uses a fresh isolated
+> There is intentionally no `vite`/`dev` target yet. Vite local development
+> inherits the SQLite exports, but this harness still uses a fresh isolated
 > Wrangler target so runs never share developer state.
 
 ## Running

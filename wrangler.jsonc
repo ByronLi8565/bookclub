@@ -24,13 +24,14 @@
       { "name": "GroupRegistry", "class_name": "GroupRegistry" },
     ],
   },
-  // NOTE: no `migrations` block. These four SQLite DO classes were originally
-  // created by alchemy, so their instances already exist with data. Declaring
-  // `new_sqlite_classes` again would fail (code 10074) and re-declaring the
-  // lineage risks the live data. wrangler applies no migration when none are
-  // listed, leaving DO storage untouched. If DO schema changes are needed
-  // later, reintroduce a migrations block whose first tag follows the worker's
-  // current (alchemy-set) migration tag.
+  // These existing namespaces were created as SQLite-backed classes by alchemy.
+  // Declarative exports adopt them in place without replaying migration history.
+  "exports": {
+    "NoteAgent": { "type": "durable-object", "storage": "sqlite" },
+    "AuthAgent": { "type": "durable-object", "storage": "sqlite" },
+    "GroupAgent": { "type": "durable-object", "storage": "sqlite" },
+    "GroupRegistry": { "type": "durable-object", "storage": "sqlite" },
+  },
   "r2_buckets": [
     { "binding": "BOOKS", "bucket_name": "bookclub-books" },
     { "binding": "IMAGES", "bucket_name": "bookclub-images" },
