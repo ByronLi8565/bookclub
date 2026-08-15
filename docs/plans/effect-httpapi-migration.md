@@ -462,6 +462,31 @@ some of the looser wording above and elsewhere in this plan; where they conflict
 - **Effect interruption does not cancel an in-flight library promise.** A Mount awaiting epub.js or
   PDF.js must check a released flag and dispose of the handle when the promise finally resolves, or
   a fast source switch leaks a document and its worker.
+- **A custom element is `display: inline` until told otherwise.** The widget replacing a decorator
+  node must set its own `display: block`: with an inline host, `position: relative` does not
+  establish the containing block its absolutely positioned chrome measures against, so the handle
+  and the remove button land against a distant ancestor — off-screen, unhittable, and invisible to
+  a test that only checks that the element exists.
+- **jsdom has no `setPointerCapture`.** A drag implemented with pointer capture must treat it as
+  optional or every jsdom test of the widget throws; the drag still tracks correctly over the
+  handle without it, and the browser suite covers the captured path.
+- **Resolving a Lexical node from a DOM node needs the editor active.**
+  `$getNearestNodeFromDOMNode` inside `editor.getEditorState().read(...)` silently finds nothing;
+  `editor.read(...)` (or `editor.update(...)`) is what makes it work.
+
+- **epub.js reads `this` inside `display`.** Holding `rendition.display` in a local, as a Mount
+  adapter naturally does, makes every call throw `undefined is not an object (evaluating
+  'this.displaying')` — and the adapter's own fallback loop reports that as "no displayable section
+  found in epub". Bind it. jsdom fakes never caught this; the first real browser render did.
+- **Playwright's WebKit build cannot store a `Blob` or `File` in IndexedDB** (`UnknownError: Error
+  preparing Blob/File data to be stored in object store`). The browser suite therefore cannot seed
+  the production source cache for the Foldkit reader; its harness substitutes a byte loader that
+  fetches the fixture URL instead. That substitution is only possible because the byte loader is
+  the reader slice's one constructor-injected environment dependency.
+- **A Foldkit reader needs real height before either library will paginate.** `.reader-surface` is
+  `height: 100%`, so the reader's own shell has to be the flex column that gives it that height;
+  without it epub.js resolves no displayable section and the failure looks like a corrupt book.
+
 - **`test:foldkit` runs Node plus jsdom, which cannot render.** epub.js never settles `display()`
   (the srcdoc iframe never finishes loading and jsdom `Range` has no `getBoundingClientRect`), and
   there is no canvas backend for PDF.js rasterization. Parsing, lifecycle, cancellation, teardown,
@@ -751,13 +776,17 @@ native generated-client suites pass. Every migrated exact Hono route is gone.
    exact restore error statuses.
 4. Migrate account avatar and Group Member Name profile routes, preserving R2 streaming and public
    avatar caching. Prefer streaming R2 bodies; buffer only when the archive or SDK requires it.
-5. Build the Foldkit workspace and reader Model around domain state only: selected source, reading
-   position, layout, search, selection, chrome, modal, and load/error states.
-6. Port epub.js and PDF.js as Mount adapters. Reuse renderer-independent anchor, search, pagination,
-   health, and snapshot helpers. Mount scopes own live documents, renditions, render tasks, canvases,
-   observers, and event listeners.
-7. Replace React hotkey and swipe libraries with Foldkit/browser event Subscriptions only after the
-   existing keyboard, touch, reduced-motion, and accessibility behavior is captured in browser tests.
+5. [x] Build the Foldkit workspace and reader Model around domain state only: selected source,
+   reading position, layout, search, selection, chrome, modal, and load/error states.
+6. [x] Port epub.js and PDF.js as Mount adapters. Reuse renderer-independent anchor, search,
+   pagination, health, and snapshot helpers. Mount scopes own live documents, renditions, render
+   tasks, canvases, observers, and event listeners. Highlight painting and erasing, search-highlight
+   painting, live spread relayout with annotation repaint, and pagination measurement are adapter
+   operations acting on the live session, not Model state.
+7. [x] Replace React hotkey and swipe libraries with Foldkit/browser event Subscriptions only after
+   the existing keyboard, touch, reduced-motion, and accessibility behavior is captured in browser
+   tests. Captured in `src/tests/playwright/readerKeyboard.pw.ts` and `readerGestures.pw.ts`;
+   reproduced by `readerKeyMessage` and `readerSwipeStream` behind two gated Subscriptions.
 8. Retain image compression and browser `File` construction as client implementation details. Add
    byte/status/header regressions for every raw HttpApi response mode.
 
@@ -785,12 +814,19 @@ HttpApi.
    values. The Mount publishes a paste _fact_; a Command dispatched from `update` performs the
    upload and applies the result. Paste handling, upload retry/discard, and unresolved-image gating
    are therefore Phase 6 update/Command work, not Mount work.
-7. `NoteImageNode` is the largest editor-parity risk. It is a `DecoratorNode<ReactNode>` whose
+7. [x] `NoteImageNode` was the largest editor-parity risk: a `DecoratorNode<ReactNode>` whose
    resize, remove, and retry UI is React rendered inside `decorate()`, which is dead weight without
-   a framework renderer; decorator nodes must render through `createDOM`/`updateDOM` after cutover.
-   Markdown round-tripping and static image rendering port cleanly, but the interactive image UI has
-   no Foldkit equivalent yet. If it cannot be reproduced, that is the Lexical stop condition, not a
-   detail to defer silently.
+   a framework renderer. **Resolved by moving the widget out of the framework entirely.** The
+   interactive chrome is a native custom element, `<note-image>`
+   (`src/client/logic/notes/noteImageElement.ts`), which owns its own DOM and reports what the
+   reader did as `CustomEvent`s. Lexical writes its properties from `createDOM`/`updateDOM` and
+   `decorate()` returns nothing; the Mount listens for its events on the editor root; Foldkit views
+   bind the same element declaratively through `CustomElement.define`
+   (`src/client/foldkit/noteImage.ts`). This is the seam Foldkit documents for widgets with
+   "typed JS properties going in, `CustomEvent`s coming out", and it makes the chrome testable
+   under jsdom through `Scene.CustomElement.emit` and plain event dispatch — coverage the React
+   decorator never had. React keeps its own `decorate()` until cutover; the element is
+   framework-neutral and can be adopted there first if the two entries need identical DOM.
 8. Add raw Effect router handlers for the authenticated NoteAgent paths and verify cookie plus query
    token gating before removing their Hono registrations. These handlers are outside the HttpApi
    contract and must keep their current `text/plain` bodies and statuses — `unauthenticated`/401,
@@ -1014,6 +1050,17 @@ routes.
 | Bundle/cutover       | One renderer, one Effect, no source fixtures or development-only tooling; main bundle size recorded at every gate                |
 | Service worker       | Navigation denylist matches the router prefixes; installed PWA updates to the new entry                                          |
 | Regression           | `bun run test`, `bun run e2e`, `bun run test:e2e`, `bun run test:visual`, and `bun run check` against the recorded lint baseline |
+
+### Running the Foldkit entry
+
+`bun run dev` serves React at `/` and the Foldkit entry at `/foldkit` (`foldkit.html`), both against
+the same local worker with `DEV_AUTH=true`. Seed an account the Foldkit login can use — it is
+password-only — with `POST /auth/start` (dev sign-in) followed by `PUT /me/password`.
+
+**Every gate in this matrix passed while sign-in, group loading, and opening a book were all broken
+in the assembled application.** Slice tests and harnesses cover the pieces; nothing crossed the seam
+between the whole client and a real server. Treat driving the running entry as a verification step
+in its own right, not as a demo.
 
 `bun run e2e` is the authoritative black-box structured HTTP and Agent integration suite. Keep its
 surfaces independent of server modules. Add contract-level tests through the generated client, but
