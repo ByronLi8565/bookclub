@@ -67,22 +67,23 @@ The harness cannot use the production source cache: Playwright's WebKit build re
 `Blob` in IndexedDB. It substitutes a byte loader that fetches the fixture URL, which is only
 possible because the loader is injected when the slice is constructed.
 
-## Validation — 2026-08-19 (after the shell restructure)
+## Validation — 2026-08-20 (after the parity suite)
 
 - `bun run check` passes (format, lint, typecheck).
-- `bun run test` — 313 passed across 49 files.
-- `bun run test:foldkit` — 105 passed across 12 files.
+- `bun run test` — 437 passed across 61 files, including 18 parity comparisons against React.
 - `bun run e2e` — 10 passed across 9 scenarios against a booted wrangler worker.
-- `bun run build` passes; the React client is 359.00 kB gzip, so Foldkit stays out of it.
-- `foldkitApp.pw.ts` — passes on Desktop Chrome, run repeatedly.
+- `bun run build` passes; the React client is 358.64 kB gzip, so Foldkit stays out of it.
+- `foldkitApp.pw.ts` — passes on Desktop Chrome.
 - **The WebKit projects were not run.** See "Running the browser suite": they cannot start in a
   detached session. They passed 51/51 on 2026-08-18 and nothing since then touched the reader,
   gesture, or composer paths, but that is an inference and not a result.
 
 Every defect in "What running the app turned up" slipped through the gates that existed at the time,
 because they all live in the seam between the assembled client and a real server. `foldkitApp.pw.ts`
-is that missing gate and now covers the whole journey — sign in, clubs, club, book, split reader —
-with an assertion at each stage that names the failure it guards against.
+is that missing gate and now covers the whole journey — dev sign-in by code, sign out, sign in by
+password, clubs, the club opening straight onto its book, the divider drag that expands a pane, and
+each of the three header overlays — with an assertion at each stage that names the failure it
+guards against.
 
 ## Running the browser suite
 
@@ -98,12 +99,64 @@ an agent session parented to a daemon rather than to a terminal — `launchctl m
   the Desktop/Mobile Safari projects — the reader, gesture, and composer suites — **cannot run in a
   detached session at all** and has to be run from a terminal.
 
+  Confirmed under lldb on 2026-08-20, because "it just aborts" is not a diagnosis. The bundle is
+  intact and is the right build (revision 2311, `browserVersion` 26.5 against macOS 26.5), and
+  `DYLD_FRAMEWORK_PATH` does resolve to the bundled `WebKit.framework` — the abort is later, in
+  process startup:
+
+  ```
+  frame #3: HIServices`___RegisterApplication_block_invoke + 12716
+  frame #6: HIServices`_RegisterApplication + 164
+  frame #12: AppKit`_NSInitializeAppContext + 52
+  frame #14: AppKit`+[NSApplication sharedApplication] + 128
+  frame #15: AppKit`NSApplicationMain + 384
+  ```
+
+  `--headless` does not avoid it: Playwright's macOS WebKit goes through `NSApplicationMain` either
+  way, and even `--version` aborts. Rejoining the GUI session from inside the detached one is not
+  possible either — `launchctl asuser` and `launchctl print gui/$UID` both answer `141: Reentrancy
+  avoided`, and `sudo` reports the session has no passwd entry. Docker is not a way around it
+  on this machine: the daemon is Docker Desktop, which needs the same GUI session to start.
+
 So `PW_DETACHED_SESSION=1 bunx playwright test src/tests/playwright/foldkitApp.pw.ts` is what an
 agent can verify by itself; the WebKit projects need the reader to run them.
 
 Editing a source file and immediately running the suite flakes: the page can load while Vite is
 mid-invalidation and render nothing, failing on the first assertion. Give the dev server a few
 seconds to settle before re-running.
+
+## Parity tests — how the migration is proven finished
+
+`src/tests/parity/` renders the React component and the Foldkit view of the **same** surface into
+jsdom and diffs their structure. A failure prints both trees, so it names the element that drifted.
+`src/tests/parity/README.md` is the guide; `domSignature.ts` is the definition of "the same
+interface" (tag, classes, and the attributes that change what a control is or how it is announced —
+ids, keys, styles and values are a renderer's own business).
+
+Covered today: the workspace header, the note panel (thread, empty, loading, unsynced, composing),
+the info screen, the login modal (all four states), the settings modal (reader and account pages),
+the presence modal (people and books pages), and the home card (signed out, club list, naming a
+club). Both host compositions — the account page inside settings, the invite controls inside
+presence — are compared as the host assembles them, not module by module.
+
+Writing them found eight divergences that eyeballing had not, every one now fixed:
+
+- an invented "Quote this passage" control, and quoted passages shown as chips, where React seeds
+  the passage into the draft as a blockquote and keeps the highlight out of sight;
+- an "Add image" file picker in the composer, where React uploads by paste only;
+- a second presence indicator in the note panel's toolbar, left from before the workspace header
+  existed;
+- a panel-level sync status, where React marks the individual note;
+- a panel-level error line, where React raises a toast;
+- `aria-label`s on the panel, its list, the composer, and the club list that React does not have;
+- a modal named by `aria-label` where React names it by `aria-labelledby` against its own heading;
+- the club-name field always open, where React offers "create a new bookclub" first — which also
+  meant no pending guard against a double submit and no inline name error.
+
+A deliberate difference is written down at the call site as a `rewrite` that normalises both sides,
+with a comment saying why. There is exactly one: React navigates by URL and uses `<a href>` where
+Foldkit's route still lives in the Model and uses `<button>`. **When URL routing lands at cutover,
+delete those rewrites — the tests should still pass.**
 
 ## Known flakiness — read before debugging
 
@@ -220,6 +273,94 @@ Restructuring the shell (below) surfaced two more of the same kind:
   `ChangedLoginEmail` and `ChangedLoginPassword` now. **One message per field is the rule** — a
   message carrying a sibling field's value is a stale write waiting to happen.
 
+Restructuring the sign-in modal surfaced two more:
+
+- **An extra element between `.app` and `.home` collapses the page.** `.app` is a column flex box
+  of `100dvh` and `.home` claims `height: 100%`; a percentage height against an auto-height parent
+  resolves to auto, so the card shrank to its contents and the whole screen shifted the moment the
+  modal opened. React renders the modal as a *sibling* of `.home-card` inside `.home`, and so does
+  Foldkit now. The jsdom test asserts `.app > .home > .home-card` and `.home > .modal-backdrop`;
+  the browser test compares the card's bounding box before and after the modal opens.
+- **Sign-in was password-only, which is the one way in the dev worker does not offer.** A dev
+  worker signs a known email in outright from `/auth/start`; an account with no password had no
+  path at all. The Foldkit modal now carries the whole React flow — see below.
+
+### 3a. The sign-in flow, at parity
+
+The Foldkit modal is now what React's is: an email step with an *optional* password, whose primary
+action reads "send code" until a password is typed; a "use a passkey" button gated on
+`passkeysSupported()`; a code step for what the server mailed; the `.modal-success` note that stays
+up for a beat before the modal closes; and `.login-error` sentences under both forms.
+
+Three things are shared rather than reimplemented, so the two clients cannot drift while both exist:
+
+- `src/client/logic/auth/authMessages.ts` — the API-code-to-sentence table both modals read.
+- `authClient.passkeyLogin` — the WebAuthn ceremony. `useSession` now calls it instead of carrying
+  its own copy; the caller still owns what a returned session does next.
+- `rememberSession` in `application.ts` stores the bearer token every login path returns, which the
+  native app needs and the previous password-only Command dropped.
+
+Signing out now returns to `Home` rather than `Login`: React leaves you on the clubs card as an
+anonymous reader, not staring at the form you just left.
+
+### 3b. The shell gaps, closed
+
+Every item that stood on the gaps list is now built, and the shell is React's shape rather than an
+approximation of it. What changed structurally:
+
+- **Routes are React's two.** `Home` and `Club({ groupRef })`, nothing else. Signing in and the
+  account are overlays over whichever page is showing, and **a club with a book *is* the workspace** —
+  there is no catalog page in between, which is what React does. The `Login`, `AccountSettings` and
+  `Reader` routes are gone, and with them the invented catalog.
+- **One `Overlay` value** says which modal is up, where React keeps an `activeModal` per surface.
+  Escape and a press outside `.modal-inner` close it, through a Subscription gated on one being
+  open — snabbdom attaches real listeners, so React's `stopPropagation` on the modal body has no
+  Foldkit equivalent.
+- **The shell is React's `App`**: an offline banner, the page, and the toast viewport. The page owns
+  its own full-screen chrome (`.app` for the workspace, `.home` for the card pages), so the shell
+  adds none. Its root carries `.foldkit-root`, added to `base.css` beside `#root`, because the
+  runtime replaces its mount point and the page needs a full-height ancestor.
+- **Toasts are React's store as Model state** — several at once, each with a kind, a dwell time and
+  an optional link — and each raises its own dismissal Command, so nothing can put one on screen and
+  forget to take it off.
+- **The desktop split has its divider.** Dragging it moves the share against the layout's own box
+  through a pointer Subscription; past either shoulder it expands the other pane
+  (`split--expanded-left`/`right`), and `Shift+Arrow` steps between those states. React keeps the
+  reader out of pointer-move reconciliation by writing the pane's width imperatively; Foldkit's
+  patch of one style attribute is cheap enough not to need that.
+- **The reader bar is React's**: the book menu (switch, rename by double-click, add), page count with
+  percentage, the fit-to-text button on a PDF, and `−` / size / `+`. The layout `<select>` is gone —
+  page layout is a stored preference, and `d` writes that preference rather than reader-local state.
+  Search is React's `.reader-search` row. `s` opens the book menu and `Mod+S` pushes the reading
+  place, both of which React had and Foldkit did not.
+
+Five modules were built to the same seam as `notes.ts` and `reader.ts` — own Model, own Messages,
+own Commands, a view taking a context — and `application.ts` owns which one is on screen:
+
+| Module | React counterpart |
+| --- | --- |
+| `settings.ts` | `SettingsModal` + `UserSettings` + `BackupControls` |
+| `presence.ts` | `PresenceModal` and the header's presence indicator |
+| `upload.ts` | `UploadModal` |
+| `invite.ts` | `InviteModal` / `InviteControls` |
+| `info.ts` | `InfoScreen` |
+
+Shared rather than duplicated: `modal.ts` (React's `Modal`/`ModalPagerTabs` chrome plus the
+dismissal streams), `noteBody.ts` (React's `NoteBodyView`, inline markup and all, now used by both
+the notes panel and the info cards), `loading.ts` (React's `Loading`), and
+`accountSectionView` in `application.ts` (React's `AccountSettings`, passed into the settings modal).
+
+React composes one `InviteControls` into both the invite modal and the presence modal, and one
+`BackupControls` into the presence modal. Foldkit does the same by composition: `invite.ts` owns the
+invite state and `settings.ts` owns the backup state, and `presence.ts` takes both as rendered
+children. This was not free — the first cut had three modules defining Messages with the same
+`_tag`, which the host dispatches by tag guard, so they would have folded into each other's `update`.
+
+**The notes panel is React's markup now.** It was the largest remaining unstyled surface: the panel,
+the thread, the filter bar and the tag chips are `NotePanel`/`NoteThread`/`NoteFilterBar`'s own class
+names, replies nest to React's `MAX_INDENT`, deleted notes render greyed instead of vanishing, and a
+note body goes through `noteBody.ts` rather than rendering as plain blocks.
+
 ### 4. The shell, restructured
 
 Home, login, club, and account render React's own card markup — `.home > .home-card` with
@@ -247,6 +388,10 @@ Two specifics worth planning for:
 
 - `src/client/logic/net/api.ts` (`apiFetch`) can now be deleted outright. It survives only for React
   callers; `bookclubClient` already reproduces everything it does.
+- **Wire URL routing** (see "Known gaps"): `routing: { onUrlRequest, onUrlChange }` on
+  `makeApplication`, `parseUrlWithFallback` over `/` and `/clubs/:groupRef`, `Navigation.pushUrl` for
+  in-app moves, and the club buttons back to `<a href>`. Do it in the same change that makes
+  `index.html` the Foldkit entry, so `/clubs/…` stops belonging to React.
 - `src/tests/playwright/visual.pw.ts` snapshots are taken against the React DOM and will not survive
   cutover. Re-baseline **after** the parity scenarios pass, and diff old against new for unintended
   visual changes rather than accepting the new images blind.
@@ -260,17 +405,34 @@ authorized.
 
 ## Known gaps in the Foldkit shell
 
-The reader, the composer, the notes list, and the card pages are at parity. What is still missing:
+Every item that was on this list is built. What is left is one structural piece and a set of small
+deliberate deviations, each recorded where it was made.
 
-- No settings modal, info screen, presence indicator, avatar, or upload flow. A club with no book
-  has no way to add one from the Foldkit entry.
-- The desktop split opens at React's default 62% and has no divider to drag; the expand-a-pane
-  states (`split--expanded-left`/`right`) have no trigger.
-- Sign-in is password-only. The email-code flow, passkey sign-in, and dev sign-in have no view.
-- A posted note renders its images and its text as plain blocks — inline formatting, quotes, and
-  references are still unrendered.
-- Opening a book logs one epub.js `TypeError: ... reading 'displayOptions'` that does not stop the
-  book from rendering. Unchased.
+**Structural, and a cutover task rather than a shell one:**
+
+- **No URL routing.** Routes are Model state; React uses wouter over `/` and `/clubs/:groupRef`, so
+  deep links, the browser's back button, and a reload landing where you were do not work yet.
+  Foldkit has the router for it (`root`, `literal`, `param`, `mapTo`, `parseUrlWithFallback`, and
+  `Navigation.pushUrl`) and the Route union is already React's two routes, so this is wiring
+  `routing` into `makeApplication` and turning the club buttons back into `<a href>`. It was left
+  until cutover deliberately: in development the entry is served at `/foldkit`, and `/clubs/…` there
+  belongs to the React app.
+
+**Deliberate deviations, all small:**
+
+- The upload modal's inspection progress bar stays at 0%. `Command.define` emits exactly one
+  Message, so `inspectSource`'s `onProgress` has nowhere to go without a queue and a Subscription;
+  the Model field and the message exist, nothing feeds them.
+- No local object-URL preview of a picked avatar, and no client-side image compression before
+  upload (the note-image upload already skipped compression).
+- A downloaded backup is named `notes.bookclub`: the generated client does not expose
+  `Content-Disposition`, so React's server-supplied filename is replaced by its own fallback.
+- The book-menu and settings dropdowns have no ArrowUp/ArrowDown roving focus, and the modal pager
+  has no Left/Right paging. All three are `useHotkey` behaviours that belong in Subscriptions.
+- Choosing the same file twice in a row fires no second change: React clears `event.target.value`
+  after a pick and `OnFileChange` has no equivalent.
+- The presence modal's book metadata editor has no word-count refresh (it downloads the whole book
+  and re-inspects it, which belongs to the reader's source slice).
 
 ## Carried gaps
 
@@ -314,6 +476,20 @@ put a `Blob` in IndexedDB, and the reader shell must supply its surface's height
   nothing the reader can see.
 - **One message per input.** A message carrying a sibling field reads that field from the model its
   handler closed over, and writes a stale value back over it on the next edit.
+- **Two modules must not define the same Message `_tag`.** The host dispatches by schema guard, so
+  identical tags in two slices fold into whichever guard runs first. Where React shares a component
+  between two surfaces, share the module and compose its rendered output — do not reimplement it.
+- **A Foldkit view cannot stop propagation.** snabbdom attaches real listeners and events bubble, so
+  React's "press inside the modal body does not reach the backdrop" has to be a document-level
+  Subscription gated on the modal being open.
+- **`Book.destroy()` in epub.js drops the deferred map its own `unpack` still resolves against.**
+  Destroying a book while the display-options fetch is in flight throws inside the library; the
+  teardown waits for the open to settle first.
+- **A view may not wrap a page in an extra element.** `.app`/`.home` and the reader's split both
+  size through direct-child relationships, so a wrapper div silently collapses the layout. Overlays
+  go in as siblings — `homeView` takes an `overlay` argument for this.
+- `client.auth.start` decodes to `void | { body, headers }`: the dev worker's outright sign-in and
+  the real worker's 204 share one endpoint, and `result === undefined` is what tells them apart.
 
 ## Working agreements
 

@@ -36,7 +36,10 @@
 
 html,
 body,
-#root {
+#root,
+/* The Foldkit runtime replaces its mount point, so the element it renders is
+   the document's app root rather than `#root`. */
+.foldkit-root {
   height: 100%;
   margin: 0;
 }

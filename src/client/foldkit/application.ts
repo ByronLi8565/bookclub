@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect";
+import { Duration, Effect, Option, Schema, Stream } from "effect";
 import { Command, Runtime, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
@@ -11,6 +11,7 @@ import {
   RosterEntry,
 } from "../../shared/types/groups.ts";
 import { PasskeyInfo } from "../../shared/types/passkeys.ts";
+import { groupUrlName } from "../../shared/groupUrls.ts";
 import {
   currentSessionMode,
   makeNoteAgentResources,
@@ -18,8 +19,69 @@ import {
   type NoteAgentRequirements,
   type NoteAgentService,
 } from "./resources/noteAgent.ts";
-import { registerPasskey } from "../logic/auth/authClient.ts";
+import { passkeyLogin, passkeysSupported, registerPasskey } from "../logic/auth/authClient.ts";
+import { loginErrorMessage } from "../logic/auth/authMessages.ts";
+import { clubNameErrorMessage } from "../logic/groups/groupMessages.ts";
+import { setSessionToken } from "../logic/net/api.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
+import { loadingView } from "./loading.ts";
+import { escapeKeyStream, modalView, pressOutsideModalStream } from "./modal.ts";
+import settingsIcon from "@assets/settings.svg";
+import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
+import { books } from "../../shared/sources.ts";
+import { GroupAction, permits } from "../../shared/groupPermissions.ts";
+import { stepExpandedPane } from "../ui/workspace/visibility.ts";
+import {
+  InfoModel,
+  infoView,
+  initialInfoModel,
+  isInfoMessage,
+  updateInfo,
+  type InfoMessage,
+} from "./info.ts";
+import {
+  DismissedSettingsNotice,
+  SettingsModel,
+  initialSettingsModel,
+  isSettingsMessage,
+  ChosePdfPageLayout,
+  OpenedSettings,
+  settingsPrefs,
+  settingsNotice,
+  settingsView,
+  updateSettings,
+  type SettingsMessage,
+} from "./settings.ts";
+import {
+  UploadModel,
+  initialUploadModel,
+  isUploadMessage,
+  updateUpload,
+  uploadView,
+  type UploadMessage,
+} from "./upload.ts";
+import {
+  InviteModel,
+  OpenedInvite,
+  initialInviteModel,
+  inviteControlsView,
+  inviteView,
+  isInviteMessage,
+  updateInvite,
+  type InviteMessage,
+} from "./invite.ts";
+import {
+  OpenedPresence,
+  PresenceModel,
+  initialPresenceModel,
+  isPresenceMessage,
+  presenceIndicatorView,
+  presencePeopleView,
+  presenceView,
+  updatePresence,
+  type PresenceMessage,
+} from "./presence.ts";
+import { backupControlsView } from "./settings.ts";
 import {
   AttachedNoteHighlight,
   FocusedNoteHighlight,
@@ -35,10 +97,10 @@ import {
   type NotesMessage,
 } from "./notes.ts";
 import {
+  ChangedReaderLayout,
   CommittedReaderSelection,
   IdentifiedReaderSession,
   JumpedToHighlight,
-  ReaderRoute,
   ReaderWorkspace,
   ShowedReaderHighlights,
   SwitchedReaderPane,
@@ -47,6 +109,7 @@ import {
   makeReaderSlice,
   makeReaderSubscriptions,
   openReader,
+  SelectedReaderSource,
   type ReaderMessage,
   type ReaderSelection,
 } from "./reader.ts";
@@ -57,12 +120,12 @@ const { update: updateReader, view: readerView } = reader;
 
 export const FOLDKIT_RUNTIME_ID = "bookclub-foldkit";
 
+/** React routes `/` and `/clubs/:groupRef` and nothing else: signing in and the
+ *  account live in overlays over whichever page is showing, and a club with a
+ *  book open *is* the workspace rather than a page of its own. */
 export const Home = r("Home");
-export const Login = r("Login");
-export const AccountSettings = r("AccountSettings");
-export const Group = r("Group", { groupRef: Schema.String });
-export const Reader = ReaderRoute;
-export const Route = Schema.Union([Home, Login, AccountSettings, Group, Reader]);
+export const Club = r("Club", { groupRef: Schema.String });
+export const Route = Schema.Union([Home, Club]);
 export type Route = typeof Route.Type;
 
 const SessionUser = Schema.Struct({
@@ -79,6 +142,29 @@ export const AuthenticatedSession = ts("AuthenticatedSession", { user: SessionUs
 export const Session = Schema.Union([LoadingSession, AnonymousSession, AuthenticatedSession]);
 export type Session = typeof Session.Type;
 
+/** Which overlay is up. React keeps one `activeModal` per surface; a single
+ *  tagged value says the same thing once for the whole application. */
+export const NoOverlay = ts("NoOverlay");
+export const LoginOverlay = ts("LoginOverlay");
+export const InfoOverlay = ts("InfoOverlay");
+export const SettingsOverlay = ts("SettingsOverlay");
+export const PresenceOverlay = ts("PresenceOverlay");
+export const UploadOverlay = ts("UploadOverlay");
+export const InviteOverlay = ts("InviteOverlay", {
+  groupRef: Schema.String,
+  displayName: Schema.String,
+});
+export const Overlay = Schema.Union([
+  NoOverlay,
+  LoginOverlay,
+  InfoOverlay,
+  SettingsOverlay,
+  PresenceOverlay,
+  UploadOverlay,
+  InviteOverlay,
+]);
+export type Overlay = typeof Overlay.Type;
+
 export const UnavailableAccount = ts("UnavailableAccount");
 export const ReadyAccount = ts("ReadyAccount", { user: SessionUser });
 export const Account = Schema.Union([UnavailableAccount, ReadyAccount]);
@@ -94,38 +180,126 @@ export const MOBILE_VIEWPORT_QUERY = "(max-width: 720px)";
 export const currentViewport = (): Viewport =>
   globalThis.matchMedia?.(MOBILE_VIEWPORT_QUERY).matches ? "narrow" : "wide";
 
-export const ErrorToast = Schema.Struct({ message: Schema.String });
-export type ErrorToast = typeof ErrorToast.Type;
+/** React's toast store, as Model state: several toasts at once, each with its
+ *  own kind, its own dwell time, and an optional link. */
+export const ToastAction = Schema.Struct({ label: Schema.String, href: Schema.String });
+export const Toast = Schema.Struct({
+  id: Schema.String,
+  type: Schema.Literals(["info", "error"]),
+  title: Schema.String,
+  message: Schema.String,
+  action: Schema.NullOr(ToastAction),
+  durationMs: Schema.Number,
+});
+export type Toast = typeof Toast.Type;
+
+const DEFAULT_TOAST_MS = 2000;
+
+export const errorToast = (title: string, message: string): Toast => ({
+  id: crypto.randomUUID(),
+  type: "error",
+  title,
+  message,
+  action: null,
+  durationMs: 6000,
+});
+
+export const infoToast = (title: string, message: string): Toast => ({
+  id: crypto.randomUUID(),
+  type: "info",
+  title,
+  message,
+  action: null,
+  durationMs: DEFAULT_TOAST_MS,
+});
+
+/** Signing in is a two-step form: an email (with an optional password, or a
+ *  passkey), then the code that was mailed out if neither shortcut applied. */
+export const LoginStep = Schema.Literals(["email", "code", "done"]);
+export type LoginStep = typeof LoginStep.Type;
 
 export const Model = Schema.Struct({
   route: Route,
   session: Session,
   account: Account,
+  loginStep: LoginStep,
   loginEmail: Schema.String,
   loginPassword: Schema.String,
+  loginCode: Schema.String,
+  loginError: Schema.NullOr(Schema.String),
+  loginBusy: Schema.Boolean,
+  passkeysAvailable: Schema.Boolean,
   groups: Schema.Array(GroupSummary),
   newGroupName: Schema.String,
+  creatingClub: Schema.Boolean,
+  newGroupPending: Schema.Boolean,
+  newGroupError: Schema.NullOr(Schema.String),
   currentGroup: Schema.NullOr(GroupSummary),
   membership: Schema.NullOr(Membership),
   members: Schema.Array(RosterEntry),
+  joinGroupRef: Schema.String,
   inviteToken: Schema.String,
   accountPasskeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
+  passkeyLabel: Schema.String,
+  currentPassword: Schema.String,
+  newPassword: Schema.String,
+  accountBusy: Schema.Boolean,
+  selectedSourceId: Schema.NullOr(Schema.String),
   reader: Schema.NullOr(ReaderWorkspace),
+  overlay: Overlay,
+  info: InfoModel,
+  settings: SettingsModel,
+  presence: PresenceModel,
+  upload: UploadModel,
+  invite: InviteModel,
+  renamingTarget: Schema.NullOr(Schema.String),
+  renameDraft: Schema.String,
+  splitShare: Schema.Number,
+  splitDragging: Schema.Boolean,
+  expandedPane: Schema.NullOr(Schema.Literals(["left", "right"])),
   viewport: Viewport,
   notes: NotesModel,
-  errorToast: Schema.NullOr(ErrorToast),
+  toasts: Schema.Array(Toast),
+  online: Schema.Boolean,
 });
 export type Model = typeof Model.Type;
 
 export const LoadedSession = m("LoadedSession", { user: SessionUser });
 export const FailedSession = m("FailedSession", { message: Schema.String });
-export const DismissedErrorToast = m("DismissedErrorToast");
+export const SpawnedToast = m("SpawnedToast", { toast: Toast });
+export const OpenedOverlay = m("OpenedOverlay", { overlay: Overlay });
+export const ClosedOverlay = m("ClosedOverlay");
+export const StartedRename = m("StartedRename", { target: Schema.String, value: Schema.String });
+export const ChangedRenameDraft = m("ChangedRenameDraft", { value: Schema.String });
+export const CommittedRename = m("CommittedRename");
+export const CancelledRename = m("CancelledRename");
+export const SteppedExpandedPane = m("SteppedExpandedPane", {
+  direction: Schema.Literals(["left", "right"]),
+});
+export const StartedSplitDrag = m("StartedSplitDrag");
+export const MovedSplitDivider = m("MovedSplitDivider", { share: Schema.Number });
+export const EndedSplitDrag = m("EndedSplitDrag");
+export const DismissedToast = m("DismissedToast", { id: Schema.String });
+export const ChangedOnline = m("ChangedOnline", { online: Schema.Boolean });
 export const ResizedViewport = m("ResizedViewport", { viewport: Viewport });
 export const Navigated = m("Navigated", { route: Route });
-export const ChangedLogin = m("ChangedLogin", { email: Schema.String, password: Schema.String });
-export const SubmittedPasswordLogin = m("SubmittedPasswordLogin");
+// One message per field. A message carrying both would have to read the other
+// from the model its handler closed over, and a handler that outlives an edit to
+// the other field then writes a stale value back over it.
+export const ChangedLoginEmail = m("ChangedLoginEmail", { email: Schema.String });
+export const ChangedLoginPassword = m("ChangedLoginPassword", { password: Schema.String });
+export const ChangedLoginCode = m("ChangedLoginCode", { code: Schema.String });
+export const SubmittedLogin = m("SubmittedLogin");
+export const SubmittedLoginCode = m("SubmittedLoginCode");
+export const RequestedPasskeyLogin = m("RequestedPasskeyLogin");
+export const SentLoginCode = m("SentLoginCode");
+export const FailedLogin = m("FailedLogin", { error: Schema.String });
+export const DismissedLogin = m("DismissedLogin");
 export const LoadedGroups = m("LoadedGroups", { groups: Schema.Array(GroupSummary) });
+export const StartedCreatingClub = m("StartedCreatingClub");
+export const CancelledCreatingClub = m("CancelledCreatingClub");
+export const FailedCreateGroup = m("FailedCreateGroup", { error: Schema.String });
 export const ChangedNewGroupName = m("ChangedNewGroupName", { name: Schema.String });
 export const SubmittedNewGroup = m("SubmittedNewGroup");
 export const CreatedGroup = m("CreatedGroup", { group: GroupSummary });
@@ -140,7 +314,25 @@ export const LoadedAccountSecurity = m("LoadedAccountSecurity", {
 });
 export const LoadedInvite = m("LoadedInvite", { token: Schema.String });
 export const ChangedInviteToken = m("ChangedInviteToken", { token: Schema.String });
-export const CompletedAccountAction = m("CompletedAccountAction");
+export const ChangedJoinGroupRef = m("ChangedJoinGroupRef", { groupRef: Schema.String });
+export const CompletedAccountAction = m("CompletedAccountAction", {
+  title: Schema.String,
+  message: Schema.String,
+});
+export const FailedAccountAction = m("FailedAccountAction", { error: Schema.String });
+export const ChangedPasskeyLabel = m("ChangedPasskeyLabel", { label: Schema.String });
+export const ChangedCurrentPassword = m("ChangedCurrentPassword", { password: Schema.String });
+export const ChangedNewPassword = m("ChangedNewPassword", { password: Schema.String });
+export const SelectedBook = m("SelectedBook", { sourceId: Schema.String });
+export const RequestedBookRename = m("RequestedBookRename", {
+  sourceId: Schema.String,
+  title: Schema.String,
+});
+export const RenamedBook = m("RenamedBook", { group: GroupSummary });
+export const RestoredSelectedSource = m("RestoredSelectedSource", {
+  sourceId: Schema.NullOr(Schema.String),
+});
+export const RememberedSelectedSource = m("RememberedSelectedSource");
 export const SignedOut = m("SignedOut");
 export const DeletedGroup = m("DeletedGroup", { groupId: Schema.String });
 export const RequestedSignOut = m("RequestedSignOut");
@@ -177,12 +369,39 @@ export const RequestedPasskeyRegistration = m("RequestedPasskeyRegistration", {
 export type Message =
   | typeof LoadedSession.Type
   | typeof FailedSession.Type
-  | typeof DismissedErrorToast.Type
+  | typeof SpawnedToast.Type
+  | typeof OpenedOverlay.Type
+  | typeof ClosedOverlay.Type
+  | InfoMessage
+  | SettingsMessage
+  | PresenceMessage
+  | UploadMessage
+  | InviteMessage
+  | typeof StartedRename.Type
+  | typeof ChangedRenameDraft.Type
+  | typeof CommittedRename.Type
+  | typeof CancelledRename.Type
+  | typeof SteppedExpandedPane.Type
+  | typeof StartedSplitDrag.Type
+  | typeof MovedSplitDivider.Type
+  | typeof EndedSplitDrag.Type
+  | typeof DismissedToast.Type
+  | typeof ChangedOnline.Type
   | typeof ResizedViewport.Type
   | typeof Navigated.Type
-  | typeof ChangedLogin.Type
-  | typeof SubmittedPasswordLogin.Type
+  | typeof ChangedLoginEmail.Type
+  | typeof ChangedLoginPassword.Type
+  | typeof ChangedLoginCode.Type
+  | typeof SubmittedLogin.Type
+  | typeof SubmittedLoginCode.Type
+  | typeof RequestedPasskeyLogin.Type
+  | typeof SentLoginCode.Type
+  | typeof FailedLogin.Type
+  | typeof DismissedLogin.Type
   | typeof LoadedGroups.Type
+  | typeof StartedCreatingClub.Type
+  | typeof CancelledCreatingClub.Type
+  | typeof FailedCreateGroup.Type
   | typeof ChangedNewGroupName.Type
   | typeof SubmittedNewGroup.Type
   | typeof CreatedGroup.Type
@@ -190,7 +409,17 @@ export type Message =
   | typeof LoadedAccountSecurity.Type
   | typeof LoadedInvite.Type
   | typeof ChangedInviteToken.Type
+  | typeof ChangedJoinGroupRef.Type
   | typeof CompletedAccountAction.Type
+  | typeof FailedAccountAction.Type
+  | typeof ChangedPasskeyLabel.Type
+  | typeof ChangedCurrentPassword.Type
+  | typeof ChangedNewPassword.Type
+  | typeof SelectedBook.Type
+  | typeof RequestedBookRename.Type
+  | typeof RenamedBook.Type
+  | typeof RestoredSelectedSource.Type
+  | typeof RememberedSelectedSource.Type
   | typeof SignedOut.Type
   | typeof DeletedGroup.Type
   | typeof RequestedSignOut.Type
@@ -217,25 +446,141 @@ export const LoadGroups = Command.define("LoadGroups", {
   ),
 });
 
+/** Every API failure carries a code the sign-in form turns into a sentence; a
+ *  transport or decode failure has none and reads as the generic apology. */
+const loginErrorCode = (error: unknown): string =>
+  typeof error === "object" && error !== null && "error" in error && typeof error.error === "string"
+    ? error.error
+    : "unknown";
+
+/** The native app carries its session as a bearer token rather than a cookie, so
+ *  a session is only signed in once the token is stored. */
+const rememberSession = (session: { user: SessionUser; token?: string }) =>
+  Effect.promise(() => setSessionToken(session.token ?? null)).pipe(
+    Effect.as(LoadedSession({ user: session.user })),
+  );
+
 export const PasswordLogin = Command.define("PasswordLogin", {
   args: { email: Schema.String, password: Schema.String },
-  messages: [LoadedSession, FailedClientCommand],
+  messages: [LoadedSession, FailedLogin],
   execute: ({ email, password }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.passwordLogin({ payload: { email, password } })),
-      Effect.map(({ body }) => LoadedSession({ user: body.user })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.flatMap(({ body }) => rememberSession(body)),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: loginErrorCode(error) }))),
     ),
+});
+
+/** The email step when no password was typed. A dev worker signs the reader in
+ *  outright; a real one mails a code and answers with no content. */
+export const StartLogin = Command.define("StartLogin", {
+  args: { email: Schema.String },
+  messages: [LoadedSession, SentLoginCode, FailedLogin],
+  execute: ({ email }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.auth.start({ payload: { email } })),
+      Effect.flatMap(
+        (result): Effect.Effect<typeof LoadedSession.Type | typeof SentLoginCode.Type> =>
+          result === undefined ? Effect.succeed(SentLoginCode()) : rememberSession(result.body),
+      ),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: loginErrorCode(error) }))),
+    ),
+});
+
+export const VerifyLoginCode = Command.define("VerifyLoginCode", {
+  args: { email: Schema.String, code: Schema.String },
+  messages: [LoadedSession, FailedLogin],
+  execute: ({ email, code }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.auth.verify({ payload: { email, code } })),
+      Effect.flatMap(({ body }) => rememberSession(body)),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: loginErrorCode(error) }))),
+    ),
+});
+
+/** The passkey ceremony runs against the browser's authenticator rather than the
+ *  API contract, so it goes through the same client the React modal uses. */
+export const PasskeyLogin = Command.define("PasskeyLogin", {
+  args: { email: Schema.String },
+  messages: [LoadedSession, FailedLogin],
+  execute: ({ email }) =>
+    Effect.promise(() => passkeyLogin(email)).pipe(
+      Effect.flatMap(
+        (result): Effect.Effect<typeof LoadedSession.Type | typeof FailedLogin.Type> =>
+          result.ok
+            ? rememberSession(result.value)
+            : Effect.succeed(FailedLogin({ error: result.error })),
+      ),
+    ),
+});
+
+/** React's account settings map their own small set of codes. */
+const ACCOUNT_MESSAGES = new Map([
+  ["weak_password", "Password must be at least 8 characters."],
+  ["bad_current", "Current password is incorrect."],
+  ["passkey_cancelled", "Passkey setup was cancelled."],
+  ["verification_failed", "Couldn't register that passkey. Try again."],
+  ["challenge_expired", "That took too long. Try again."],
+  ["unauthenticated", "Please sign in again."],
+]);
+
+const accountErrorCode = (error: unknown): string =>
+  typeof error === "object" && error !== null && "error" in error && typeof error.error === "string"
+    ? error.error
+    : "unknown";
+
+const accountErrorMessage = (error: string): string =>
+  ACCOUNT_MESSAGES.get(error) ?? "Something went wrong. Try again.";
+
+/** Which book a club opens on is a per-device choice React keeps in local
+ *  storage; reading and writing it is a side effect either way. */
+const selectedSourceKey = (groupId: string): string => `bookclub.selectedSource.${groupId}`;
+
+export const RenameBook = Command.define("RenameBook", {
+  args: { groupRef: Schema.String, sourceId: Schema.String, title: Schema.String },
+  messages: [RenamedBook, FailedClientCommand],
+  execute: ({ groupRef, sourceId, title }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) =>
+        client.groups.renameBook({ params: { groupRef }, payload: { sourceId, title } }),
+      ),
+      Effect.map(({ group }) => RenamedBook({ group })),
+      Effect.catch(() =>
+        Effect.succeed(FailedClientCommand({ message: "Couldn't rename that book." })),
+      ),
+    ),
+});
+
+export const RestoreSelectedSource = Command.define("RestoreSelectedSource", {
+  args: { groupId: Schema.String },
+  messages: [RestoredSelectedSource],
+  execute: ({ groupId }) =>
+    Effect.sync(() =>
+      RestoredSelectedSource({
+        sourceId: globalThis.localStorage?.getItem(selectedSourceKey(groupId)) ?? null,
+      }),
+    ),
+});
+
+export const RememberSelectedSource = Command.define("RememberSelectedSource", {
+  args: { groupId: Schema.String, sourceId: Schema.NullOr(Schema.String) },
+  messages: [RememberedSelectedSource],
+  execute: ({ groupId, sourceId }) =>
+    Effect.sync(() => {
+      if (sourceId === null) globalThis.localStorage?.removeItem(selectedSourceKey(groupId));
+      else globalThis.localStorage?.setItem(selectedSourceKey(groupId), sourceId);
+      return RememberedSelectedSource();
+    }),
 });
 
 export const CreateGroup = Command.define("CreateGroup", {
   args: { displayName: Schema.String },
-  messages: [CreatedGroup, FailedClientCommand],
+  messages: [CreatedGroup, FailedCreateGroup],
   execute: ({ displayName }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.create({ payload: { displayName } })),
       Effect.map(({ group }) => CreatedGroup({ group })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.catch((error) => Effect.succeed(FailedCreateGroup({ error: loginErrorCode(error) }))),
     ),
 });
 
@@ -261,7 +606,7 @@ export const LoadAccountSecurity = Command.define("LoadAccountSecurity", {
 
 export const SetAccountPassword = Command.define("SetAccountPassword", {
   args: { password: Schema.String, currentPassword: Schema.optionalKey(Schema.String) },
-  messages: [CompletedAccountAction, FailedClientCommand],
+  messages: [CompletedAccountAction, FailedAccountAction],
   execute: ({ password, currentPassword }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) =>
@@ -269,30 +614,46 @@ export const SetAccountPassword = Command.define("SetAccountPassword", {
           payload: currentPassword === undefined ? { password } : { password, currentPassword },
         }),
       ),
-      Effect.as(CompletedAccountAction()),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.as(
+        CompletedAccountAction({
+          title: "Password saved",
+          message: "You can now sign in with your password.",
+        }),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed(FailedAccountAction({ error: accountErrorCode(error) })),
+      ),
     ),
 });
 
 export const RemoveAccountPassword = Command.define("RemoveAccountPassword", {
   args: { currentPassword: Schema.String },
-  messages: [CompletedAccountAction, FailedClientCommand],
+  messages: [CompletedAccountAction, FailedAccountAction],
   execute: ({ currentPassword }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.removePassword({ payload: { currentPassword } })),
-      Effect.as(CompletedAccountAction()),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.as(
+        CompletedAccountAction({
+          title: "Password removed",
+          message: "You'll sign in with a code or passkey.",
+        }),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed(FailedAccountAction({ error: accountErrorCode(error) })),
+      ),
     ),
 });
 
 export const RemoveAccountPasskey = Command.define("RemoveAccountPasskey", {
   args: { id: Schema.String },
-  messages: [CompletedAccountAction, FailedClientCommand],
+  messages: [CompletedAccountAction, FailedAccountAction],
   execute: ({ id }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.removePasskey({ params: { id } })),
-      Effect.as(CompletedAccountAction()),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.as(CompletedAccountAction({ title: "Passkey", message: "That passkey is gone." })),
+      Effect.catch((error) =>
+        Effect.succeed(FailedAccountAction({ error: accountErrorCode(error) })),
+      ),
     ),
 });
 
@@ -348,8 +709,10 @@ export const SetMemberRole = Command.define("SetMemberRole", {
       Effect.flatMap((client) =>
         client.groups.setMemberRole({ params: { groupRef, memberId }, payload: { role } }),
       ),
-      Effect.as(CompletedAccountAction()),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.as(CompletedAccountAction({ title: "Role changed", message: `Now a ${role}.` })),
+      Effect.catch(() =>
+        Effect.succeed(FailedClientCommand({ message: "Couldn't change that member's role." })),
+      ),
     ),
 });
 
@@ -364,6 +727,21 @@ export const DeleteGroup = Command.define("DeleteGroup", {
     ),
 });
 
+export const DismissToastLater = Command.define("DismissToastLater", {
+  args: { id: Schema.String, durationMs: Schema.Number },
+  messages: [DismissedToast],
+  // React's store sets a `setTimeout` per toast; the Command is that timer.
+  execute: ({ id, durationMs }) =>
+    Effect.sleep(Duration.millis(durationMs)).pipe(Effect.as(DismissedToast({ id }))),
+});
+
+/** React leaves the success note up for a beat before the modal goes away, and
+ *  a sign-in that vanishes instantly reads as a failure. */
+export const CloseLoginAfterSuccess = Command.define("CloseLoginAfterSuccess", {
+  messages: [DismissedLogin],
+  execute: Effect.sleep("1200 millis").pipe(Effect.as(DismissedLogin())),
+});
+
 export const RegisterPasskey = Command.define("RegisterPasskey", {
   args: { label: Schema.String },
   messages: [CompletedPasskeyRegistration],
@@ -375,28 +753,81 @@ export const RegisterPasskey = Command.define("RegisterPasskey", {
     ),
 });
 
+/**
+ * Reader and notes, laid out the way the viewport asks for: side by side on a
+ * wide screen, and as two pages of a swipeable track on a phone, where the
+ * reader's `pane` decides which one is showing. Dragging the divider past
+ * either shoulder expands the pane on the other side.
+ */
+const DESKTOP_READER_SHARE = 62;
+const MIN_SPLIT_SHARE = 25;
+const MAX_SPLIT_SHARE = 80;
+
 export const init = (): readonly [Model, []] => [
   {
     route: Home(),
     session: LoadingSession(),
     account: UnavailableAccount(),
+    loginStep: "email",
     loginEmail: "",
     loginPassword: "",
+    loginCode: "",
+    loginError: null,
+    loginBusy: false,
+    passkeysAvailable: passkeysSupported(),
     groups: [],
     newGroupName: "",
+    creatingClub: false,
+    newGroupPending: false,
+    newGroupError: null,
     currentGroup: null,
     membership: null,
     members: [],
+    joinGroupRef: "",
     inviteToken: "",
     accountPasskeys: [],
     hasPassword: false,
+    passkeyLabel: "",
+    currentPassword: "",
+    newPassword: "",
+    accountBusy: false,
+    selectedSourceId: null,
     reader: null,
+    overlay: NoOverlay(),
+    info: initialInfoModel(),
+    settings: initialSettingsModel(),
+    presence: initialPresenceModel(),
+    upload: initialUploadModel(),
+    invite: initialInviteModel(),
+    renamingTarget: null,
+    renameDraft: "",
+    splitShare: DESKTOP_READER_SHARE,
+    splitDragging: false,
+    expandedPane: null,
     notes: initialNotesModel(),
     viewport: currentViewport(),
-    errorToast: null,
+    toasts: [],
+    online: globalThis.navigator?.onLine ?? true,
   },
   [],
 ];
+
+/** A toast is raised and its own dismissal is scheduled in one move, so nothing
+ *  can put one on screen and forget to take it off again. */
+const withToast = (model: Model, toast: Toast): Update => [
+  { ...model, toasts: [toast, ...model.toasts] },
+  [DismissToastLater({ id: toast.id, durationMs: toast.durationMs })],
+];
+
+/** Every way into or out of the sign-in modal leaves the form as it was found. */
+const blankLogin = {
+  loginStep: "email",
+  loginEmail: "",
+  loginPassword: "",
+  loginCode: "",
+  loginError: null,
+  loginBusy: false,
+} as const;
 
 type Update = readonly [Model, readonly Command.Command<Message, never, NoteAgentService>[]];
 
@@ -410,7 +841,18 @@ const sameHighlights = (a: readonly { id: string }[], b: readonly { id: string }
  */
 const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
   const [notes, commands] = updateNotes(model.notes, message);
-  const withNotes = { ...model, notes };
+  // React reports a rejected operation as a toast rather than in the panel, so
+  // the note list never carries an error line of its own.
+  const withNotes =
+    message._tag === "RejectedNoteOperations"
+      ? withToast(
+          { ...model, notes },
+          errorToast(
+            "Some changes couldn't sync",
+            "A note was edited or removed by someone else. Your change to it was skipped.",
+          ),
+        )[0]
+      : { ...model, notes };
   if (withNotes.reader === null) return [withNotes, commands];
   const highlights = notesHighlights(notes, withNotes.reader.sourceId);
   if (sameHighlights(withNotes.reader.highlights, highlights)) return [withNotes, commands];
@@ -439,12 +881,14 @@ const commitSelection = (
 
 const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
   if (message._tag === "SelectedReaderSource") {
-    const { groupRef, sourceId, kind } = message;
+    const { groupRef } = message;
     const [reader, commands] = updateReader(openReader(message), message) ?? [
       openReader(message),
       [],
     ];
-    return [{ ...model, route: Reader({ groupRef, sourceId, kind }), reader }, commands];
+    // A club *is* its open book; opening one changes what the club page shows
+    // rather than where the reader is.
+    return [{ ...model, route: Club({ groupRef }), reader }, commands];
   }
   if (model.reader === null) return [model, []];
   const selection = model.reader.selection;
@@ -495,55 +939,286 @@ const reconcileReaderIdentity = ([model, commands]: Update): Update => {
     : [{ ...model, reader: identified[0] }, [...commands, ...identified[1]]];
 };
 
+/**
+ * Settings publishes what React answered with a toast rather than spawning one
+ * itself, so every toast in the application is raised in one place. Reading the
+ * notice consumes it.
+ */
+const updateSettingsSlice = (model: Model, message: SettingsMessage): Update => {
+  const [settings, commands] = updateSettings(model.settings, message);
+  const layout = settingsPrefs(settings).reader.pdfPageLayout;
+  const relaid =
+    model.reader === null || model.reader.layout === layout
+      ? null
+      : updateReader(model.reader, ChangedReaderLayout({ layout }));
+  const applied =
+    relaid === null ? { ...model, settings } : { ...model, settings, reader: relaid[0] };
+  const withLayout = relaid === null ? commands : [...commands, ...relaid[1]];
+  const notice = settingsNotice(settings);
+  if (notice === null) return [applied, withLayout];
+  const [read] = updateSettings(settings, DismissedSettingsNotice());
+  const [toasted, toastCommands] = withToast(
+    { ...applied, settings: read },
+    notice.tone === "error"
+      ? errorToast(notice.title, notice.body)
+      : infoToast(notice.title, notice.body),
+  );
+  return [toasted, [...withLayout, ...toastCommands]];
+};
+
+/** A finished upload is the club's first book: the modal closes and the club is
+ *  re-read, which is what opens the reader on it. */
+const updateUploadSlice = (model: Model, message: UploadMessage): Update => {
+  const [upload, commands] = updateUpload(model.upload, message);
+  const withUpload = { ...model, upload };
+  if (message._tag === "FailedBookUpload") {
+    return withToast(
+      withUpload,
+      errorToast("Upload failed", "Couldn't store that file. Try again."),
+    );
+  }
+  if (message._tag !== "UploadedBook") return [withUpload, commands];
+  const group = model.currentGroup;
+  return [
+    { ...withUpload, overlay: NoOverlay(), selectedSourceId: message.sourceId },
+    group === null
+      ? commands
+      : [
+          ...commands,
+          RememberSelectedSource({ groupId: group.groupId, sourceId: message.sourceId }),
+          LoadGroup({ groupRef: groupUrlName(group) }),
+        ],
+  ];
+};
+
+/** Presence owns the club's roster, its books and its images, so what it
+ *  changes is the host's own club state rather than a copy of it. */
+const updatePresenceSlice = (model: Model, message: PresenceMessage): Update => {
+  const [presence, commands] = updatePresence(model.presence, message);
+  const withPresence = { ...model, presence };
+  switch (message._tag) {
+    case "DeletedBook":
+    case "SavedBookMetadata":
+      return [{ ...withPresence, currentGroup: message.group }, commands];
+    case "ChangedMemberRole":
+      return [{ ...withPresence, members: message.members }, commands];
+    case "FailedBookDownload":
+      return withToast(withPresence, errorToast("Download failed", "Couldn't download that book."));
+    default:
+      return [withPresence, commands];
+  }
+};
+
+const updateInviteSlice = (model: Model, message: InviteMessage): Update => {
+  const [invite, commands] = updateInvite(model.invite, message);
+  const withInvite = { ...model, invite };
+  switch (message._tag) {
+    case "SentInvite":
+      return withToast(withInvite, infoToast("Invite sent", `Invited ${message.email}.`));
+    case "FailedInvite":
+      return withToast(withInvite, errorToast("Invite failed", "Couldn't send that invite."));
+    case "FailedInviteLinkRotation":
+      return withToast(withInvite, errorToast("Failed", "Couldn't regenerate the link."));
+    default:
+      return [withInvite, commands];
+  }
+};
+
 export const update = (model: Model, message: Message): Update =>
   reconcileReaderIdentity(updateSlices(model, message));
 
 const updateSlices = (model: Model, message: Message): Update => {
+  if (message._tag === "ToggledReaderLayout") {
+    // Page layout is a stored preference in React, not reader-local state, so
+    // the key that flips it writes the preference and the reader follows.
+    return updateSettingsSlice(
+      model,
+      ChosePdfPageLayout({
+        value: settingsPrefs(model.settings).reader.pdfPageLayout === "auto" ? "single" : "auto",
+      }),
+    );
+  }
   if (isReaderMessage(message)) return updateReaderSlice(model, message);
   if (isNotesMessage(message)) return updateNotesSlice(model, message);
+  if (isInfoMessage(message)) {
+    const [info, commands] = updateInfo(model.info, message);
+    return [{ ...model, info }, commands];
+  }
+  if (isSettingsMessage(message)) return updateSettingsSlice(model, message);
+  if (isPresenceMessage(message)) return updatePresenceSlice(model, message);
+  if (isUploadMessage(message)) return updateUploadSlice(model, message);
+  if (isInviteMessage(message)) return updateInviteSlice(model, message);
   switch (message._tag) {
-    case "LoadedSession":
+    case "LoadedSession": {
+      const signingIn = model.overlay._tag === "LoginOverlay";
       return [
         {
           ...model,
           session: AuthenticatedSession({ user: message.user }),
           account: ReadyAccount({ user: message.user }),
+          // The login modal stays up long enough to say it worked; the page
+          // behind it was already where the reader wanted to be.
+          loginStep: signingIn ? "done" : model.loginStep,
+          loginBusy: false,
+          loginError: null,
+          loginPassword: "",
+          loginCode: "",
         },
-        [LoadGroups()],
+        signingIn ? [LoadGroups(), CloseLoginAfterSuccess()] : [LoadGroups()],
       ];
+    }
     case "FailedSession":
+      return withToast(
+        { ...model, session: AnonymousSession(), account: UnavailableAccount() },
+        errorToast("Sign-in check failed", message.message),
+      );
+    case "SpawnedToast":
+      return withToast(model, message.toast);
+    case "DismissedToast":
+      return [{ ...model, toasts: model.toasts.filter((toast) => toast.id !== message.id) }, []];
+    case "OpenedOverlay": {
+      // A reopened modal starts over rather than showing whatever the last one
+      // left behind; React gets that from remounting the component.
+      const opened =
+        message.overlay._tag === "LoginOverlay"
+          ? { ...model, overlay: message.overlay, ...blankLogin }
+          : { ...model, overlay: message.overlay };
+      switch (message.overlay._tag) {
+        case "SettingsOverlay": {
+          const [next, commands] = updateSettingsSlice(opened, OpenedSettings());
+          return [next, [LoadAccountSecurity(), ...commands]];
+        }
+        case "InviteOverlay":
+          return updateInviteSlice(opened, OpenedInvite({ groupRef: message.overlay.groupRef }));
+        case "UploadOverlay":
+          return [{ ...opened, upload: initialUploadModel() }, []];
+        case "PresenceOverlay": {
+          const group = model.currentGroup;
+          if (group === null) return [opened, []];
+          // The people page nests the roster inside the invite controls, so both
+          // are told the modal opened.
+          const groupRef = groupUrlName(group);
+          const [shown, presenceCommands] = updatePresenceSlice(
+            opened,
+            OpenedPresence({ groupRef }),
+          );
+          const [invited, inviteCommands] = updateInviteSlice(shown, OpenedInvite({ groupRef }));
+          return [invited, [...presenceCommands, ...inviteCommands]];
+        }
+        default:
+          return [opened, []];
+      }
+    }
+    case "ClosedOverlay":
+      return [{ ...model, overlay: NoOverlay() }, []];
+    case "StartedRename":
+      return [{ ...model, renamingTarget: message.target, renameDraft: message.value }, []];
+    case "ChangedRenameDraft":
+      return [{ ...model, renameDraft: message.value }, []];
+    case "CancelledRename":
+      return [{ ...model, renamingTarget: null, renameDraft: "" }, []];
+    case "CommittedRename": {
+      // An empty or unchanged name is not a rename; the field just closes.
+      const title = model.renameDraft.trim();
+      const unchanged = model.currentGroup === null || title === model.currentGroup.displayName;
+      return [
+        { ...model, renamingTarget: null, renameDraft: "" },
+        title === "" || unchanged || model.currentGroup === null
+          ? []
+          : [RenameGroup({ groupRef: groupUrlName(model.currentGroup), title })],
+      ];
+    }
+    case "SteppedExpandedPane":
+      return [
+        { ...model, expandedPane: stepExpandedPane(model.expandedPane, message.direction) },
+        [],
+      ];
+    case "StartedSplitDrag":
+      return [{ ...model, splitDragging: true }, []];
+    case "MovedSplitDivider":
+      return [{ ...model, splitShare: message.share }, []];
+    case "EndedSplitDrag":
+      // Dragging a pane most of the way out expands the other one outright,
+      // which is the only way to reach the expanded states.
       return [
         {
           ...model,
-          session: AnonymousSession(),
-          account: UnavailableAccount(),
-          errorToast: { message: message.message },
+          splitDragging: false,
+          expandedPane:
+            model.splitShare <= MIN_SPLIT_SHARE
+              ? "right"
+              : model.splitShare >= MAX_SPLIT_SHARE
+                ? "left"
+                : null,
         },
         [],
       ];
-    case "DismissedErrorToast":
-      return [{ ...model, errorToast: null }, []];
+    case "ChangedOnline":
+      return [{ ...model, online: message.online }, []];
     case "ResizedViewport":
       return [{ ...model, viewport: message.viewport }, []];
     case "Navigated":
       return [
-        { ...model, route: message.route },
-        message.route._tag === "Group"
-          ? [LoadGroup({ groupRef: message.route.groupRef })]
-          : message.route._tag === "AccountSettings"
-            ? [LoadAccountSecurity()]
-            : [],
+        // Leaving a club puts its book away, the way React unmounts the
+        // workspace when the route changes.
+        message.route._tag === "Home"
+          ? { ...model, route: message.route, reader: null, currentGroup: null }
+          : { ...model, route: message.route },
+        message.route._tag === "Club" ? [LoadGroup({ groupRef: message.route.groupRef })] : [],
       ];
-    case "ChangedLogin":
-      return [{ ...model, loginEmail: message.email, loginPassword: message.password }, []];
-    case "SubmittedPasswordLogin":
-      return [model, [PasswordLogin({ email: model.loginEmail, password: model.loginPassword })]];
+    case "ChangedLoginEmail":
+      return [{ ...model, loginEmail: message.email }, []];
+    case "ChangedLoginPassword":
+      return [{ ...model, loginPassword: message.password }, []];
+    case "ChangedLoginCode":
+      return [{ ...model, loginCode: message.code }, []];
+    case "SubmittedLogin":
+      // A typed password is the shortcut; without one the server mails a code.
+      // A wrong password does not lock anyone out — clearing it asks for a code.
+      return [
+        { ...model, loginBusy: true, loginError: null },
+        [
+          model.loginPassword === ""
+            ? StartLogin({ email: model.loginEmail })
+            : PasswordLogin({ email: model.loginEmail, password: model.loginPassword }),
+        ],
+      ];
+    case "SubmittedLoginCode":
+      return [
+        { ...model, loginBusy: true, loginError: null },
+        [VerifyLoginCode({ email: model.loginEmail, code: model.loginCode })],
+      ];
+    case "RequestedPasskeyLogin":
+      return [
+        { ...model, loginBusy: true, loginError: null },
+        [PasskeyLogin({ email: model.loginEmail })],
+      ];
+    case "SentLoginCode":
+      return [{ ...model, loginStep: "code", loginBusy: false }, []];
+    case "FailedLogin":
+      return [{ ...model, loginBusy: false, loginError: loginErrorMessage(message.error) }, []];
+    case "DismissedLogin":
+      return [{ ...model, overlay: NoOverlay(), ...blankLogin }, []];
     case "LoadedGroups":
       return [{ ...model, groups: message.groups }, []];
     case "ChangedNewGroupName":
       return [{ ...model, newGroupName: message.name }, []];
+    case "StartedCreatingClub":
+      return [{ ...model, creatingClub: true, newGroupError: null }, []];
+    case "CancelledCreatingClub":
+      return [{ ...model, creatingClub: false, newGroupName: "", newGroupError: null }, []];
     case "SubmittedNewGroup":
-      return [model, [CreateGroup({ displayName: model.newGroupName })]];
+      return model.newGroupPending
+        ? [model, []]
+        : [{ ...model, newGroupPending: true }, [CreateGroup({ displayName: model.newGroupName })]];
+    case "FailedCreateGroup": {
+      // React says it twice: inline under the field, and as a toast.
+      const sentence = clubNameErrorMessage(message.error);
+      return withToast(
+        { ...model, newGroupPending: false, newGroupError: sentence },
+        errorToast("Invalid club name", sentence),
+      );
+    }
     case "CreatedGroup":
       return [
         {
@@ -553,21 +1228,82 @@ const updateSlices = (model: Model, message: Message): Update => {
             message.group,
           ],
           newGroupName: "",
+          creatingClub: false,
+          newGroupPending: false,
+          newGroupError: null,
           currentGroup: message.group,
-          route: Group({ groupRef: message.group.publicId }),
+          route: Club({ groupRef: groupUrlName(message.group) }),
         },
         [],
       ];
-    case "LoadedGroup":
+    case "LoadedGroup": {
+      const loaded = {
+        ...model,
+        currentGroup: message.group,
+        membership: message.membership,
+        members: message.members,
+      };
+      // A club is its open book, so loading one asks which book this device
+      // was last reading before deciding what the page shows.
+      return [loaded, [RestoreSelectedSource({ groupId: message.group.groupId })]];
+    }
+    case "RestoredSelectedSource": {
+      const group = model.currentGroup;
+      if (group === null) return [model, []];
+      const stored =
+        message.sourceId !== null && group.sources.includes(message.sourceId)
+          ? message.sourceId
+          : (group.sources[0] ?? null);
+      const meta = stored === null ? undefined : group.sourceMeta[stored];
+      const chosen = { ...model, selectedSourceId: stored };
+      return stored === null || meta === undefined || model.reader?.sourceId === stored
+        ? [chosen, []]
+        : updateReaderSlice(
+            chosen,
+            SelectedReaderSource({
+              groupRef: groupUrlName(group),
+              sourceId: stored,
+              kind: meta.kind,
+            }),
+          );
+    }
+    case "RememberedSelectedSource":
+      return [model, []];
+    case "SelectedBook": {
+      const group = model.currentGroup;
+      const meta = group?.sourceMeta[message.sourceId];
+      if (group === undefined || group === null || meta === undefined) return [model, []];
+      const [opened, commands] = updateReaderSlice(
+        { ...model, selectedSourceId: message.sourceId },
+        SelectedReaderSource({
+          groupRef: groupUrlName(group),
+          sourceId: message.sourceId,
+          kind: meta.kind,
+        }),
+      );
       return [
-        {
-          ...model,
-          currentGroup: message.group,
-          membership: message.membership,
-          members: message.members,
-        },
-        [],
+        opened,
+        [
+          ...commands,
+          RememberSelectedSource({ groupId: group.groupId, sourceId: message.sourceId }),
+        ],
       ];
+    }
+    case "RequestedBookRename":
+      return model.currentGroup === null
+        ? [model, []]
+        : [
+            model,
+            [
+              RenameBook({
+                groupRef: groupUrlName(model.currentGroup),
+                sourceId: message.sourceId,
+                title: message.title,
+              }),
+            ],
+          ];
+    case "RenamedBook":
+      return [{ ...model, currentGroup: message.group }, []];
     case "LoadedAccountSecurity":
       return [
         { ...model, accountPasskeys: message.passkeys, hasPassword: message.hasPassword },
@@ -577,13 +1313,31 @@ const updateSlices = (model: Model, message: Message): Update => {
       return [{ ...model, inviteToken: message.token }, []];
     case "ChangedInviteToken":
       return [{ ...model, inviteToken: message.token }, []];
+    case "ChangedJoinGroupRef":
+      return [{ ...model, joinGroupRef: message.groupRef }, []];
     case "CompletedAccountAction":
-      return [model, model.route._tag === "AccountSettings" ? [LoadAccountSecurity()] : []];
+      return withToast(
+        { ...model, accountBusy: false, passkeyLabel: "", currentPassword: "", newPassword: "" },
+        infoToast(message.title, message.message),
+      );
+    case "FailedAccountAction":
+      return withToast(
+        { ...model, accountBusy: false },
+        errorToast("Account", accountErrorMessage(message.error)),
+      );
+    case "ChangedPasskeyLabel":
+      return [{ ...model, passkeyLabel: message.label }, []];
+    case "ChangedCurrentPassword":
+      return [{ ...model, currentPassword: message.password }, []];
+    case "ChangedNewPassword":
+      return [{ ...model, newPassword: message.password }, []];
     case "SignedOut":
       return [
         {
           ...model,
-          route: Login(),
+          // Signing out leaves you on the clubs card as an anonymous reader,
+          // not staring at the form you just left.
+          route: Home(),
           session: AnonymousSession(),
           account: UnavailableAccount(),
           groups: [],
@@ -621,12 +1375,11 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "RequestedDeleteGroup":
       return [model, [DeleteGroup(message)]];
     case "FailedClientCommand":
-      return [{ ...model, errorToast: { message: message.message } }, []];
+      return withToast(model, errorToast("Something went wrong", message.message));
     case "CompletedPasskeyRegistration":
-      return [
-        { ...model, errorToast: message.error === null ? null : { message: message.error } },
-        [],
-      ];
+      return message.error === null
+        ? [model, []]
+        : withToast(model, errorToast("Passkey failed", loginErrorMessage(message.error)));
     case "RequestedPasskeyRegistration":
       return [model, [RegisterPasskey({ label: message.label })]];
   }
@@ -681,34 +1434,174 @@ const viewportSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }));
 
+const paneKeySubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  expandedPaneKeys: entry(
+    { active: Schema.Boolean },
+    {
+      modelToDependencies: (model) => ({
+        active:
+          model.reader !== null && model.viewport === "wide" && model.overlay._tag === "NoOverlay",
+      }),
+      dependenciesToStream: ({ active }) =>
+        Stream.when(
+          Subscription.fromEventFilterMap<KeyboardEvent, Message>({
+            target: globalThis.document,
+            type: "keydown",
+            toMessage: (event) => {
+              if (!event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
+                return Option.none();
+              }
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return Option.none();
+              event.preventDefault();
+              return Option.some(
+                SteppedExpandedPane({ direction: event.key === "ArrowLeft" ? "left" : "right" }),
+              );
+            },
+          }),
+          Effect.sync(() => active),
+        ),
+    },
+  ),
+}));
+
+const connectivitySubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  online: entry(
+    {},
+    {
+      modelToDependencies: () => ({}),
+      dependenciesToStream: () =>
+        Stream.merge(
+          Subscription.fromEvent<Event, Message>({
+            target: globalThis.window,
+            type: "online",
+            toMessage: () => ChangedOnline({ online: true }),
+          }),
+          Subscription.fromEvent<Event, Message>({
+            target: globalThis.window,
+            type: "offline",
+            toMessage: () => ChangedOnline({ online: false }),
+          }),
+        ),
+    },
+  ),
+}));
+
+const overlaySubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  overlayDismissal: entry(
+    { open: Schema.Boolean },
+    {
+      modelToDependencies: (model) => ({ open: model.overlay._tag !== "NoOverlay" }),
+      // React's modal closes on Escape and on a press outside its body; both
+      // only exist while one is up.
+      dependenciesToStream: ({ open }) =>
+        Stream.when(
+          Stream.merge(
+            escapeKeyStream<Message>(ClosedOverlay()),
+            pressOutsideModalStream<Message>(ClosedOverlay()),
+          ),
+          Effect.sync(() => open),
+        ),
+    },
+  ),
+}));
+
+const splitSubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  splitDrag: entry(
+    { dragging: Schema.Boolean },
+    {
+      // The divider's share follows the pointer against the layout's own box,
+      // which is why the geometry is read here rather than carried in the Model.
+      modelToDependencies: (model) => ({ dragging: model.splitDragging }),
+      dependenciesToStream: ({ dragging }) =>
+        Stream.when(
+          Stream.merge(
+            Subscription.fromEventFilterMap<PointerEvent, Message>({
+              target: globalThis.window,
+              type: "pointermove",
+              toMessage: (event) => {
+                const layout = globalThis.document?.querySelector(".workspace-layout");
+                if (layout === null || layout === undefined) return Option.none();
+                const box = layout.getBoundingClientRect();
+                if (box.width === 0) return Option.none();
+                const share = ((event.clientX - box.left) / box.width) * 100;
+                return Option.some(MovedSplitDivider({ share: Math.min(100, Math.max(0, share)) }));
+              },
+            }),
+            Subscription.fromEvent<PointerEvent, Message>({
+              target: globalThis.window,
+              type: "pointerup",
+              toMessage: () => EndedSplitDrag(),
+            }),
+          ),
+          Effect.sync(() => dragging),
+        ),
+    },
+  ),
+}));
+
 const subscriptions = Subscription.aggregate<Model, Message, NoteAgentService>()(
   noteAgentSubscriptions,
   readerSubscriptions,
   viewportSubscriptions,
+  connectivitySubscriptions,
+  overlaySubscriptions,
+  splitSubscriptions,
+  paneKeySubscriptions,
 );
 
-/**
- * Reader and notes, laid out the way the viewport asks for: side by side on a
- * wide screen, and as two pages of a swipeable track on a phone, where the
- * reader's `pane` decides which one is showing.
- */
-const workspaceView = (
+const paneClass = (base: string, hidden: boolean): string =>
+  hidden ? `${base} split-pane--hidden` : base;
+
+const workspaceLayoutView = (
   model: Model,
   reader: ReaderWorkspace,
   groupRef: string,
   h: HtmlBuilder<Message>,
 ): Html => {
   const narrow = model.viewport === "narrow";
+  const viewerId = model.session._tag === "AuthenticatedSession" ? model.session.user.id : "";
+  const membersById = new Map(model.members.map((member) => [member.id, member]));
+  const prefs = settingsPrefs(model.settings);
   const notes = notesView(
     model.notes,
     {
       sourceId: reader.sourceId,
       groupRef,
-      selection: reader.selection,
       jumpToHighlight: (anchor) => JumpedToHighlight({ anchor }),
+      viewer: { userId: viewerId, isOwner: model.currentGroup?.ownerId === viewerId },
+      canWrite: model.membership?.isMember === true,
+      // Avatars are a preference; without the resolver the panel falls through
+      // to React's avatar-less markup, which is what turning them off means.
+      avatarFor: prefs.notes.showAvatars
+        ? (author) => {
+            const member = membersById.get(author.id);
+            return {
+              url:
+                member?.avatarImageId === undefined
+                  ? null
+                  : avatarImagePath(author.id, member.avatarImageId),
+              initials: avatarInitial(author.name),
+              name: author.name,
+            };
+          }
+        : undefined,
+      bookTitles: new Map(
+        (model.currentGroup?.sources ?? []).map((id) => [
+          id,
+          model.currentGroup?.bookTitles[id] ??
+            model.currentGroup?.sourceMeta[id]?.title ??
+            "Untitled book",
+        ]),
+      ),
     },
     h,
   );
+  // An expanded pane is a share of 100 or 0; mid-drag the panes both stay
+  // rendered so the one being uncovered is already there when the press ends.
+  const share =
+    model.expandedPane === "left" ? 100 : model.expandedPane === "right" ? 0 : model.splitShare;
+  const hideReader = !model.splitDragging && model.expandedPane === "right";
+  const hideNotes = !model.splitDragging && model.expandedPane === "left";
   const track = h.div(
     [
       h.Class(narrow ? "workspace-layout-track pager-track" : "workspace-layout-track"),
@@ -716,32 +1609,68 @@ const workspaceView = (
     ],
     [
       h.div(
-        [h.Key("reader"), h.Class(narrow ? "pager-page" : "split-pane")],
-        [readerView(reader, h)],
+        [
+          h.Key("reader"),
+          h.Class(narrow ? "pager-page" : paneClass("split-pane", hideReader)),
+          ...(narrow ? [] : [h.Style({ width: `${share}%` }), h.AriaHidden(hideReader)]),
+        ],
+        [
+          readerView(
+            reader,
+            {
+              books: model.currentGroup === null ? [] : books(model.currentGroup),
+              title: model.currentGroup?.bookTitles[reader.sourceId] ?? null,
+              onSelectBook: (sourceId) => SelectedBook({ sourceId }),
+              // Renaming a book is a permission, not a decoration.
+              onRenameBook: permits(model.membership?.role ?? "visitor", GroupAction.RenameBook)
+                ? (sourceId, title) => RequestedBookRename({ sourceId, title })
+                : null,
+              onAddBook: OpenedOverlay({ overlay: UploadOverlay() }),
+            },
+            h,
+          ),
+        ],
       ),
+      ...(narrow
+        ? []
+        : [
+            h.div(
+              [
+                h.Key("divider"),
+                h.Class("split-divider"),
+                h.OnPointerDown(() => Option.some(StartedSplitDrag())),
+              ],
+              [],
+            ),
+          ]),
       h.div(
-        [h.Key("notes"), h.Class(narrow ? "pager-page" : "split-pane split-pane--grow")],
+        [
+          h.Key("notes"),
+          h.Class(narrow ? "pager-page" : paneClass("split-pane split-pane--grow", hideNotes)),
+          ...(narrow ? [] : [h.AriaHidden(hideNotes)]),
+        ],
         [notes],
       ),
     ],
   );
-  const chromeHidden = reader.chromeLevel >= 1;
   if (!narrow) {
+    const expanded = model.expandedPane === null ? "" : ` split--expanded-${model.expandedPane}`;
     return h.div(
       [
         h.Class(
-          chromeHidden ? "workspace-layout split app--chrome-hidden" : "workspace-layout split",
+          `workspace-layout ${model.splitDragging ? "split is-dragging" : "split"}${expanded}`,
         ),
       ],
-      [track],
+      [
+        track,
+        // A transparent sheet over both panes for the length of the drag, so a
+        // press that starts on the divider cannot be stolen by the book.
+        ...(model.splitDragging ? [h.div([h.Class("split-overlay")], [])] : []),
+      ],
     );
   }
   return h.div(
-    [
-      h.Class(
-        chromeHidden ? "workspace-layout pager app--chrome-hidden" : "workspace-layout pager",
-      ),
-    ],
+    [h.Class("workspace-layout pager")],
     [
       track,
       h.div(
@@ -792,6 +1721,820 @@ const workspaceView = (
   );
 };
 
+/** Whatever overlay is up, over whichever page is showing. Each module owns its
+ *  own markup; the host owns only which one is on screen. */
+export const overlayView = (model: Model, h: HtmlBuilder<Message>): Html[] => {
+  switch (model.overlay._tag) {
+    case "LoginOverlay":
+      return [loginModalView(model, h)];
+    case "InfoOverlay":
+      return [infoView(model.info, { onClose: ClosedOverlay() }, h)];
+    case "SettingsOverlay":
+      return [
+        settingsView(
+          model.settings,
+          {
+            book: model.currentGroup === null ? null : settingsBook(model, model.currentGroup),
+            signedIn: model.session._tag === "AuthenticatedSession",
+            onClose: ClosedOverlay(),
+            accountSection: accountSectionView(model, h),
+          },
+          h,
+        ),
+      ];
+    case "UploadOverlay":
+      return model.currentGroup === null
+        ? []
+        : [uploadView(model.upload, { group: model.currentGroup, onClose: ClosedOverlay() }, h)];
+    case "PresenceOverlay": {
+      const group = model.currentGroup;
+      if (group === null) return [];
+      const roster = {
+        members: model.members,
+        peers: model.notes.peers,
+        viewerRole: model.membership?.role ?? "visitor",
+      };
+      return [
+        presenceView(
+          model.presence,
+          {
+            group,
+            ...roster,
+            viewerId: model.session._tag === "AuthenticatedSession" ? model.session.user.id : "",
+            onClose: ClosedOverlay(),
+            // React nests the roster inside the invite controls and puts the
+            // backup controls at the head of the books page.
+            inviteControls: inviteControlsView(
+              model.invite,
+              { group, children: [presencePeopleView(model.presence, roster, h)] },
+              h,
+            ),
+            backupControls: [backupControlsView(model.settings, group, h)],
+          },
+          h,
+        ),
+      ];
+    }
+    case "InviteOverlay": {
+      const overlay = model.overlay;
+      const group = model.groups.find((candidate) => groupUrlName(candidate) === overlay.groupRef);
+      return group === undefined
+        ? []
+        : [inviteView(model.invite, { group, onClose: ClosedOverlay() }, h)];
+    }
+    default:
+      return [];
+  }
+};
+
+/** The club's own profile for the settings modal: who the reader is inside this
+ *  club, which is a roster entry rather than the account. */
+const settingsBook = (model: Model, group: GroupSummary) => {
+  const viewerId = model.session._tag === "AuthenticatedSession" ? model.session.user.id : "";
+  const me = model.members.find((member) => member.id === viewerId);
+  const profile =
+    me?.avatarImageId === undefined
+      ? { id: viewerId, displayName: me?.name ?? "You" }
+      : { id: viewerId, displayName: me.name, avatarImageId: me.avatarImageId };
+  return { groupId: group.groupId, slug: group.slug, publicId: group.publicId, profile };
+};
+
+/** React's `RenamableText`: a double-click turns the text into a field that
+ *  saves on blur or Enter and abandons on Escape. */
+const renamableTitle = (
+  model: Model,
+  target: string,
+  value: string,
+  h: HtmlBuilder<Message>,
+): Html =>
+  model.renamingTarget === target
+    ? h.input([
+        h.Class("topbar-title-edit"),
+        h.Autofocus(true),
+        h.AriaLabel("club name"),
+        h.Value(model.renameDraft),
+        h.OnInput((next) => ChangedRenameDraft({ value: next })),
+        h.OnBlur(CommittedRename()),
+        h.OnKeyDownPreventDefault((key) =>
+          key === "Enter"
+            ? Option.some(CommittedRename())
+            : key === "Escape"
+              ? Option.some(CancelledRename())
+              : Option.none(),
+        ),
+      ])
+    : h.h1(
+        [
+          h.Title("Double-click to rename the club"),
+          h.OnDoubleClick(StartedRename({ target, value })),
+        ],
+        [value],
+      );
+
+export const workspaceHeaderView = (
+  model: Model,
+  displayName: string,
+  h: HtmlBuilder<Message>,
+): Html =>
+  h.header(
+    [h.Class("topbar")],
+    [
+      h.button(
+        [
+          h.Type("button"),
+          h.Class("topbar-home"),
+          h.AriaLabel("back to your clubs"),
+          h.OnClick(Navigated({ route: Home() })),
+        ],
+        ["\u2039"],
+      ),
+      renamableTitle(model, "club", displayName, h),
+      presenceIndicatorView(
+        model.notes.peers.length,
+        OpenedOverlay({ overlay: PresenceOverlay() }),
+        h,
+      ),
+      h.button(
+        [
+          h.Type("button"),
+          h.Class("settings-button icon-button"),
+          h.AriaLabel("settings"),
+          h.Title("Settings"),
+          h.OnClick(OpenedOverlay({ overlay: SettingsOverlay() })),
+        ],
+        [h.img([h.Src(settingsIcon), h.Alt(""), h.AriaHidden(true)])],
+      ),
+      h.button(
+        [
+          h.Type("button"),
+          h.Class("workspace-info-button"),
+          h.AriaLabel("open info"),
+          h.Title("About & release log"),
+          h.OnClick(OpenedOverlay({ overlay: InfoOverlay() })),
+        ],
+        ["i"],
+      ),
+    ],
+  );
+
+/** The club, open on its book: React's `.app` shell, its header, and the split.
+ *  Chrome hiding is a class on the shell, which is what the CSS keys off. */
+const workspaceView = (
+  model: Model,
+  reader: ReaderWorkspace,
+  groupRef: string,
+  h: HtmlBuilder<Message>,
+): Html =>
+  h.div(
+    [h.Class(reader.chromeLevel >= 1 ? "app app--chrome-hidden" : "app")],
+    [
+      workspaceHeaderView(model, model.currentGroup?.displayName ?? "Bookclub", h),
+      workspaceLayoutView(model, reader, groupRef, h),
+      ...overlayView(model, h),
+    ],
+  );
+
+/** The card the whole signed-out and club-picking experience sits on. React's
+ *  `home.css` draws its stacked border, its centre rule, and its bookmark. */
+const homeCard = (h: HtmlBuilder<Message>, children: Html[], overlay: Html[] = []): Html =>
+  h.div([h.Class("home")], [h.div([h.Class("home-card")], children), ...overlay]);
+
+/** The card's top-left corner: the way into settings and into the info screen. */
+const homeTopButtons = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class("home-top-buttons")],
+    [
+      ...(model.session._tag === "AuthenticatedSession"
+        ? [
+            h.button(
+              [
+                h.Type("button"),
+                h.Class("home-settings-button icon-button"),
+                h.AriaLabel("settings"),
+                h.Title("Settings"),
+                h.OnClick(OpenedOverlay({ overlay: SettingsOverlay() })),
+              ],
+              [h.img([h.Src(settingsIcon), h.Alt(""), h.AriaHidden(true)])],
+            ),
+          ]
+        : []),
+      h.button(
+        [
+          h.Type("button"),
+          h.Class("home-info-button"),
+          h.AriaLabel("open info"),
+          h.Title("About & release log"),
+          h.OnClick(OpenedOverlay({ overlay: InfoOverlay() })),
+        ],
+        ["i"],
+      ),
+    ],
+  );
+
+/** The card's top-right corner: who you are, or the way in. */
+const loginCorner = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class("home-corner home-corner--login")],
+    model.session._tag === "AuthenticatedSession"
+      ? [
+          h.div(
+            [h.Class("login login--authed")],
+            [
+              h.span([h.Class("login-email")], [model.session.user.email]),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("login-link plain-button"),
+                  h.Title("Sign out"),
+                  h.OnClick(RequestedSignOut()),
+                ],
+                ["sign out"],
+              ),
+            ],
+          ),
+        ]
+      : [
+          h.button(
+            [
+              h.Type("button"),
+              h.Class("login-signin"),
+              h.Title("Sign in"),
+              h.OnClick(OpenedOverlay({ overlay: LoginOverlay() })),
+            ],
+            ["sign in"],
+          ),
+        ],
+  );
+
+const backToClubs = (h: HtmlBuilder<Message>): Html =>
+  h.button(
+    [
+      h.Type("button"),
+      h.Class("home-back"),
+      h.AriaLabel("back to your clubs"),
+      h.OnClick(Navigated({ route: Home() })),
+    ],
+    ["\u2039"],
+  );
+
+const clubList = (model: Model, h: HtmlBuilder<Message>): Html =>
+  model.session._tag !== "AuthenticatedSession"
+    ? h.span([h.Class("home-existing-label")], ["sign in to see your clubs"])
+    : model.groups.length === 0
+      ? h.span([h.Class("home-existing-label")], ["no clubs yet \u2014 create one above"])
+      : h.ul(
+          [h.Class("home-club-list")],
+          model.groups.map((group) =>
+            h.li(
+              [h.Key(group.groupId)],
+              [
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("login-link plain-button"),
+                    h.OnClick(Navigated({ route: Club({ groupRef: groupUrlName(group) }) })),
+                  ],
+                  [group.displayName],
+                ),
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("login-link plain-button"),
+                    h.Title("Invite people"),
+                    h.OnClick(
+                      OpenedOverlay({
+                        overlay: InviteOverlay({
+                          groupRef: groupUrlName(group),
+                          displayName: group.displayName,
+                        }),
+                      }),
+                    ),
+                  ],
+                  ["invite"],
+                ),
+              ],
+            ),
+          ),
+        );
+
+const homeView = (model: Model, h: HtmlBuilder<Message>, overlay: Html[] = []): Html =>
+  homeCard(
+    h,
+    [
+      homeTopButtons(model, h),
+      loginCorner(model, h),
+      h.div(
+        [h.Class("home-main")],
+        [
+          h.h1([h.Class("home-title")], ["Bookclub"]),
+          ...(model.session._tag !== "AuthenticatedSession"
+            ? []
+            : model.creatingClub
+              ? [
+                  h.form(
+                    [h.Class("home-create"), h.OnSubmit(SubmittedNewGroup())],
+                    [
+                      h.input([
+                        h.Type("text"),
+                        h.AriaLabel("Club name"),
+                        h.Placeholder("club name"),
+                        h.Value(model.newGroupName),
+                        h.OnInput((name) => ChangedNewGroupName({ name })),
+                        h.OnKeyDownPreventDefault((key) =>
+                          key === "Escape" ? Option.some(CancelledCreatingClub()) : Option.none(),
+                        ),
+                      ]),
+                      h.button(
+                        [
+                          h.Type("submit"),
+                          h.Class("home-create-confirm"),
+                          h.AriaLabel("create"),
+                          h.Title("Create club"),
+                          h.Disabled(model.newGroupName === "" || model.newGroupPending),
+                        ],
+                        ["+"],
+                      ),
+                    ],
+                  ),
+                ]
+              : [
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("home-action"),
+                      h.Title("Create a new bookclub"),
+                      h.OnClick(StartedCreatingClub()),
+                    ],
+                    ["create a new bookclub"],
+                  ),
+                ]),
+          ...(model.newGroupError === null
+            ? []
+            : [h.p([h.Class("login-error")], [model.newGroupError])]),
+          h.div([h.Class("home-clubs")], [clubList(model, h)]),
+        ],
+      ),
+      h.div([h.Class("home-corner home-corner--credit")], ["a project by Byron Li"]),
+    ],
+    overlay,
+  );
+
+/** Signing in is a modal over whatever page is showing, the way React presents
+ *  it, rather than a page of its own. */
+export const loginModalView = (model: Model, h: HtmlBuilder<Message>): Html =>
+  modalView({ title: "sign in", onClose: DismissedLogin() }, h, [
+    h.div([h.Class("modal-body")], loginBody(model, h)),
+  ]);
+
+const loginBody = (model: Model, h: HtmlBuilder<Message>): Html[] => [
+  ...(model.loginStep === "done"
+    ? [h.p([h.Class("modal-success")], ["\u2713 Sign in successful"])]
+    : model.loginStep === "email"
+      ? [loginEmailForm(model, h)]
+      : [loginCodeForm(model, h)]),
+  ...(model.loginError === null ? [] : [h.p([h.Class("login-error")], [model.loginError])]),
+];
+
+const loginEmailForm = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.form(
+    [h.OnSubmit(SubmittedLogin())],
+    [
+      h.input([
+        h.Id("login-email"),
+        h.Type("email"),
+        // `webauthn` is what offers a passkey from the browser's own autofill.
+        h.Autocomplete("username webauthn"),
+        h.AriaLabel("Email address"),
+        h.Placeholder("you@example.com"),
+        h.Value(model.loginEmail),
+        h.OnInput((email) => ChangedLoginEmail({ email })),
+      ]),
+      h.input([
+        h.Id("login-password"),
+        h.Type("password"),
+        h.Autocomplete("current-password"),
+        h.AriaLabel("Password (optional)"),
+        h.Placeholder("password (optional)"),
+        h.Value(model.loginPassword),
+        h.OnInput((password) => ChangedLoginPassword({ password })),
+      ]),
+      h.button(
+        [
+          h.Type("submit"),
+          h.Class("primary"),
+          h.Title(model.loginPassword === "" ? "Send a sign-in code" : "Sign in with password"),
+          h.Disabled(model.loginBusy || model.loginEmail === ""),
+        ],
+        [model.loginPassword === "" ? "send code" : "sign in"],
+      ),
+      ...(model.passkeysAvailable
+        ? [
+            h.button(
+              [
+                h.Type("button"),
+                h.Class("login-passkey plain-button"),
+                h.Title("Sign in with a passkey"),
+                h.Disabled(model.loginBusy || model.loginEmail === ""),
+                h.OnClick(RequestedPasskeyLogin()),
+              ],
+              ["use a passkey"],
+            ),
+          ]
+        : []),
+    ],
+  );
+
+const loginCodeForm = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.form(
+    [h.OnSubmit(SubmittedLoginCode())],
+    [
+      h.p([h.Class("modal-note")], [`Enter the code we sent to ${model.loginEmail}.`]),
+      h.input([
+        h.Id("login-code"),
+        h.Type("text"),
+        h.InputMode("numeric"),
+        h.AriaLabel("Verification code"),
+        h.Placeholder("6-digit code"),
+        h.Value(model.loginCode),
+        h.OnInput((code) => ChangedLoginCode({ code })),
+      ]),
+      h.button(
+        [
+          h.Type("submit"),
+          h.Class("primary"),
+          h.Title("Verify code"),
+          h.Disabled(model.loginBusy || model.loginCode === ""),
+        ],
+        ["verify"],
+      ),
+    ],
+  );
+
+/** React's `AccountSettings`, which is a page of the settings modal rather than
+ *  a screen of its own. */
+export const accountSectionView = (model: Model, h: HtmlBuilder<Message>): Html[] => [
+  h.section(
+    [h.Class("settings-item settings-item--stacked")],
+    [
+      h.div(
+        [h.Class("settings-item-text")],
+        [
+          h.h2([h.Class("settings-item-head")], ["Passkeys"]),
+          h.p(
+            [h.Class("settings-item-desc")],
+            ["Sign in with Face ID, Touch ID, or a security key."],
+          ),
+        ],
+      ),
+      ...(model.passkeysAvailable
+        ? [
+            ...(model.accountPasskeys.length === 0
+              ? []
+              : [
+                  h.ul(
+                    [h.Class("account-passkey-list")],
+                    model.accountPasskeys.map((passkey) =>
+                      h.li(
+                        [h.Key(passkey.id), h.Class("account-passkey")],
+                        [
+                          h.span([h.Class("account-passkey-label truncate")], [passkey.label]),
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Class("login-link plain-button"),
+                              h.Title("Remove this passkey"),
+                              h.OnClick(RequestedRemovePasskey({ id: passkey.id })),
+                            ],
+                            ["remove"],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ]),
+            h.div(
+              [h.Class("account-passkey-add")],
+              [
+                h.input([
+                  h.Type("text"),
+                  h.AriaLabel("Passkey name"),
+                  h.Placeholder("passkey name (optional)"),
+                  h.Value(model.passkeyLabel),
+                  h.OnInput((label) => ChangedPasskeyLabel({ label })),
+                ]),
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("settings-action"),
+                    h.Title("Add a passkey"),
+                    h.Disabled(model.accountBusy),
+                    h.OnClick(
+                      RequestedPasskeyRegistration({
+                        label: model.passkeyLabel.trim() === "" ? "Passkey" : model.passkeyLabel,
+                      }),
+                    ),
+                  ],
+                  ["add passkey"],
+                ),
+              ],
+            ),
+          ]
+        : [h.p([h.Class("settings-item-desc")], ["This browser doesn't support passkeys."])]),
+    ],
+  ),
+  h.section(
+    [h.Class("settings-item settings-item--stacked")],
+    [
+      h.div(
+        [h.Class("settings-item-text")],
+        [
+          h.h2([h.Class("settings-item-head")], ["Password"]),
+          h.p(
+            [h.Class("settings-item-desc")],
+            [
+              model.hasPassword
+                ? "A password is set. Enter it at sign-in to skip the email code."
+                : "Set an optional password to sign in without an email code.",
+            ],
+          ),
+        ],
+      ),
+      h.form(
+        [
+          h.Class("account-password-form"),
+          h.OnSubmit(
+            RequestedSetPassword(
+              model.hasPassword
+                ? { password: model.newPassword, currentPassword: model.currentPassword }
+                : { password: model.newPassword },
+            ),
+          ),
+        ],
+        [
+          ...(model.hasPassword
+            ? [
+                h.input([
+                  h.Type("password"),
+                  h.Autocomplete("current-password"),
+                  h.AriaLabel("Current password"),
+                  h.Placeholder("current password"),
+                  h.Value(model.currentPassword),
+                  h.OnInput((password) => ChangedCurrentPassword({ password })),
+                ]),
+              ]
+            : []),
+          h.input([
+            h.Type("password"),
+            h.Autocomplete("new-password"),
+            h.AriaLabel("New password"),
+            h.Placeholder(model.hasPassword ? "new password" : "password"),
+            h.Value(model.newPassword),
+            h.OnInput((password) => ChangedNewPassword({ password })),
+          ]),
+          h.button(
+            [
+              h.Type("submit"),
+              h.Class("settings-action"),
+              h.Title(model.hasPassword ? "Change password" : "Set password"),
+              h.Disabled(
+                model.accountBusy ||
+                  model.newPassword === "" ||
+                  (model.hasPassword && model.currentPassword === ""),
+              ),
+            ],
+            [model.hasPassword ? "change" : "set password"],
+          ),
+          ...(model.hasPassword
+            ? [
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("login-link plain-button"),
+                    h.Title("Remove password"),
+                    h.Disabled(model.accountBusy || model.currentPassword === ""),
+                    h.OnClick(RequestedRemovePassword({ currentPassword: model.currentPassword })),
+                  ],
+                  ["remove"],
+                ),
+              ]
+            : []),
+        ],
+      ),
+    ],
+  ),
+];
+
+/** A club that cannot be shown, on the same card the clubs list lives on. */
+const clubMessageView = (h: HtmlBuilder<Message>, title: string, body: string): Html =>
+  homeCard(h, [
+    backToClubs(h),
+    h.div([h.Class("home-main")], [h.h1([h.Class("home-title")], [title]), h.p([], [body])]),
+  ]);
+
+/** A club with no book yet: the one place a book gets added from. */
+const noBookView = (model: Model, group: GroupSummary, h: HtmlBuilder<Message>): Html =>
+  homeCard(
+    h,
+    [
+      backToClubs(h),
+      h.div(
+        [h.Class("home-main")],
+        [
+          h.h1([h.Class("home-title")], [group.displayName]),
+          h.button(
+            [
+              h.Type("button"),
+              h.Class("home-upload-link plain-button"),
+              h.Title("Upload a book or PDF"),
+              h.OnClick(OpenedOverlay({ overlay: UploadOverlay() })),
+            ],
+            ["upload the club's book or PDF"],
+          ),
+        ],
+      ),
+    ],
+    overlayView(model, h),
+  );
+
+/** The chrome a club wears while it is still resolving, so the page does not
+ *  jump when the book arrives. */
+const workspaceLoadingView = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class("app")],
+    [
+      h.header(
+        [h.Class("topbar")],
+        [
+          h.button(
+            [
+              h.Type("button"),
+              h.Class("topbar-home"),
+              h.AriaLabel("back to your clubs"),
+              h.OnClick(Navigated({ route: Home() })),
+            ],
+            ["\u2039"],
+          ),
+          h.span(
+            [h.Class("presence-indicator"), h.AriaHidden(true)],
+            [h.span([h.Class("presence-count")], ["0"]), h.span([h.Class("presence-dot")], [])],
+          ),
+        ],
+      ),
+      h.div(
+        [
+          h.Class(
+            model.viewport === "narrow" ? "workspace-layout pager" : "workspace-layout split",
+          ),
+        ],
+        [
+          h.div(
+            [h.Class("workspace-layout-track")],
+            [
+              h.div(
+                [h.Class(model.viewport === "narrow" ? "pager-page" : "split-pane")],
+                [
+                  h.div(
+                    [h.Class("reader")],
+                    [
+                      h.div(
+                        [h.Class("reader-bar")],
+                        [h.span([h.Class("reader-title")], []), h.span([h.Class("spacer")], [])],
+                      ),
+                      h.div(
+                        [h.Class("reader-stage")],
+                        [h.div([h.Class("reader-surface")], [loadingView(h, "loading--reader")])],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              h.div(
+                [
+                  h.Class(
+                    model.viewport === "narrow" ? "pager-page" : "split-pane split-pane--grow",
+                  ),
+                ],
+                [
+                  h.aside(
+                    [h.Class("note-panel")],
+                    [h.h2([], ["Notes"]), loadingView(h, "loading--note-panel")],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    ],
+  );
+
+/** A club, in whichever of React's states it is in: still resolving, closed to
+ *  you, empty, or open on its book. */
+const clubPageView = (model: Model, groupRef: string, h: HtmlBuilder<Message>): Html => {
+  if (model.session._tag === "AnonymousSession") {
+    return homeCard(
+      h,
+      [
+        loginCorner(model, h),
+        h.div(
+          [h.Class("home-main")],
+          [h.h1([h.Class("home-title")], ["Bookclub"]), h.p([], ["Sign in to open this club."])],
+        ),
+      ],
+      [loginModalView(model, h)],
+    );
+  }
+  const group = model.currentGroup;
+  if (group === null || group.publicId !== groupRef.slice(groupRef.lastIndexOf("-") + 1)) {
+    return workspaceLoadingView(model, h);
+  }
+  if (model.membership !== null && !model.membership.isMember) {
+    return clubMessageView(h, "Members only", "You need an invite to join this club.");
+  }
+  if (group.sources.length === 0) return noBookView(model, group, h);
+  return model.reader === null
+    ? workspaceLoadingView(model, h)
+    : workspaceView(model, model.reader, groupRef, h);
+};
+
+/** The page for a route, with whatever overlay is up over it. */
+const pageView = (model: Model, h: HtmlBuilder<Message>): Html => {
+  switch (model.route._tag) {
+    case "Club":
+      return clubPageView(model, model.route.groupRef, h);
+    default:
+      return homeView(model, h, overlayView(model, h));
+  }
+};
+
+/** React's `ToastViewport`: newest first, each dismissable, each carrying the
+ *  dwell time the stylesheet animates against. */
+const toastViewportView = (model: Model, h: HtmlBuilder<Message>): Html[] =>
+  model.toasts.length === 0
+    ? []
+    : [
+        h.div(
+          [h.Class("toast-viewport"), h.AriaLive("polite"), h.AriaAtomic(false)],
+          model.toasts.map((toast) =>
+            h.div(
+              [
+                h.Key(toast.id),
+                h.Class(`toast toast--${toast.type}`),
+                h.Style({ "--toast-duration": `${toast.durationMs}ms` }),
+              ],
+              [
+                h.div(
+                  [h.Class("toast-head")],
+                  [
+                    h.strong([], [toast.title]),
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.AriaLabel("dismiss toast"),
+                        h.Title("Dismiss"),
+                        h.OnClick(DismissedToast({ id: toast.id })),
+                      ],
+                      ["x"],
+                    ),
+                  ],
+                ),
+                h.div(
+                  [h.Class("toast-body")],
+                  [
+                    h.p([], [toast.message]),
+                    ...(toast.action === null
+                      ? []
+                      : [h.a([h.Href(toast.action.href)], [toast.action.label])]),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ];
+
+/** Reassurance that reading and note-taking keep working with no connection. */
+const offlineBannerView = (h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class("offline-banner"), h.Role("status"), h.AriaLive("polite")],
+    ["You're offline — you can keep reading and taking notes; changes sync when you reconnect."],
+  );
+
+/**
+ * React's `App`: a banner, the route, and the toasts. The page owns its own
+ * full-screen chrome — the workspace renders `.app` and the card pages render
+ * `.home` — so the shell adds none of its own.
+ */
+export const shellView = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class("foldkit-root")],
+    [
+      ...(model.online ? [] : [offlineBannerView(h)]),
+      pageView(model, h),
+      ...toastViewportView(model, h),
+    ],
+  );
+
 export const makeBookclubApplication = (container: HTMLElement) => {
   container.id = FOLDKIT_RUNTIME_ID;
   return Runtime.makeApplication<Model, Message, never, NoteAgentService>({
@@ -801,243 +2544,7 @@ export const makeBookclubApplication = (container: HTMLElement) => {
     update,
     managedResources: noteAgentResources,
     subscriptions,
-    view: (model, h) => {
-      const page =
-        model.route._tag === "Login"
-          ? h.form(
-              [h.OnSubmit(SubmittedPasswordLogin())],
-              [
-                h.label([h.For("login-email")], ["Email"]),
-                h.input([
-                  h.Id("login-email"),
-                  h.Type("email"),
-                  h.Autocomplete("email"),
-                  h.Value(model.loginEmail),
-                  h.OnInput((email) => ChangedLogin({ email, password: model.loginPassword })),
-                ]),
-                h.label([h.For("login-password")], ["Password"]),
-                h.input([
-                  h.Id("login-password"),
-                  h.Type("password"),
-                  h.Autocomplete("current-password"),
-                  h.Value(model.loginPassword),
-                  h.OnInput((password) => ChangedLogin({ email: model.loginEmail, password })),
-                ]),
-                h.button([h.Type("submit")], ["Sign in"]),
-              ],
-            )
-          : model.route._tag === "AccountSettings"
-            ? h.section(
-                [h.AriaLabel("Account settings")],
-                [
-                  h.h2([], ["Account settings"]),
-                  h.button([h.OnClick(Navigated({ route: Home() }))], ["Back"]),
-                  h.button(
-                    [h.OnClick(RequestedPasskeyRegistration({ label: "Passkey" }))],
-                    ["Register passkey"],
-                  ),
-                  h.ul(
-                    [],
-                    model.accountPasskeys.map((passkey) =>
-                      h.li(
-                        [],
-                        [
-                          passkey.label,
-                          h.button(
-                            [h.OnClick(RequestedRemovePasskey({ id: passkey.id }))],
-                            [`Remove ${passkey.label}`],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  h.label([h.For("account-password")], ["Password"]),
-                  h.input([
-                    h.Id("account-password"),
-                    h.Type("password"),
-                    h.Value(model.loginPassword),
-                    h.OnInput((password) => ChangedLogin({ email: model.loginEmail, password })),
-                  ]),
-                  h.button(
-                    [h.OnClick(RequestedSetPassword({ password: model.loginPassword }))],
-                    [model.hasPassword ? "Change password" : "Set password"],
-                  ),
-                  ...(model.hasPassword
-                    ? [
-                        h.button(
-                          [
-                            h.OnClick(
-                              RequestedRemovePassword({ currentPassword: model.loginPassword }),
-                            ),
-                          ],
-                          ["Remove password"],
-                        ),
-                      ]
-                    : []),
-                  h.button([h.OnClick(RequestedSignOut())], ["Sign out"]),
-                ],
-              )
-            : model.route._tag === "Reader"
-              ? model.reader === null
-                ? h.p([h.Class("reader-empty label")], ["Open a book to begin."])
-                : workspaceView(model, model.reader, model.route.groupRef, h)
-              : model.route._tag === "Group"
-                ? h.section(
-                    [h.AriaLabel("Club")],
-                    [
-                      h.h2([], [model.route.groupRef]),
-                      h.button([h.OnClick(Navigated({ route: Home() }))], ["Back"]),
-                      ...(model.currentGroup === null
-                        ? [h.p([h.Role("status")], ["Loading club"])]
-                        : [
-                            h.p([], [`${model.currentGroup.sources.length} books`]),
-                            h.ul(
-                              [h.AriaLabel("Book catalog")],
-                              model.currentGroup.sources.map((sourceId) =>
-                                h.li([], [model.currentGroup?.bookTitles[sourceId] ?? sourceId]),
-                              ),
-                            ),
-                            h.label([h.For("club-title")], ["Club title"]),
-                            h.input([
-                              h.Id("club-title"),
-                              h.Value(model.newGroupName),
-                              h.OnInput((name) => ChangedNewGroupName({ name })),
-                            ]),
-                            h.button(
-                              [
-                                h.OnClick(
-                                  RequestedRenameGroup({
-                                    groupRef: model.route.groupRef,
-                                    title: model.newGroupName,
-                                  }),
-                                ),
-                              ],
-                              ["Rename club"],
-                            ),
-                            h.button(
-                              [h.OnClick(RequestedInvite({ groupRef: model.route.groupRef }))],
-                              ["Create invite link"],
-                            ),
-                            ...(model.inviteToken === ""
-                              ? []
-                              : [h.p([h.Role("status")], [`Invite token: ${model.inviteToken}`])]),
-                            h.ul(
-                              [h.AriaLabel("Members")],
-                              model.members.map((member) =>
-                                h.li(
-                                  [],
-                                  [
-                                    `${member.name}: ${member.role}`,
-                                    h.button(
-                                      [
-                                        h.OnClick(
-                                          RequestedMemberRole({
-                                            groupRef: model.currentGroup?.publicId ?? "",
-                                            memberId: member.id,
-                                            role: member.role === "visitor" ? "member" : "visitor",
-                                          }),
-                                        ),
-                                      ],
-                                      [`Toggle ${member.name} role`],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            h.button(
-                              [
-                                h.OnClick(
-                                  RequestedDeleteGroup({
-                                    groupRef: model.route.groupRef,
-                                    groupId: model.currentGroup.groupId,
-                                  }),
-                                ),
-                              ],
-                              ["Delete club"],
-                            ),
-                          ]),
-                    ],
-                  )
-                : h.section(
-                    [h.AriaLabel("Your clubs")],
-                    [
-                      h.h2([], ["Your clubs"]),
-                      h.form(
-                        [h.OnSubmit(SubmittedNewGroup())],
-                        [
-                          h.label([h.For("new-club")], ["New club name"]),
-                          h.input([
-                            h.Id("new-club"),
-                            h.Value(model.newGroupName),
-                            h.OnInput((name) => ChangedNewGroupName({ name })),
-                          ]),
-                          h.button([h.Type("submit")], ["Create club"]),
-                        ],
-                      ),
-                      h.label([h.For("join-club-ref")], ["Club reference"]),
-                      h.input([
-                        h.Id("join-club-ref"),
-                        h.Value(model.loginEmail),
-                        h.OnInput((email) =>
-                          ChangedLogin({ email, password: model.loginPassword }),
-                        ),
-                      ]),
-                      h.label([h.For("join-token")], ["Invite token"]),
-                      h.input([
-                        h.Id("join-token"),
-                        h.Value(model.inviteToken),
-                        h.OnInput((token) => ChangedInviteToken({ token })),
-                      ]),
-                      h.button(
-                        [
-                          h.OnClick(
-                            RequestedJoin({ groupRef: model.loginEmail, token: model.inviteToken }),
-                          ),
-                        ],
-                        ["Join club"],
-                      ),
-                      h.ul(
-                        [],
-                        model.groups.map((group) =>
-                          h.li(
-                            [],
-                            [
-                              h.button(
-                                [
-                                  h.OnClick(
-                                    Navigated({ route: Group({ groupRef: group.publicId }) }),
-                                  ),
-                                ],
-                                [group.displayName],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-      return {
-        title: "Bookclub",
-        body: h.main(
-          [],
-          [
-            h.h1([], ["Bookclub"]),
-            h.nav(
-              [h.AriaLabel("Primary")],
-              [
-                h.button([h.OnClick(Navigated({ route: Home() }))], ["Home"]),
-                h.button([h.OnClick(Navigated({ route: Login() }))], ["Sign in"]),
-                h.button([h.OnClick(Navigated({ route: AccountSettings() }))], ["Account"]),
-              ],
-            ),
-            page,
-            ...(model.errorToast === null
-              ? []
-              : [h.p([h.Role("alert")], [model.errorToast.message])]),
-          ],
-        ),
-      };
-    },
+    view: (model, h) => ({ title: "Bookclub", body: shellView(model, h) }),
     devTools: false,
   });
 };

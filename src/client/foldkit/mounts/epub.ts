@@ -217,10 +217,13 @@ export const epubJsEngine: EpubEngine = ({
   // section. Bound, because epub.js reads `this.displaying` inside `display`.
   const display = rendition.display.bind(rendition) as (target?: string) => Promise<void>;
 
+  let opening: Promise<unknown> | null = null;
+
   return {
     book,
     async load(bytes, initialCfi) {
-      await book.open(bytes, "binary");
+      opening = book.open(bytes, "binary");
+      await opening;
       const metadata = await book.loaded.metadata.catch(() => null);
       const navigation = await book.loaded.navigation.catch(() => null);
       // Try the most specific target first: a body-matter landmark can fail to
@@ -318,13 +321,19 @@ export const epubJsEngine: EpubEngine = ({
     },
     destroy() {
       rendition.destroy();
-      book.destroy();
+      // `Book.destroy` drops the deferred `loading` map, and the display-options
+      // fetch epub.js starts during `unpack` resolves against it afterwards. A
+      // book destroyed while that is in flight throws inside the library, so the
+      // teardown waits for the open to settle — and a session torn down before
+      // it ever opened has nothing in flight to wait for.
+      if (opening === null) book.destroy();
+      else void opening.catch(() => undefined).then(() => book.destroy());
     },
   };
 };
 
 export interface EpubMountOptions {
-  loadSource: (sourceId: string) => Promise<ArrayBuffer>;
+  loadSource: (sourceId: string, groupRef: string) => Promise<ArrayBuffer>;
   engine?: EpubEngine;
 }
 
@@ -356,6 +365,9 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     "EpubSource",
     {
       sourceId: Schema.String,
+      // The club the book belongs to: a first open downloads it, and the
+      // download is addressed by club reference.
+      groupRef: Schema.String,
       initialCfi: Schema.NullOr(Schema.String),
       spread: EpubSpread,
       fontSizePercent: Schema.Number,
@@ -367,7 +379,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     ClickedEpubHighlight,
     FailedEpubLoad,
   )(
-    ({ sourceId, initialCfi, spread, fontSizePercent }) =>
+    ({ sourceId, groupRef, initialCfi, spread, fontSizePercent }) =>
       (element) =>
         Stream.callback<EpubMountMessage>((queue) =>
           Effect.gen(function* () {
@@ -405,7 +417,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
             );
 
             const opened = yield* Effect.tryPromise(() =>
-              loadSource(sourceId).then((bytes) => session.load(bytes, initialCfi)),
+              loadSource(sourceId, groupRef).then((bytes) => session.load(bytes, initialCfi)),
             ).pipe(
               Effect.map((title) => ({ title })),
               Effect.tapError((error) =>

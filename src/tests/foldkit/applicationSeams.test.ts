@@ -2,7 +2,14 @@
 
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { Model, Navigated, init, update, type Message } from "../../client/foldkit/application.ts";
+import {
+  Club,
+  Model,
+  Navigated,
+  init,
+  update,
+  type Message,
+} from "../../client/foldkit/application.ts";
 import { NotesMessage, isNotesMessage } from "../../client/foldkit/notes.ts";
 import {
   ClickedEpubHighlight,
@@ -76,7 +83,8 @@ describe("Foldkit application slice seams", () => {
       initial,
       SelectedReaderSource({ groupRef: "club-alpha", sourceId: "source-1", kind: "epub" }),
     );
-    expect(opened.route._tag).toBe("Reader");
+    // A club is its open book: opening one stays on the club's own route.
+    expect(opened.route).toEqual(Club({ groupRef: "club-alpha" }));
     expect(opened.reader?.sourceId).toBe("source-1");
     expect(opened.reader?.loading).toBe(true);
 

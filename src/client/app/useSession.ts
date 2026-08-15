@@ -1,9 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
-import {
-  startAuthentication,
-  type PublicKeyCredentialRequestOptionsJSON,
-} from "@simplewebauthn/browser";
 import { parseHttpError } from "../http.ts";
+import { passkeyLogin as passkeyCeremony } from "../logic/auth/authClient.ts";
 import { apiFetch, setSessionToken } from "../logic/net/api.ts";
 import { isOnline, subscribeOnline } from "../logic/net/online.ts";
 import { readLocal, removeLocal, writeLocal } from "../logic/storage.ts";
@@ -161,33 +158,11 @@ export function useSession(): Session {
   );
 
   const passkeyLogin = useCallback(async (email: string): Promise<ActionResult> => {
-    const optionsRes = await apiFetch("/auth/passkey/login/options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
-    // SAFETY: the login-options endpoint returns SimpleWebAuthn's request options contract.
-    const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialRequestOptionsJSON;
-
-    let assertion;
-    try {
-      assertion = await startAuthentication({ optionsJSON });
-    } catch {
-      return { ok: false, error: "passkey_cancelled" };
-    }
-
-    const verifyRes = await apiFetch("/auth/passkey/login/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ response: assertion }),
-    });
-    if (!verifyRes.ok) return { ok: false, error: await parseHttpError(verifyRes) };
-    // SAFETY: the passkey verification endpoint returns the shared session envelope on success.
-    const body = (await verifyRes.json()) as { user: SessionUser; token?: string };
-    await setSessionToken(body.token ?? null);
-    cacheUser(body.user);
-    setSessionSnapshot({ user: body.user, status: "authed" });
+    const result = await passkeyCeremony(email);
+    if (!result.ok) return { ok: false, error: result.error };
+    await setSessionToken(result.value.token ?? null);
+    cacheUser(result.value.user);
+    setSessionSnapshot({ user: result.value.user, status: "authed" });
     return { ok: true };
   }, []);
 

@@ -108,7 +108,7 @@ export interface PdfRasterizeRequest {
  *  free of handles: the application supplies one environment at construction
  *  and the Mount owns whatever it produces for the element's lifetime. */
 export interface PdfMountEnvironment {
-  readonly loadSource: (sourceId: string) => Promise<ArrayBuffer>;
+  readonly loadSource: (sourceId: string, groupRef: string) => Promise<ArrayBuffer>;
   readonly loadDocument: (bytes: ArrayBuffer) => Promise<PDFDocumentProxy>;
   readonly rasterize: (request: PdfRasterizeRequest) => PdfRenderTask;
   readonly loadTextLayerBuilder: (() => Promise<typeof TextLayerBuilder>) | null;
@@ -140,7 +140,7 @@ export const canvasRasterizer = ({
 };
 
 export const browserPdfMountEnvironment = (
-  loadSource: (sourceId: string) => Promise<ArrayBuffer>,
+  loadSource: (sourceId: string, groupRef: string) => Promise<ArrayBuffer>,
   overrides: Partial<PdfMountEnvironment> = {},
 ): PdfMountEnvironment => ({
   loadSource,
@@ -170,6 +170,7 @@ interface Pane {
 interface Session {
   readonly environment: PdfMountEnvironment;
   readonly sourceId: string;
+  readonly groupRef: string;
   readonly layout: PdfPageLayout;
   readonly zoom: number;
   readonly scroller: HTMLDivElement;
@@ -412,7 +413,13 @@ function documentCacheKey(environment: PdfMountEnvironment, sourceId: string, by
 function openSession(
   element: Element,
   environment: PdfMountEnvironment,
-  args: { sourceId: string; initialPage: number; zoom: number; layout: PdfPageLayout },
+  args: {
+    sourceId: string;
+    groupRef: string;
+    initialPage: number;
+    zoom: number;
+    layout: PdfPageLayout;
+  },
   emit: (message: PdfMountMessage) => void,
 ): Session {
   const scroller = document.createElement("div");
@@ -427,6 +434,7 @@ function openSession(
   const session: Session = {
     environment,
     sourceId: args.sourceId,
+    groupRef: args.groupRef,
     layout: args.layout,
     zoom: args.zoom,
     scroller,
@@ -739,7 +747,7 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
 
 async function startSession(session: Session, environment: PdfMountEnvironment): Promise<void> {
   try {
-    const bytes = await environment.loadSource(session.sourceId);
+    const bytes = await environment.loadSource(session.sourceId, session.groupRef);
     const key = documentCacheKey(environment, session.sourceId, bytes.byteLength);
     session.documentCacheKey = key;
     const cached = key === null ? null : getCachedPdfDocument(key);
@@ -822,6 +830,7 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
     "PdfDocument",
     {
       sourceId: Schema.String,
+      groupRef: Schema.String,
       initialPage: Schema.Number,
       zoom: Schema.Number,
       layout: PdfPageLayout,

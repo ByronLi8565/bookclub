@@ -2,6 +2,7 @@ import { Runtime } from "foldkit";
 import {
   ReaderWorkspace,
   SelectedReaderSource,
+  ClosedBookMenu,
   ShowedReaderHighlights,
   makeReaderSlice,
   makeReaderSubscriptions,
@@ -74,7 +75,21 @@ Runtime.embed(
           h.Class(model.chromeLevel >= 1 ? "app app--chrome-hidden" : "app"),
           h.DataAttribute("pane", model.pane),
         ],
-        [reader.view(model, h)],
+        [
+          // The harness opens one fixture book with no club around it, so the
+          // bar has nothing to switch to, rename, or add.
+          reader.view(
+            model,
+            {
+              books: [],
+              title: null,
+              onSelectBook: () => ClosedBookMenu(),
+              onRenameBook: null,
+              onAddBook: null,
+            },
+            h,
+          ),
+        ],
       ),
     devTools: false,
     slow: false,

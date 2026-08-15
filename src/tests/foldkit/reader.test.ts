@@ -70,8 +70,14 @@ describe("reader keyboard contract", () => {
     expect(readerKeyMessage(key({ key: "ArrowUp", shiftKey: true }), false)).toEqual(
       Option.some({ _tag: "SteppedReaderChrome", direction: "hide" }),
     );
+    expect(readerKeyMessage(key({ key: "s" }), false)).toEqual(
+      Option.some({ _tag: "ToggledBookMenu" }),
+    );
+    // React's Mod+S pushes the reading place to the server there and then.
+    expect(readerKeyMessage(key({ key: "s", metaKey: true }), false)).toEqual(
+      Option.some({ _tag: "RequestedPositionSync" }),
+    );
     expect(readerKeyMessage(key({ key: "q" }), false)).toEqual(Option.none());
-    expect(readerKeyMessage(key({ key: "s", metaKey: true }), false)).toEqual(Option.none());
   });
 
   it("closes search on Escape only while search is open", () => {

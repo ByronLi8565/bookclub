@@ -2,12 +2,17 @@ import { Effect, Option, Queue, Schedule, Schema, Stream } from "effect";
 import { Command, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
-import { r } from "foldkit/route";
 import { HighlightAnchor, QuoteSelector } from "../../shared/types/notes.ts";
 import { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
-import { SourceKind } from "../../shared/types/sources.ts";
+import {
+  contentTypeFor,
+  extensionFor,
+  SourceKind,
+  type SourceSummary,
+} from "../../shared/types/sources.ts";
 import { PdfPageLayout } from "../../shared/types/userPrefs.ts";
-import { getCachedSource } from "../logic/groups/sourceCache.ts";
+import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts";
+import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { getRenderSnapshot } from "../ui/reader/engine/renderSnapshot.ts";
 import {
   browserReaderPositions,
@@ -33,12 +38,6 @@ import {
   browserPdfMountEnvironment,
   makePdfMount,
 } from "./mounts/pdf.ts";
-
-export const ReaderRoute = r("Reader", {
-  groupRef: Schema.String,
-  sourceId: Schema.String,
-  kind: SourceKind,
-});
 
 export const ReaderSearchMatch = Schema.Struct({ anchor: HighlightAnchor, excerpt: Schema.String });
 
@@ -80,6 +79,9 @@ export const ReaderSnapshotImage = Schema.Struct({
 export type ReaderSnapshotImage = typeof ReaderSnapshotImage.Type;
 
 export const ReaderWorkspace = Schema.Struct({
+  bookMenuOpen: Schema.Boolean,
+  renamingBook: Schema.Boolean,
+  bookTitleDraft: Schema.String,
   groupRef: Schema.String,
   sourceId: Schema.String,
   kind: SourceKind,
@@ -173,6 +175,11 @@ export const CommittedReaderSelection = m("CommittedReaderSelection", {
 });
 export const DismissedReaderSelection = m("DismissedReaderSelection");
 export const RequestedFitToText = m("RequestedFitToText");
+export const ToggledBookMenu = m("ToggledBookMenu");
+export const ClosedBookMenu = m("ClosedBookMenu");
+export const StartedBookRename = m("StartedBookRename", { title: Schema.String });
+export const ChangedBookTitleDraft = m("ChangedBookTitleDraft", { title: Schema.String });
+export const CancelledBookRename = m("CancelledBookRename");
 /** Show a passage the notes pane pointed at. */
 export const JumpedToHighlight = m("JumpedToHighlight", { anchor: HighlightAnchor });
 export const SetReaderZoom = m("SetReaderZoom", { percent: Schema.Number });
@@ -204,6 +211,11 @@ export const ReaderMessage = Schema.Union([
   CommittedReaderSelection,
   DismissedReaderSelection,
   RequestedFitToText,
+  ToggledBookMenu,
+  ClosedBookMenu,
+  StartedBookRename,
+  ChangedBookTitleDraft,
+  CancelledBookRename,
   JumpedToHighlight,
   SetReaderZoom,
   FailedReaderCommand,
@@ -224,17 +236,40 @@ export type ReaderMessage = typeof ReaderMessage.Type;
 
 export const isReaderMessage = Schema.is(ReaderMessage);
 
-const loadCachedBytes = async (sourceId: string): Promise<ArrayBuffer> => {
-  const file = await getCachedSource(sourceId);
-  if (file === null) throw new Error("This book is not available offline yet.");
+/** The cache answers a reopened book without a round trip; the first open of a
+ *  book downloads it and fills the cache for the next one. */
+const loadBookBytes = async (sourceId: string, groupRef: string): Promise<ArrayBuffer> => {
+  const cached = await getCachedSource(sourceId);
+  if (cached !== null) return cached.arrayBuffer();
+
+  const bytes = await Effect.runPromise(
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.groups.book({ params: { groupRef }, query: { sourceId } })),
+      Effect.flatMap((stream) => Stream.runCollect(stream)),
+    ),
+  );
+  // SAFETY: the response stream yields Uint8Array chunks backed by ArrayBuffer, not SharedArrayBuffer.
+  const blob = new Blob([...bytes] as BlobPart[]);
+  const kind = sniffSourceKind(await blob.slice(0, 4).arrayBuffer());
+  const file = new File([blob], `${sourceId}.${extensionFor(kind)}`, {
+    type: contentTypeFor(kind),
+  });
+  void putCachedSource(sourceId, file);
   return file.arrayBuffer();
 };
+
+const PDF_MAGIC = "%PDF";
+
+/** The download carries no source kind, and an EPUB is a zip while a PDF says so
+ *  in its first four bytes. */
+const sniffSourceKind = (head: ArrayBuffer): SourceKind =>
+  new TextDecoder().decode(head) === PDF_MAGIC ? "pdf" : "epub";
 
 /** The reader's one environment dependency: how a source's bytes are found.
  *  Mount args are Schema-only, so this is closed over when the slice is
  *  constructed rather than passed through the Model. */
 export interface ReaderEnvironment {
-  loadSource: (sourceId: string) => Promise<ArrayBuffer>;
+  loadSource: (sourceId: string, groupRef: string) => Promise<ArrayBuffer>;
   /** Where the reader's place is kept. A slice built without one opens every
    *  book at the beginning and records nothing. */
   positions?: ReaderPositions;
@@ -243,7 +278,7 @@ export interface ReaderEnvironment {
 }
 
 export const browserReaderEnvironment: ReaderEnvironment = {
-  loadSource: loadCachedBytes,
+  loadSource: loadBookBytes,
   positions: browserReaderPositions,
   snapshotFor: (sourceId) => {
     const snapshot = getRenderSnapshot(sourceId);
@@ -253,7 +288,227 @@ export const browserReaderEnvironment: ReaderEnvironment = {
   },
 };
 
+/** What the reader bar needs from the club around it: which books there are,
+ *  and what selecting, renaming or adding one means to the host. */
+export interface ReaderViewContext<Message> {
+  readonly books: readonly SourceSummary[];
+  readonly title: string | null;
+  readonly onSelectBook: (sourceId: string) => Message;
+  readonly onRenameBook: ((sourceId: string, title: string) => Message) | null;
+  readonly onAddBook: Message | null;
+}
+
+/** React's `bookLabel`: a stored title, else the open book's parsed one, else
+ *  the kind and a short id. */
+const bookLabel = (book: SourceSummary, activeTitle: string | null, isActive: boolean): string =>
+  book.title ??
+  (isActive && activeTitle !== null
+    ? activeTitle
+    : `${book.kind.toUpperCase()} · ${book.id.slice(0, 8)}`);
+
+const bookTitleView = <Message>(
+  reader: ReaderWorkspace,
+  context: ReaderViewContext<Message>,
+  label: string,
+  h: HtmlBuilder<Message | ReaderMessage>,
+): Html => {
+  const rename = context.onRenameBook;
+  if (rename === null || label === "") return h.span([h.Class("reader-title")], [label]);
+  return reader.renamingBook
+    ? h.input([
+        h.Class("reader-title-edit"),
+        h.Autofocus(true),
+        h.AriaLabel("book title"),
+        h.Value(reader.bookTitleDraft),
+        h.OnInput((title) => ChangedBookTitleDraft({ title })),
+        h.OnBlur(
+          reader.bookTitleDraft.trim() === "" || reader.bookTitleDraft === label
+            ? CancelledBookRename()
+            : rename(reader.sourceId, reader.bookTitleDraft.trim()),
+        ),
+        h.OnKeyDownPreventDefault((key) =>
+          key === "Enter"
+            ? Option.some(
+                reader.bookTitleDraft.trim() === "" || reader.bookTitleDraft === label
+                  ? CancelledBookRename()
+                  : rename(reader.sourceId, reader.bookTitleDraft.trim()),
+              )
+            : key === "Escape"
+              ? Option.some(CancelledBookRename())
+              : Option.none(),
+        ),
+      ])
+    : h.span(
+        [
+          h.Class("reader-title"),
+          h.Title("Double-click to rename the book"),
+          h.OnDoubleClick(StartedBookRename({ title: label })),
+        ],
+        [label],
+      );
+};
+
+/** React's `BookMenu`: the open book's title, and — when there is more than one
+ *  book or a way to add one — a dropdown to switch between them. */
+const bookMenu = <Message>(
+  reader: ReaderWorkspace,
+  context: ReaderViewContext<Message>,
+  h: HtmlBuilder<Message | ReaderMessage>,
+): Html => {
+  const active = context.books.find((book) => book.id === reader.sourceId) ?? null;
+  const label = active === null ? (context.title ?? "") : bookLabel(active, context.title, true);
+  const title = bookTitleView(reader, context, label, h);
+  if (context.books.length <= 1 && context.onAddBook === null) return title;
+  return h.div(
+    [h.Class("book-menu")],
+    [
+      title,
+      h.button(
+        [
+          h.Type("button"),
+          h.Class("book-menu-arrow"),
+          h.AriaHasPopup("menu"),
+          h.AriaExpanded(reader.bookMenuOpen),
+          h.AriaLabel("switch book"),
+          h.Title("Switch book"),
+          h.OnClick(ToggledBookMenu()),
+        ],
+        ["\u25be"],
+      ),
+      ...(reader.bookMenuOpen
+        ? [
+            h.ul(
+              [h.Class("book-menu-list"), h.Role("menu")],
+              [
+                ...context.books.map((book) => {
+                  const name = bookLabel(book, context.title, book.id === reader.sourceId);
+                  return h.li(
+                    [h.Key(book.id), h.Role("none")],
+                    [
+                      h.button(
+                        [
+                          h.Type("button"),
+                          h.Role("menuitemradio"),
+                          h.AriaChecked(book.id === reader.sourceId),
+                          h.Class(
+                            book.id === reader.sourceId
+                              ? "book-menu-item is-active"
+                              : "book-menu-item",
+                          ),
+                          h.Title(`Open ${name}`),
+                          h.OnClick(context.onSelectBook(book.id)),
+                        ],
+                        [name],
+                      ),
+                    ],
+                  );
+                }),
+                ...(context.onAddBook === null
+                  ? []
+                  : [
+                      h.li(
+                        [h.Key("add-book"), h.Role("none"), h.Class("book-menu-add")],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Role("menuitem"),
+                              h.Class("book-menu-item"),
+                              h.Title("Add a book"),
+                              h.OnClick(context.onAddBook),
+                            ],
+                            ["+ Add a book"],
+                          ),
+                        ],
+                      ),
+                    ]),
+              ],
+            ),
+          ]
+        : []),
+    ],
+  );
+};
+
+const pageCount = <Message>(
+  reader: ReaderWorkspace,
+  h: HtmlBuilder<Message | ReaderMessage>,
+): Html[] =>
+  reader.totalPages === 0
+    ? []
+    : [
+        h.span(
+          [h.Class("page-count"), h.Role("status")],
+          [
+            `${reader.page} / ${reader.totalPages}`,
+            reader.percentage > 0 ? ` · ${Math.round(reader.percentage * 100)}%` : "",
+          ],
+        ),
+      ];
+
+const FIT_TO_TEXT_PATH = "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5";
+
+const readerZoom = <Message>(
+  reader: ReaderWorkspace,
+  h: HtmlBuilder<Message | ReaderMessage>,
+): Html[] => {
+  const percent = reader.kind === "epub" ? reader.fontSizePercent : reader.zoomPercent;
+  return [
+    ...(reader.kind === "pdf"
+      ? [
+          h.button(
+            [
+              h.Type("button"),
+              h.Class("reader-fit"),
+              h.Disabled(reader.loading),
+              h.AriaLabel("Fit text to screen"),
+              h.Title("Fit text to screen"),
+              h.OnClick(RequestedFitToText()),
+            ],
+            [
+              h.svg(
+                [h.ViewBox("0 0 24 24"), h.AriaHidden(true)],
+                [
+                  h.path([
+                    h.D(FIT_TO_TEXT_PATH),
+                    h.Fill("none"),
+                    h.Stroke("currentColor"),
+                    h.StrokeWidth("2.5"),
+                    h.StrokeLinecap("square"),
+                    h.StrokeLinejoin("miter"),
+                  ]),
+                ],
+              ),
+            ],
+          ),
+        ]
+      : []),
+    h.button(
+      [
+        h.Type("button"),
+        h.Disabled(reader.loading),
+        h.Title("Decrease text size"),
+        h.OnClick(SteppedReaderZoom({ direction: "out" })),
+      ],
+      ["\u2212"],
+    ),
+    h.span([h.Class("font-size")], [`${percent}%`]),
+    h.button(
+      [
+        h.Type("button"),
+        h.Disabled(reader.loading),
+        h.Title("Increase text size"),
+        h.OnClick(SteppedReaderZoom({ direction: "in" })),
+      ],
+      ["+"],
+    ),
+  ];
+};
+
 export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorkspace => ({
+  bookMenuOpen: false,
+  renamingBook: false,
+  bookTitleDraft: "",
   groupRef: input.groupRef,
   sourceId: input.sourceId,
   kind: input.kind,
@@ -328,6 +583,9 @@ export const readerKeyMessage = (
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
     return claim(OpenedReaderSearch());
   }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    return claim(RequestedPositionSync());
+  }
   if (event.metaKey || event.ctrlKey || event.altKey) return Option.none();
   if (isTypingTarget(event.target)) return Option.none();
   if (event.shiftKey) {
@@ -344,6 +602,8 @@ export const readerKeyMessage = (
       return claim(ToggledReaderLayout());
     case "f":
       return claim(RequestedFitToText());
+    case "s":
+      return claim(ToggledBookMenu());
     case "z":
       return claim(ToggledReaderChrome());
     default:
@@ -436,6 +696,26 @@ export const makeReaderSubscriptions = <Model, Message>({
               type: "keydown",
               toMessage: (event) =>
                 Option.map(readerKeyMessage(event, searchOpen), (message) => toMessage(message)),
+            }),
+            Effect.sync(() => open),
+          ),
+      },
+    ),
+    bookMenuDismissal: entry(
+      { open: Schema.Boolean },
+      {
+        modelToDependencies: (model) => ({ open: modelToReader(model)?.bookMenuOpen === true }),
+        // React's dropdown closes on a press anywhere outside it, and on the
+        // window losing focus.
+        dependenciesToStream: ({ open }) =>
+          Stream.when(
+            Subscription.fromEventFilterMap<PointerEvent, Message>({
+              target: globalThis.document,
+              type: "pointerdown",
+              toMessage: (event) =>
+                event.target instanceof Element && event.target.closest(".book-menu") !== null
+                  ? Option.none()
+                  : Option.some(toMessage(ClosedBookMenu())),
             }),
             Effect.sync(() => open),
           ),
@@ -842,6 +1122,16 @@ export const makeReaderSlice = ({
           { ...reader, pane: "reader" },
           [GoToReaderAnchor({ anchor: message.anchor, kind: reader.kind })],
         ];
+      case "ToggledBookMenu":
+        return [{ ...reader, bookMenuOpen: !reader.bookMenuOpen }, []];
+      case "ClosedBookMenu":
+        return [{ ...reader, bookMenuOpen: false }, []];
+      case "StartedBookRename":
+        return [{ ...reader, renamingBook: true, bookTitleDraft: message.title }, []];
+      case "ChangedBookTitleDraft":
+        return [{ ...reader, bookTitleDraft: message.title }, []];
+      case "CancelledBookRename":
+        return [{ ...reader, renamingBook: false, bookTitleDraft: "" }, []];
       case "RequestedFitToText":
         return reader.kind === "pdf" ? [reader, [FitPdfToText({})]] : null;
       case "SetReaderZoom":
@@ -940,6 +1230,7 @@ export const makeReaderSlice = ({
 
   const readerView = <Message>(
     reader: ReaderWorkspace,
+    context: ReaderViewContext<Message>,
     h: HtmlBuilder<Message | ReaderMessage>,
   ): Html => {
     const searchCount = reader.searchMatches.length;
@@ -947,101 +1238,94 @@ export const makeReaderSlice = ({
       reader.kind === "epub"
         ? epubReaderMount.Mount({
             sourceId: reader.sourceId,
+            groupRef: reader.groupRef,
             initialCfi: reader.position?.kind === "epub" ? reader.position.cfi : null,
             spread: epubSpread(reader.layout),
             fontSizePercent: reader.fontSizePercent,
           })
         : PdfReaderMount({
             sourceId: reader.sourceId,
+            groupRef: reader.groupRef,
             initialPage: reader.position?.kind === "pdf" ? reader.position.page : reader.page || 1,
             zoom: reader.zoomPercent,
             layout: reader.layout,
           });
-    const searchForm = h.form(
-      [h.OnSubmit(RequestedReaderSearch()), h.Class("reader-search")],
+    const searchRow = h.div(
+      [h.Class("reader-search")],
       [
-        h.label([h.For("reader-search")], ["Find in book"]),
         h.input([
-          h.Id("reader-search"),
-          h.Type("search"),
+          h.Class("reader-search-input"),
+          h.Type("text"),
+          h.AriaLabel("Find in book"),
+          h.Placeholder("Find in book"),
+          h.Autofocus(true),
           h.Value(reader.searchQuery),
           h.OnInput((query) => ChangedReaderSearch({ query })),
+          h.OnKeyDownPreventDefault((key, modifiers) =>
+            key === "Enter"
+              ? Option.some(
+                  modifiers.shiftKey
+                    ? SelectedSearchMatch({ index: reader.activeSearchMatch - 1 })
+                    : RequestedReaderSearch(),
+                )
+              : key === "Escape"
+                ? Option.some(ClosedReaderSearch())
+                : key === "ArrowRight" && searchCount > 0
+                  ? Option.some(SelectedSearchMatch({ index: reader.activeSearchMatch + 1 }))
+                  : key === "ArrowLeft" && searchCount > 0
+                    ? Option.some(SelectedSearchMatch({ index: reader.activeSearchMatch - 1 }))
+                    : Option.none(),
+          ),
         ]),
-        h.button([h.Type("submit")], ["Search"]),
+        h.span(
+          [h.Class("reader-search-count"), h.Role("status")],
+          [
+            searchCount === 0
+              ? reader.searchQuery.trim() === ""
+                ? ""
+                : "0 / 0"
+              : `${reader.activeSearchMatch + 1} / ${searchCount}`,
+          ],
+        ),
         h.button(
           [
             h.Type("button"),
             h.OnClick(SelectedSearchMatch({ index: reader.activeSearchMatch - 1 })),
+            h.Disabled(searchCount === 0),
             h.AriaLabel("Previous match"),
+            h.Title("Previous match"),
           ],
-          ["Previous match"],
+          ["\u2191"],
         ),
         h.button(
           [
             h.Type("button"),
             h.OnClick(SelectedSearchMatch({ index: reader.activeSearchMatch + 1 })),
+            h.Disabled(searchCount === 0),
             h.AriaLabel("Next match"),
+            h.Title("Next match"),
           ],
-          ["Next match"],
+          ["\u2193"],
         ),
         h.button(
-          [h.Type("button"), h.OnClick(ClosedReaderSearch()), h.AriaLabel("Close search")],
-          ["Close search"],
-        ),
-        h.span(
-          [h.Class("reader-search-count"), h.Role("status")],
-          [searchCount === 0 ? "0 / 0" : `${reader.activeSearchMatch + 1} / ${searchCount}`],
+          [
+            h.Type("button"),
+            h.OnClick(ClosedReaderSearch()),
+            h.AriaLabel("Close search"),
+            h.Title("Close search"),
+          ],
+          ["\u2715"],
         ),
       ],
     );
 
     const toolbar = h.div(
-      [h.Class("reader-bar"), h.Role("toolbar"), h.AriaLabel("Reader controls")],
+      [h.Class("reader-bar")],
       [
-        h.span(
-          [h.Class("page-count"), h.Role("status")],
-          [reader.totalPages === 0 ? "" : `${reader.page} / ${reader.totalPages}`],
-        ),
-        h.button(
-          [h.OnClick(SteppedReaderZoom({ direction: "in" })), h.Title("Increase text size")],
-          ["Increase text size"],
-        ),
-        h.button(
-          [h.OnClick(SteppedReaderZoom({ direction: "out" })), h.Title("Decrease text size")],
-          ["Decrease text size"],
-        ),
-        h.span(
-          [h.Class("font-size")],
-          [`${reader.kind === "epub" ? reader.fontSizePercent : reader.zoomPercent}%`],
-        ),
-        ...(reader.kind === "epub"
-          ? [
-              h.label([h.For("reader-font-size")], ["Text size"]),
-              h.input([
-                h.Id("reader-font-size"),
-                h.Type("range"),
-                h.Min("75"),
-                h.Max("200"),
-                h.Value(String(reader.fontSizePercent)),
-                h.OnInput((value) => ChangedReaderFontSize({ percent: Number(value) })),
-              ]),
-            ]
-          : []),
-        h.label([h.For("reader-layout")], ["Page layout"]),
-        h.select(
-          [
-            h.Id("reader-layout"),
-            h.Value(reader.layout),
-            h.OnChange((layout) =>
-              ChangedReaderLayout({ layout: layout === "auto" ? "auto" : "single" }),
-            ),
-          ],
-          [
-            h.option([h.Value("single")], ["Single page"]),
-            h.option([h.Value("auto")], ["Automatic spread"]),
-          ],
-        ),
-        h.button([h.OnClick(OpenedReaderSearch()), h.Title("Search")], ["Search"]),
+        bookMenu(reader, context, h),
+        ...pageCount(reader, h),
+        h.span([h.Class("spacer")], []),
+        ...readerZoom(reader, h),
       ],
     );
 
@@ -1095,7 +1379,7 @@ export const makeReaderSlice = ({
         // Chrome hides in two steps, and both are CSS collapses rather than
         // removals, so the bars animate out the way the React reader's do.
         toolbar,
-        ...(reader.searchOpen ? [searchForm] : []),
+        ...(reader.searchOpen ? [searchRow] : []),
         ...(reader.error === null ? [] : [h.p([h.Role("alert")], [reader.error])]),
         h.div(
           [h.Class("reader-stage")],

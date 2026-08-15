@@ -196,6 +196,7 @@ function startReader(adapter: ReturnType<typeof makeEpubMount>, initialSourceId:
                       h.OnMount(
                         adapter.Mount({
                           sourceId: model.sourceId,
+                          groupRef: "club-abc123",
                           initialCfi: null,
                           spread: "auto",
                           fontSizePercent: 100,

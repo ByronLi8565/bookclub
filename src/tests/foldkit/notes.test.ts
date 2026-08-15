@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { Story } from "foldkit/test";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,10 +16,22 @@ import {
   RetriedNoteImage,
 } from "../../client/foldkit/mounts/lexical.ts";
 import {
+  AddedNoteFilterTerm,
+  AskedNoteDelete,
   AttachedNoteHighlight,
+  ClearedNoteFilters,
+  ConfirmedNoteDelete,
+  DismissedNoteDelete,
+  FollowedNoteReference,
+  NotesModel,
+  RemovedNoteDraftTag,
+  RemovedNoteFilterTerm,
+  StartedNote,
+  StartedNoteReply,
+  ToggledNoteFilterMode,
+  ToggledNoteFilterTerm,
   CancelledNoteComposer,
   ChangedNoteComposer,
-  DetachedNoteHighlight,
   EnqueueNoteOperation,
   FailedNoteImageUpload,
   SelectedNoteImage,
@@ -34,6 +47,7 @@ import {
   initialNotesModel,
   updateNotes,
 } from "../../client/foldkit/notes.ts";
+import { removeNoteOp } from "../../client/logic/notes/noteOps.ts";
 import { addNoteOp, editNoteOp, updateTagsOp } from "../../client/logic/notes/noteOps.ts";
 import type { Highlight, Note } from "../../shared/types/notes.ts";
 
@@ -232,8 +246,6 @@ describe("Foldkit notes stories", () => {
         // passage must be recognised by its anchor or the note quotes it twice.
         expect(model.draftHighlights).toEqual([highlight]);
       }),
-      Story.message(DetachedNoteHighlight({ highlightId: highlight.id })),
-      Story.model((model) => expect(model.draftHighlights).toEqual([])),
     );
   });
 
@@ -383,5 +395,155 @@ describe("Foldkit notes stories", () => {
       Story.message(FailedNoteEditor({ message: "editor state was corrupt" })),
       Story.model((model) => expect(model.error).toBe("editor state was corrupt")),
     );
+  });
+
+  it("opens one composer at a time and remembers which note it answers", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(StartedNote()),
+      Story.model((model) => {
+        expect(model.composing).toBe(true);
+        expect(model.replyingToNoteId).toBeNull();
+      }),
+      Story.message(StartedNoteReply({ noteId: note.id })),
+      Story.model((model) => {
+        expect(model.replyingToNoteId).toBe(note.id);
+        // The reply composer is the note's, so the panel's own one closes.
+        expect(model.composing).toBe(false);
+      }),
+      Story.message(
+        StartedNoteEdit({
+          noteId: note.id,
+          body: note.body,
+          tags: note.tags ?? [],
+          highlights: note.highlights,
+        }),
+      ),
+      Story.model((model) => {
+        expect(model.editingNoteId).toBe(note.id);
+        expect(model.replyingToNoteId).toBeNull();
+      }),
+      Story.message(CancelledNoteComposer()),
+      Story.model((model) => {
+        expect(model.editingNoteId).toBeNull();
+        expect(model.replyingToNoteId).toBeNull();
+        expect(model.composing).toBe(false);
+      }),
+    );
+  });
+
+  it("opens the composer when the reader quotes a passage into it", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(AttachedNoteHighlight({ highlight })),
+      Story.model((model) => expect(model.composing).toBe(true)),
+    );
+  });
+
+  it("asks before deleting a note, and only then enqueues the removal", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(AskedNoteDelete({ noteId: note.id })),
+      Story.model((model) => expect(model.confirmingDeleteNoteId).toBe(note.id)),
+      Story.message(DismissedNoteDelete()),
+      Story.Command.expectNone(),
+      Story.model((model) => expect(model.confirmingDeleteNoteId).toBeNull()),
+      Story.message(AskedNoteDelete({ noteId: note.id })),
+      Story.message(ConfirmedNoteDelete({ noteId: note.id })),
+      Story.model((model) => expect(model.confirmingDeleteNoteId).toBeNull()),
+      Story.Command.resolve(EnqueueNoteOperation, QueuedNoteOperation({ noteId: note.id })),
+    );
+    // The op the confirmation enqueues is the existing serializable removal.
+    expect(removeNoteOp(note.id).kind).toBe("remove");
+  });
+
+  it("collects filter terms without repeating or contradicting itself", () => {
+    const theme = { kind: "tag", value: "theme", negated: false } as const;
+
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(AddedNoteFilterTerm({ term: theme })),
+      Story.message(AddedNoteFilterTerm({ term: { ...theme, negated: true } })),
+      Story.model((model) => {
+        // A term is identified by what it filters on, not by which way it points.
+        expect(model.filterTerms).toEqual([theme]);
+        expect(model.filterInput).toBe("");
+      }),
+      Story.message(ToggledNoteFilterTerm({ key: "tag:theme" })),
+      Story.model((model) => expect(model.filterTerms[0]?.negated).toBe(true)),
+      Story.message(ToggledNoteFilterMode()),
+      Story.model((model) => expect(model.filterMode).toBe("any")),
+      Story.message(RemovedNoteFilterTerm({ key: "tag:theme" })),
+      Story.model((model) => expect(model.filterTerms).toEqual([])),
+    );
+  });
+
+  it("widens the scope when a filter asks about a book other than this one", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.model((model) => expect(model.scope).toBe("current-book")),
+      Story.message(
+        AddedNoteFilterTerm({
+          term: { kind: "property", property: "book", value: "source-2", negated: false },
+        }),
+      ),
+      Story.model((model) => expect(model.scope).toBe("all-books")),
+      Story.message(ClearedNoteFilters()),
+      Story.model((model) => expect(model.filterTerms).toEqual([])),
+    );
+  });
+
+  it("follows a numbered reference to the note it names", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(
+        ChangedNotes({
+          ready: true,
+          notes: [note],
+          pendingNoteIds: [],
+          failedNoteIds: [],
+          pendingCount: 0,
+        }),
+      ),
+      Story.message(FollowedNoteReference({ seq: note.seq })),
+      Story.model((model) => expect(model.focusedNoteId).toBe(note.id)),
+      // A reference to a note this panel does not hold leaves the focus alone.
+      Story.message(FollowedNoteReference({ seq: 404 })),
+      Story.model((model) => expect(model.focusedNoteId).toBe(note.id)),
+    );
+  });
+
+  it("drops a tag the reader took back off the draft", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(ExtractedNoteDraftTags({ tags: ["theme", "question"] })),
+      Story.message(RemovedNoteDraftTag({ tag: "theme" })),
+      Story.model((model) => expect(model.draftTags).toEqual(["question"])),
+    );
+  });
+
+  it("keeps the panel's own state serializable", () => {
+    const model: NotesModel = {
+      ...initialNotesModel(),
+      notes: [note],
+      composing: true,
+      replyingToNoteId: note.id,
+      confirmingDeleteNoteId: note.id,
+      scope: "all-books",
+      filterMode: "any",
+      filterInput: "the",
+      filterTerms: [
+        { kind: "tag", value: "theme", negated: true },
+        { kind: "property", property: "author", value: "reader-1", negated: false },
+      ],
+    };
+    expect(Schema.decodeUnknownSync(NotesModel)(JSON.parse(JSON.stringify(model)))).toEqual(model);
   });
 });

@@ -4,6 +4,7 @@ import settingsIcon from "@assets/settings.svg";
 import { groupUrlName } from "../../../shared/groupUrls.ts";
 import type { Session } from "../../app/useSession.ts";
 import { createGroup, listMyGroups, type GroupSummary } from "../../logic/groups/groupClient.ts";
+import { clubNameErrorMessage } from "../../logic/groups/groupMessages.ts";
 import { readLocal, writeLocal } from "../../logic/storage.ts";
 import { useOnline } from "../../logic/net/online.ts";
 import { InviteModal } from "../group/InviteModal.tsx";
@@ -12,11 +13,6 @@ import { Loading } from "../shared/Loading.tsx";
 import { Login, LoginModal } from "../shared/Login.tsx";
 import { SettingsModal } from "../workspace/SettingsModal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
-
-const NAME_ERRORS = new Map([
-  ["empty", "Enter a name for your club."],
-  ["too_long", "That name is too long! 100 characters max."],
-]);
 
 interface GroupsStore {
   groups: GroupSummary[];
@@ -162,7 +158,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
     const result = await createGroup(name).catch(() => ({ ok: false as const, error: "network" }));
     createInFlight.current = false;
     if (!result.ok) {
-      const message = NAME_ERRORS.get(result.error) ?? "Couldn't create that club. Try again.";
+      const message = clubNameErrorMessage(result.error);
       dispatch({ type: "createError", error: message });
       spawnToast("Invalid club name", message, { type: "error", durationMs: 6000 });
       return;

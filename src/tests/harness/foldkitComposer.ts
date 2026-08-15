@@ -36,7 +36,7 @@ Runtime.embed(
       h.div(
         [h.Class("app")],
         [
-          notesView(model, { sourceId: "source-1", groupRef, selection: null }, h),
+          notesView(model, { sourceId: "source-1", groupRef }, h),
           // The draft as the Model holds it, so a test can see what an edit in
           // the editor actually wrote.
           h.pre([h.DataAttribute("draft", "true")], [model.draft]),

@@ -132,6 +132,7 @@ function runReader(environment: PdfMountEnvironment) {
                 h.OnMount(
                   PdfDocument({
                     sourceId: model.sourceId,
+                    groupRef: "club-abc123",
                     initialPage: model.page,
                     zoom: 100,
                     layout: "single",

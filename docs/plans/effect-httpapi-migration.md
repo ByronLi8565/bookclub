@@ -1054,8 +1054,10 @@ routes.
 ### Running the Foldkit entry
 
 `bun run dev` serves React at `/` and the Foldkit entry at `/foldkit` (`foldkit.html`), both against
-the same local worker with `DEV_AUTH=true`. Seed an account the Foldkit login can use — it is
-password-only — with `POST /auth/start` (dev sign-in) followed by `PUT /me/password`.
+the same local worker with `DEV_AUTH=true`. Any email signs in from the modal's "send code" button,
+because a dev worker signs a known email in outright instead of mailing a code. The Foldkit entry
+has no URL routing yet — it navigates in the Model — because `/clubs/…` in development belongs to
+React; wiring `routing` into `makeApplication` is part of the cutover.
 
 **Every gate in this matrix passed while sign-in, group loading, and opening a book were all broken
 in the assembled application.** Slice tests and harnesses cover the pieces; nothing crossed the seam

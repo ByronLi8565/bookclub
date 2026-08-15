@@ -18,7 +18,9 @@ const DevSession = Schema.Struct({
   user: PublicUser,
   token: Schema.String,
 }).pipe(HttpApiSchema.status(200));
-const CookieHeaders = { "set-cookie": Schema.String };
+// `set-cookie` is a forbidden response header: the browser stores the cookie but
+// hides it from `fetch`, so a client decoding these responses never sees it.
+const CookieHeaders = { "set-cookie": Schema.optionalKey(Schema.String) };
 const DevSessionWithCookie = HttpApiSchema.WithHeaders(DevSession, CookieHeaders);
 const SessionWithCookie = HttpApiSchema.WithHeaders(Session, CookieHeaders);
 const SignedOut = HttpApiSchema.WithHeaders(HttpApiSchema.NoContent, CookieHeaders);

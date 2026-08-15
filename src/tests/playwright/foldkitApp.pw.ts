@@ -1,0 +1,143 @@
+import { expect, test, type APIRequestContext } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+// The whole Foldkit entry against the real worker, which is the seam no slice
+// test and no harness crosses: session decoding, group references, and the
+// download that fills the source cache all live between the two, and all three
+// were broken while every other gate passed.
+//
+// One journey rather than several tests: the checks are sequential stages of a
+// single session, and a detached macOS launchd session gives Chromium only one
+// usable browser context (see PW_DETACHED_SESSION in playwright.config.ts).
+const PASSWORD = "devdevdev";
+const DISPLAY_NAME = "Parity Club";
+
+/** Seeds an account and a club with a book through the API, so the journey
+ *  starts from a known state rather than whatever the dev worker holds. */
+async function seedClub(request: APIRequestContext): Promise<string> {
+  const email = `foldkit-${Date.now()}@bookclub.test`;
+  const started = await request.post("/auth/start", { data: { email } });
+  expect(started.ok(), "dev sign-in needs DEV_AUTH=true").toBeTruthy();
+
+  const passworded = await request.put("/me/password", { data: { password: PASSWORD } });
+  expect(passworded.ok()).toBeTruthy();
+
+  const created = await request.post("/groups", { data: { displayName: DISPLAY_NAME } });
+  expect(created.ok()).toBeTruthy();
+  // SAFETY: the create-group endpoint answers 201 with this shape, asserted ok above.
+  const { group } = (await created.json()) as { group: { slug: string; publicId: string } };
+
+  const uploaded = await request.put(`/groups/${group.slug}-${group.publicId}/book`, {
+    headers: { "x-source-title": "The Picture of Dorian Gray" },
+    multipart: {
+      file: {
+        name: "dorian.epub",
+        mimeType: "application/epub+zip",
+        buffer: readFileSync(new URL("../../../assets/dorian.epub", import.meta.url)),
+      },
+    },
+  });
+  expect(uploaded.ok()).toBeTruthy();
+
+  return email;
+}
+
+test("a reader signs in, picks a club, and opens its book", async ({ page, request }) => {
+  const email = await seedClub(request);
+
+  await page.goto("/foldkit");
+
+  // `home.css` applies through these class names and nothing else, so a page
+  // that renders the right elements with the wrong ones is bare markup.
+  const card = page.locator(".home-card");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveCSS("border-top-width", "3px");
+  expect(await card.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
+
+  const cardBefore = await card.boundingBox();
+  await page.getByRole("button", { name: "sign in" }).first().click();
+
+  // A `<dialog>` without `open` is hidden outright by the UA stylesheet, so the
+  // route changes and the reader sees nothing happen.
+  const dialog = page.locator("dialog.modal");
+  await expect(dialog).toBeVisible();
+
+  // The modal lays over the card. If it wraps the card instead, `.home` stops
+  // being a direct child of `.app`, loses its height, and the page jumps.
+  expect(await card.boundingBox()).toEqual(cardBefore);
+
+  // Every way in the React modal offers: a mailed code by default, a password,
+  // or a passkey.
+  await expect(dialog.getByRole("button", { name: "send code" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "use a passkey" })).toBeVisible();
+
+  // The dev worker signs a known email in outright rather than mailing a code,
+  // which is the only way in for an account with no password set.
+  await dialog.getByLabel("Email address").fill(email);
+  await dialog.getByRole("button", { name: "send code" }).click();
+  await expect(page.locator(".login-email")).toHaveText(email);
+
+  await page.getByRole("button", { name: "sign out" }).click();
+  await expect(page.locator(".login-signin")).toBeVisible();
+
+  await page.getByRole("button", { name: "sign in" }).first().click();
+  await dialog.getByLabel("Email address").fill(email);
+  await dialog.getByLabel("Password").fill(PASSWORD);
+  // Each field has to survive the other: a form reporting both as one message
+  // writes a stale value back over whichever was edited first.
+  await expect(dialog.getByLabel("Email address")).toHaveValue(email);
+  await expect(dialog.getByLabel("Password")).toHaveValue(PASSWORD);
+
+  const submit = dialog.getByRole("button", { name: "sign in" });
+  // Enabled only once both fields reached the Model, which is the real signal
+  // that the form is wired rather than merely rendered.
+  await expect(submit).toBeEnabled();
+  await submit.click();
+
+  // The session response carries a `set-cookie` the browser hides from `fetch`;
+  // a client that requires it to decode never gets past here. Landing anywhere
+  // but the clubs card means signing in did not move the route.
+  await expect(page.locator(".login-email")).toHaveText(email);
+  await expect(dialog).toHaveCount(0);
+
+  await page.locator(".home-club-list").getByRole("button", { name: DISPLAY_NAME }).click();
+
+  // A club reference is `slug-publicId`; a bare publicId answers 404 and the
+  // club never resolves. A club with a book *is* the workspace — there is no
+  // catalog page in between — and nothing has cached this book, so opening it
+  // has to download it first.
+  await expect(page.locator(".app > .topbar")).toBeVisible();
+  await expect(page.locator(".topbar h1")).toHaveText(DISPLAY_NAME);
+  await expect(page.locator(".epub-container iframe").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".page-count")).toContainText("/");
+  // The reader and the notes pane sit side by side rather than stacked.
+  await expect(page.locator(".split-pane")).toHaveCount(2);
+  await expect(page.locator(".split-divider")).toBeVisible();
+
+  // The panes are draggable, and dragging one most of the way out expands the
+  // other: the only way to reach `split--expanded-*`.
+  const divider = page.locator(".split-divider");
+  const box = await divider.boundingBox();
+  if (box === null) throw new Error("the split divider has no box to drag");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(40, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator(".workspace-layout.split--expanded-right")).toBeVisible();
+
+  // Every overlay the workspace header opens, over the book.
+  await page.getByRole("button", { name: "open info" }).click();
+  await expect(page.locator("dialog.modal.home-info-panel[open]")).toBeVisible();
+  await page.getByRole("button", { name: "close" }).click();
+  await expect(page.locator("dialog.modal")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "settings" }).click();
+  await expect(page.locator("dialog.modal[open]")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("dialog.modal")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /people online/ }).click();
+  await expect(page.locator("dialog.modal[open]")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("dialog.modal")).toHaveCount(0);
+});
