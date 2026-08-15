@@ -1,5 +1,5 @@
 import { Story } from "foldkit/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ChangedNoteAgentStatus,
   ChangedNotes,
@@ -11,6 +11,8 @@ import {
   ExtractedNoteDraftTags,
   FailedNoteEditor,
   PastedNoteImage,
+  RemovedNoteImage,
+  RetriedNoteImage,
 } from "../../client/foldkit/mounts/lexical.ts";
 import {
   AttachedNoteHighlight,
@@ -22,6 +24,11 @@ import {
   SelectedNoteImage,
   StartedNoteEdit,
   SubmittedNoteOperation,
+  DiscardNoteImage,
+  MarkNoteImageFailed,
+  ResolveNoteImage,
+  ShowPendingNoteImage,
+  CompletedImageAction,
   UploadNoteImage,
   UploadedNoteImage,
   initialNotesModel,
@@ -149,7 +156,14 @@ describe("Foldkit notes stories", () => {
       updateNotes,
       Story.given(initialNotesModel()),
       Story.model((model) => expect(model.composerGeneration).toBe(0)),
-      Story.message(ChangedNoteDraft({ body: "a passage", imageIds: ["image-1"] })),
+      Story.message(
+        ChangedNoteDraft({
+          groupRef: "club-alpha",
+          body: "a passage",
+          imageIds: ["image-1"],
+          unresolvedImages: 0,
+        }),
+      ),
       Story.message(ExtractedNoteDraftTags({ tags: ["theme"] })),
       Story.message(ExtractedNoteDraftTags({ tags: ["theme", "question"] })),
       Story.message(
@@ -176,7 +190,14 @@ describe("Foldkit notes stories", () => {
     Story.story(
       updateNotes,
       Story.given(initialNotesModel()),
-      Story.message(ChangedNoteDraft({ body: "half a thought", imageIds: [] })),
+      Story.message(
+        ChangedNoteDraft({
+          groupRef: "club-alpha",
+          body: "half a thought",
+          imageIds: [],
+          unresolvedImages: 0,
+        }),
+      ),
       Story.message(
         StartedNoteEdit({
           noteId: note.id,
@@ -223,7 +244,14 @@ describe("Foldkit notes stories", () => {
       updateNotes,
       Story.given(initialNotesModel()),
       Story.message(AttachedNoteHighlight({ highlight })),
-      Story.message(ChangedNoteDraft({ body: "what this passage means", imageIds: [] })),
+      Story.message(
+        ChangedNoteDraft({
+          groupRef: "club-alpha",
+          body: "what this passage means",
+          imageIds: [],
+          unresolvedImages: 0,
+        }),
+      ),
       Story.model((model) => {
         // What the composer would build from this Model is what gets submitted.
         expect(addNoteOp("source-1", model.draft, [...model.draftHighlights])).toMatchObject({
@@ -237,56 +265,114 @@ describe("Foldkit notes stories", () => {
     );
   });
 
-  it("uploads a chosen image and folds its block into the draft", () => {
+  const withToken = (token: `${string}-${string}-${string}-${string}-${string}`) =>
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(token);
+
+  it("shows a chosen image while it uploads, then settles it in the editor", () => {
     const file = new File([Uint8Array.from([1, 2, 3])], "shot.png", { type: "image/png" });
+    const token = "11111111-1111-4111-8111-111111111111" as const;
+    withToken(token);
 
     Story.story(
       updateNotes,
       Story.given(initialNotesModel()),
-      Story.message(ChangedNoteDraft({ body: "look at this", imageIds: [] })),
+      Story.message(
+        ChangedNoteDraft({
+          groupRef: "club-alpha",
+          body: "look at this",
+          imageIds: [],
+          unresolvedImages: 0,
+        }),
+      ),
       Story.message(SelectedNoteImage({ groupRef: "club-alpha", file })),
       Story.model((model) => expect(model.uploadingImage).toBe(true)),
-      Story.Command.expectExact(UploadNoteImage({ groupRef: "club-alpha", file })),
-      Story.Command.resolve(UploadNoteImage, UploadedNoteImage({ imageId: "image-1" })),
+      // The image reaches the document before its bytes reach the server.
+      Story.Command.expectExact(
+        ShowPendingNoteImage({ token, file }),
+        UploadNoteImage({ groupRef: "club-alpha", token, file }),
+      ),
+      Story.Command.resolve(ShowPendingNoteImage, CompletedImageAction()),
+      Story.Command.resolve(UploadNoteImage, UploadedNoteImage({ token, imageId: "image-1" })),
+      Story.Command.resolve(ResolveNoteImage, CompletedImageAction()),
       Story.model((model) => {
-        expect(model.draft).toBe("look at this\n\n[[image:image-1]]");
         expect(model.draftImageIds).toEqual(["image-1"]);
         expect(model.uploadingImage).toBe(false);
-        // The editor holds its own content, so the appended image is only visible
-        // once the Mount is rebuilt from the Model.
-        expect(model.composerGeneration).toBe(1);
+        // The editor keeps its content, so nothing re-seeds the composer.
+        expect(model.composerGeneration).toBe(0);
       }),
     );
   });
 
   it("uploads a pasted image through the same path as a chosen one", () => {
     const file = new File([Uint8Array.from([4, 5])], "pasted.png", { type: "image/png" });
+    const token = "22222222-2222-4222-8222-222222222222" as const;
+    withToken(token);
 
     Story.story(
       updateNotes,
       Story.given(initialNotesModel()),
       Story.message(PastedNoteImage({ groupRef: "club-alpha", file })),
-      Story.Command.expectExact(UploadNoteImage({ groupRef: "club-alpha", file })),
-      Story.Command.resolve(UploadNoteImage, UploadedNoteImage({ imageId: "image-9" })),
+      Story.Command.expectExact(
+        ShowPendingNoteImage({ token, file }),
+        UploadNoteImage({ groupRef: "club-alpha", token, file }),
+      ),
+      Story.Command.resolve(ShowPendingNoteImage, CompletedImageAction()),
+      Story.Command.resolve(UploadNoteImage, UploadedNoteImage({ token, imageId: "image-9" })),
+      Story.Command.resolve(ResolveNoteImage, CompletedImageAction()),
       Story.model((model) => {
-        expect(model.draft).toBe("[[image:image-9]]");
+        expect(model.draftImageIds).toEqual(["image-9"]);
         expect(model.uploadingImage).toBe(false);
       }),
     );
   });
 
-  it("reports a failed image upload without disabling the composer", () => {
+  it("marks a failed upload in the editor so it can be retried", () => {
     const file = new File([Uint8Array.from([1])], "shot.png", { type: "image/png" });
+    const token = "33333333-3333-4333-8333-333333333333" as const;
+    withToken(token);
 
     Story.story(
       updateNotes,
       Story.given(initialNotesModel()),
       Story.message(SelectedNoteImage({ groupRef: "club-alpha", file })),
-      Story.Command.resolve(UploadNoteImage, FailedNoteImageUpload({ message: "image too large" })),
+      Story.Command.resolve(ShowPendingNoteImage, CompletedImageAction()),
+      Story.Command.resolve(
+        UploadNoteImage,
+        FailedNoteImageUpload({ token, message: "image too large" }),
+      ),
       Story.model((model) => {
         expect(model.error).toBe("image too large");
         expect(model.uploadingImage).toBe(false);
       }),
+      // The failed image stays in the document, marked, so it can go again.
+      Story.Command.resolve(MarkNoteImageFailed({ token }), CompletedImageAction()),
+      // The editor kept the file, so a retry is the same upload again.
+      Story.message(RetriedNoteImage({ groupRef: "club-alpha", token, file })),
+      Story.Command.resolve(UploadNoteImage, UploadedNoteImage({ token, imageId: "image-2" })),
+      Story.Command.resolve(ResolveNoteImage, CompletedImageAction()),
+      Story.model((model) => expect(model.draftImageIds).toEqual(["image-2"])),
+    );
+  });
+
+  it("discards the upload behind an image removed from the draft", () => {
+    Story.story(
+      updateNotes,
+      Story.given({ ...initialNotesModel(), draftImageIds: ["image-1"] }),
+      Story.message(
+        RemovedNoteImage({ groupRef: "club-alpha", imageId: "image-1", token: "token-1" }),
+      ),
+      Story.model((model) => expect(model.draftImageIds).toEqual([])),
+      Story.Command.expectExact(DiscardNoteImage({ groupRef: "club-alpha", imageId: "image-1" })),
+      Story.Command.resolve(DiscardNoteImage, CompletedImageAction()),
+    );
+  });
+
+  it("leaves nothing to discard when the removed image never uploaded", () => {
+    Story.story(
+      updateNotes,
+      Story.given(initialNotesModel()),
+      Story.message(RemovedNoteImage({ groupRef: "club-alpha", imageId: "", token: "token-2" })),
+      Story.Command.expectNone(),
     );
   });
 

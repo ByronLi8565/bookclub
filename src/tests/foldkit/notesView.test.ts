@@ -11,6 +11,10 @@ import {
   type ReaderSelection,
 } from "../../client/foldkit/notes.ts";
 import type { Highlight, Note } from "../../shared/types/notes.ts";
+import {
+  NOTE_IMAGE_TAG,
+  registerNoteImageElement,
+} from "../../client/logic/notes/noteImageElement.ts";
 
 const highlight: Highlight = {
   id: "highlight-1",
@@ -176,5 +180,30 @@ describe("Foldkit notes view", () => {
   it("reports a sync failure through the alert channel", async () => {
     const rendered = await render({ ...online, status: "offline", error: "socket refused" });
     expect(rendered.querySelector('[role="alert"]')?.textContent).toContain("socket refused");
+  });
+
+  it("renders an image block in a posted note as the read-only widget", async () => {
+    registerNoteImageElement();
+    const imageId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const rendered = await render({
+      ...online,
+      notes: [{ ...note, body: `look\n\n[[image:${imageId}:60]]`, highlights: [] }],
+    });
+
+    const widget = rendered.querySelector(NOTE_IMAGE_TAG);
+    expect(widget).not.toBeNull();
+    expect(rendered.textContent).toContain("look");
+    // The block's own text never reaches the reader.
+    expect(rendered.textContent).not.toContain("[[image:");
+    // Foldkit writes JS properties, so what is observable in the rendered
+    // markup is what the widget did with them.
+    expect(widget?.getAttribute("style")).toContain("60%");
+    expect(widget?.querySelector("img")?.getAttribute("src")).toBe(
+      `/groups/club-alpha/images/${imageId}`,
+    );
+    // A posted note offers no editing chrome.
+    expect(widget?.querySelector('button[aria-label="Remove image"]')?.hasAttribute("hidden")).toBe(
+      true,
+    );
   });
 });

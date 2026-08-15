@@ -27,6 +27,7 @@ export default defineConfig({
         "**/readerActions.pw.ts",
         "**/readerKeyboard.pw.ts",
         "**/foldkitReader.pw.ts",
+        "**/foldkitComposer.pw.ts",
         "e2e/browser/**/*.pw.ts",
       ],
       use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },

@@ -8,8 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   NOTE_EDITOR_INPUT_CLASS,
   NoteDraftEditor,
+  noteEditor,
   type NoteEditorMessage,
 } from "../../client/foldkit/mounts/lexical.ts";
+import {
+  NOTE_IMAGE_REMOVED,
+  NOTE_IMAGE_RESIZED,
+  NOTE_IMAGE_RETRIED,
+  NOTE_IMAGE_TAG,
+  type NoteImageWidget,
+} from "../../client/logic/notes/noteImageElement.ts";
 
 interface EditorArgs {
   initialBody: string;
@@ -277,5 +285,124 @@ describe("Lexical Mount", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(mounted.classList.contains(NOTE_EDITOR_INPUT_CLASS)).toBe(false));
+  });
+
+  const widgetIn = (root: Element): NoteImageWidget => {
+    // SAFETY: the image node renders the registered widget, whose properties
+    // are its declared contract.
+    const widget = root.querySelector(NOTE_IMAGE_TAG) as NoteImageWidget | null;
+    if (!widget) throw new Error(`no ${NOTE_IMAGE_TAG} rendered: ${root.innerHTML}`);
+    return widget;
+  };
+
+  const emitFromWidget = (widget: NoteImageWidget, type: string, detail: unknown): void => {
+    widget.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+  };
+
+  const imageFile = () => new File([Uint8Array.from([1, 2, 3])], "shot.png", { type: "image/png" });
+
+  it("renders an image node as the widget, with the properties the document holds", async () => {
+    const imageId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const mounted = mountEditor(element, { initialBody: `[[image:${imageId}:50]]` });
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+
+    const widget = widgetIn(element);
+    expect(widget.imageId).toBe(imageId);
+    expect(widget.width).toBe(50);
+    expect(widget.status).toBe("ready");
+    expect(widget.src).toBe(`/groups/g1/images/${imageId}`);
+    // The widget is one atomic thing to the editor, not editable text.
+    expect(widget.getAttribute("contenteditable")).toBe("false");
+
+    await mounted.release();
+  });
+
+  it("writes a resize back into the document and out as a new draft", async () => {
+    const imageId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const mounted = mountEditor(element, { initialBody: `[[image:${imageId}]]` });
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+
+    emitFromWidget(widgetIn(element), NOTE_IMAGE_RESIZED, { imageId, width: 40 });
+
+    await vi.waitFor(() =>
+      expect(mounted.drafts().at(-1)).toMatchObject({ body: `[[image:${imageId}:40]]` }),
+    );
+    expect(widgetIn(element).width).toBe(40);
+
+    await mounted.release();
+  });
+
+  it("removes an image from the document and reports the upload it left behind", async () => {
+    const imageId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    const mounted = mountEditor(element, { initialBody: `[[image:${imageId}]]` });
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+
+    emitFromWidget(widgetIn(element), NOTE_IMAGE_REMOVED, { imageId });
+
+    await vi.waitFor(() =>
+      expect(
+        mounted.messages.some(
+          (message) => message._tag === "RemovedNoteImage" && message.imageId === imageId,
+        ),
+      ).toBe(true),
+    );
+    expect(element.querySelector(NOTE_IMAGE_TAG)).toBeNull();
+    expect(mounted.drafts().at(-1)).toMatchObject({ body: "", imageIds: [] });
+
+    await mounted.release();
+  });
+
+  it("shows a pending image at once, then settles it in place", async () => {
+    const mounted = mountEditor(element);
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:preview", revokeObjectURL() {} });
+
+    await Effect.runPromise(noteEditor.insertPendingImage("token-1", imageFile()));
+
+    const widget = widgetIn(element);
+    expect(widget.status).toBe("uploading");
+    expect(widget.src).toBe("blob:preview");
+    // An image with no id yet has nothing to write into the note.
+    await vi.waitFor(() =>
+      expect(mounted.drafts().at(-1)).toMatchObject({ body: "", unresolvedImages: 1 }),
+    );
+
+    await Effect.runPromise(
+      noteEditor.resolvePendingImage("token-1", "01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    );
+
+    expect(widgetIn(element).status).toBe("ready");
+    await vi.waitFor(() =>
+      expect(mounted.drafts().at(-1)).toMatchObject({
+        body: "[[image:01ARZ3NDEKTSV4RRFFQ69G5FAV]]",
+        unresolvedImages: 0,
+      }),
+    );
+
+    await mounted.release();
+  });
+
+  it("keeps a failed upload retryable, with the file the editor kept", async () => {
+    const mounted = mountEditor(element);
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:preview", revokeObjectURL() {} });
+
+    await Effect.runPromise(noteEditor.insertPendingImage("token-2", imageFile()));
+    await Effect.runPromise(noteEditor.failPendingImage("token-2"));
+    expect(widgetIn(element).status).toBe("failed");
+
+    emitFromWidget(widgetIn(element), NOTE_IMAGE_RETRIED, { imageId: "" });
+
+    await vi.waitFor(() =>
+      expect(
+        mounted.messages.some(
+          (message) => message._tag === "RetriedNoteImage" && message.token === "token-2",
+        ),
+      ).toBe(true),
+    );
+    // Retrying puts it back in flight rather than leaving it marked failed.
+    expect(widgetIn(element).status).toBe("uploading");
+
+    await mounted.release();
   });
 });

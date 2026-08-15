@@ -4,7 +4,8 @@ import * as FoldkitFile from "foldkit/file";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { UPLOAD_FILE_FIELD } from "../../shared/http/uploads.ts";
-import { DEFAULT_NOTE_IMAGE_WIDTH, noteImageBlock } from "../../shared/notes/images.ts";
+import { noteImageIds, parseNoteImageBlock } from "../../shared/notes/images.ts";
+import { noteImage } from "./noteImage.ts";
 import {
   HIGHLIGHT_TAG,
   Highlight,
@@ -23,6 +24,9 @@ import {
   FailedNoteEditor,
   NoteDraftEditor,
   PastedNoteImage,
+  RemovedNoteImage,
+  RetriedNoteImage,
+  noteEditor,
 } from "./mounts/lexical.ts";
 import {
   ChangedNoteAgentPresence,
@@ -68,6 +72,11 @@ export const NotesModel = Schema.Struct({
   draftHighlights: Schema.Array(Highlight),
   focusedNoteId: Schema.NullOr(Schema.String),
   draftImageIds: Schema.Array(Schema.String),
+  /** Images in the editor whose upload has not settled. */
+  unresolvedImages: Schema.Number,
+  /** The club whose draft the editor is holding, learned from the editor
+   *  itself, so an abandoned upload can be cleaned up without the view. */
+  groupRef: Schema.NullOr(Schema.String),
   draftFormat: DraftFormat,
   uploadingImage: Schema.Boolean,
   /**
@@ -106,8 +115,15 @@ export const SelectedNoteImage = m("SelectedNoteImage", {
   groupRef: Schema.String,
   file: FoldkitFile.File,
 });
-export const UploadedNoteImage = m("UploadedNoteImage", { imageId: Schema.String });
-export const FailedNoteImageUpload = m("FailedNoteImageUpload", { message: Schema.String });
+export const UploadedNoteImage = m("UploadedNoteImage", {
+  token: Schema.String,
+  imageId: Schema.String,
+});
+export const FailedNoteImageUpload = m("FailedNoteImageUpload", {
+  token: Schema.String,
+  message: Schema.String,
+});
+export const CompletedImageAction = m("CompletedImageAction");
 
 export const NotesMessage = Schema.Union([
   StartedNote,
@@ -121,6 +137,9 @@ export const NotesMessage = Schema.Union([
   SelectedNoteImage,
   UploadedNoteImage,
   FailedNoteImageUpload,
+  CompletedImageAction,
+  RetriedNoteImage,
+  RemovedNoteImage,
   ConnectedNoteAgent,
   FailedNoteAgentConnection,
   ReleasedNoteAgent,
@@ -154,17 +173,55 @@ export const EnqueueNoteOperation = Command.define("EnqueueNoteOperation", {
  * it from disk and the whole image never lands in the Model.
  */
 export const UploadNoteImage = Command.define("UploadNoteImage", {
-  args: { groupRef: Schema.String, file: FoldkitFile.File },
+  args: { groupRef: Schema.String, token: Schema.String, file: FoldkitFile.File },
   messages: [UploadedNoteImage, FailedNoteImageUpload],
-  execute: ({ groupRef, file }) => {
+  execute: ({ groupRef, token, file }) => {
     const payload = new FormData();
     payload.append(UPLOAD_FILE_FIELD, file);
     return bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.uploadImage({ params: { groupRef }, payload })),
-      Effect.map(({ id }) => UploadedNoteImage({ imageId: id })),
-      Effect.catch((error) => Effect.succeed(FailedNoteImageUpload({ message: String(error) }))),
+      Effect.map(({ id }) => UploadedNoteImage({ token, imageId: id })),
+      Effect.catch((error) =>
+        Effect.succeed(FailedNoteImageUpload({ token, message: String(error) })),
+      ),
     );
   },
+});
+
+/** The image shows in the document while its bytes are still going up, so the
+ *  editor is told about it before the upload starts. */
+export const ShowPendingNoteImage = Command.define("ShowPendingNoteImage", {
+  args: { token: Schema.String, file: FoldkitFile.File },
+  messages: [CompletedImageAction],
+  execute: ({ token, file }) =>
+    noteEditor.insertPendingImage(token, file).pipe(Effect.as(CompletedImageAction())),
+});
+
+export const ResolveNoteImage = Command.define("ResolveNoteImage", {
+  args: { token: Schema.String, imageId: Schema.String },
+  messages: [CompletedImageAction],
+  execute: ({ token, imageId }) =>
+    noteEditor.resolvePendingImage(token, imageId).pipe(Effect.as(CompletedImageAction())),
+});
+
+export const MarkNoteImageFailed = Command.define("MarkNoteImageFailed", {
+  args: { token: Schema.String },
+  messages: [CompletedImageAction],
+  execute: ({ token }) =>
+    noteEditor.failPendingImage(token).pipe(Effect.as(CompletedImageAction())),
+});
+
+/** An image dropped from the draft is deleted rather than left behind for a
+ *  note that never arrives. */
+export const DiscardNoteImage = Command.define("DiscardNoteImage", {
+  args: { groupRef: Schema.String, imageId: Schema.String },
+  messages: [CompletedImageAction, FailedNoteImageUpload],
+  execute: ({ groupRef, imageId }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.groups.deleteImage({ params: { groupRef, imageId } })),
+      Effect.as(CompletedImageAction()),
+      Effect.catch(() => Effect.succeed(CompletedImageAction())),
+    ),
 });
 
 export const initialNotesModel = (): NotesModel => ({
@@ -181,6 +238,8 @@ export const initialNotesModel = (): NotesModel => ({
   draftHighlights: [],
   focusedNoteId: null,
   draftImageIds: [],
+  unresolvedImages: 0,
+  groupRef: null,
   draftFormat: { collapsed: true, bold: false, italic: false, highlight: false },
   uploadingImage: false,
   composerGeneration: 0,
@@ -188,12 +247,29 @@ export const initialNotesModel = (): NotesModel => ({
   error: null,
 });
 
+const opBody = (op: NoteOp): string => ("body" in op && typeof op.body === "string" ? op.body : "");
+
+/** Uploads that the draft is no longer carrying are deleted rather than left
+ *  behind for a note that never arrives. */
+const discardDraftImages = (
+  model: NotesModel,
+  keptImageIds: readonly string[],
+): readonly NotesCommand[] => {
+  const groupRef = model.groupRef;
+  if (groupRef === null) return [];
+  const kept = new Set(keptImageIds);
+  return model.draftImageIds
+    .filter((imageId) => !kept.has(imageId))
+    .map((imageId) => DiscardNoteImage({ groupRef, imageId }));
+};
+
 const clearComposer = (model: NotesModel): NotesModel => ({
   ...model,
   draft: "",
   draftTags: [],
   draftHighlights: [],
   draftImageIds: [],
+  unresolvedImages: 0,
   composerGeneration: model.composerGeneration + 1,
   editingNoteId: null,
 });
@@ -209,17 +285,23 @@ const withTags = (existing: readonly string[], added: readonly string[]): readon
 const anchorKey = (anchor: HighlightAnchor): string =>
   anchor.kind === "epub-cfi" ? `epub:${anchor.value}` : `pdf:${anchor.page}`;
 
+export type NotesCommand =
+  | ReturnType<typeof EnqueueNoteOperation>
+  | ReturnType<typeof UploadNoteImage>
+  | ReturnType<typeof ShowPendingNoteImage>
+  | ReturnType<typeof ResolveNoteImage>
+  | ReturnType<typeof MarkNoteImageFailed>
+  | ReturnType<typeof DiscardNoteImage>;
+
 export const updateNotes = (
   model: NotesModel,
   message: NotesMessage,
-): readonly [
-  NotesModel,
-  readonly (ReturnType<typeof EnqueueNoteOperation> | ReturnType<typeof UploadNoteImage>)[],
-] => {
+): readonly [NotesModel, readonly NotesCommand[]] => {
   switch (message._tag) {
     case "StartedNote":
     case "CancelledNoteComposer":
-      return [clearComposer(model), []];
+      // Uploads the abandoned draft was holding have no note to belong to.
+      return [clearComposer(model), discardDraftImages(model, [])];
     case "StartedNoteEdit":
       return [
         {
@@ -234,7 +316,16 @@ export const updateNotes = (
         [],
       ];
     case "ChangedNoteDraft":
-      return [{ ...model, draft: message.body, draftImageIds: message.imageIds }, []];
+      return [
+        {
+          ...model,
+          draft: message.body,
+          draftImageIds: message.imageIds,
+          unresolvedImages: message.unresolvedImages,
+          groupRef: message.groupRef,
+        },
+        [],
+      ];
     case "ExtractedNoteDraftTags":
       return [{ ...model, draftTags: withTags(model.draftTags, message.tags) }, []];
     case "ChangedNoteDraftSelection":
@@ -253,29 +344,52 @@ export const updateNotes = (
     case "FailedNoteEditor":
       return [{ ...model, error: message.message }, []];
     case "SelectedNoteImage":
-    case "PastedNoteImage":
+    case "PastedNoteImage": {
+      // The image is part of the document from the moment it is chosen; the
+      // token is what ties the upload's outcome back to it.
+      const token = crypto.randomUUID();
       return [
         { ...model, uploadingImage: true, error: null },
-        [UploadNoteImage({ groupRef: message.groupRef, file: message.file })],
+        [
+          ShowPendingNoteImage({ token, file: message.file }),
+          UploadNoteImage({ groupRef: message.groupRef, token, file: message.file }),
+        ],
       ];
-    case "UploadedNoteImage": {
-      const block = noteImageBlock({ id: message.imageId, width: DEFAULT_NOTE_IMAGE_WIDTH });
-      const draft = model.draft === "" ? block : `${model.draft}\n\n${block}`;
-      // The editor owns its own content, so an image appended to the draft only
-      // appears once the Mount is rebuilt from the Model.
+    }
+    case "RetriedNoteImage":
+      return [
+        { ...model, uploadingImage: true, error: null },
+        [UploadNoteImage({ groupRef: message.groupRef, token: message.token, file: message.file })],
+      ];
+    case "UploadedNoteImage":
+      // The editor holds the image already, so settling the upload is a write
+      // to the node rather than a rebuild of the composer.
       return [
         {
           ...model,
-          draft,
           uploadingImage: false,
           draftImageIds: [...model.draftImageIds, message.imageId],
-          composerGeneration: model.composerGeneration + 1,
         },
-        [],
+        [ResolveNoteImage({ token: message.token, imageId: message.imageId })],
       ];
-    }
     case "FailedNoteImageUpload":
-      return [{ ...model, uploadingImage: false, error: message.message }, []];
+      return [
+        { ...model, uploadingImage: false, error: message.message },
+        [MarkNoteImageFailed({ token: message.token })],
+      ];
+    case "RemovedNoteImage":
+      return [
+        {
+          ...model,
+          draftImageIds: model.draftImageIds.filter((id) => id !== message.imageId),
+          uploadingImage: false,
+        },
+        message.imageId === ""
+          ? []
+          : [DiscardNoteImage({ groupRef: message.groupRef, imageId: message.imageId })],
+      ];
+    case "CompletedImageAction":
+      return [model, []];
     case "AttachedNoteHighlight":
       return model.draftHighlights.some(
         (highlight) => anchorKey(highlight.anchor) === anchorKey(message.highlight.anchor),
@@ -314,7 +428,14 @@ export const updateNotes = (
         [],
       ];
     case "SubmittedNoteOperation":
-      return [clearComposer(model), [EnqueueNoteOperation({ op: message.op })]];
+      return [
+        clearComposer(model),
+        [
+          EnqueueNoteOperation({ op: message.op }),
+          // Images the reader took back out before posting are not kept.
+          ...discardDraftImages(model, [...noteImageIds(opBody(message.op))]),
+        ],
+      ];
     case "ChangedNoteAgentStatus":
       return [{ ...model, status: message.status }, []];
     case "ChangedNoteAgentPresence":
@@ -409,6 +530,25 @@ export const notesView = <Message>(
       ? addNoteOp(sourceId, model.draft, [...model.draftHighlights], [...model.draftTags])
       : editNoteOp(model.editingNoteId, model.draft, [...model.draftTags]);
 
+  const image = noteImage.withMessage(h);
+
+  /** A posted note's body carries image blocks; they render as the widget the
+   *  editor uses, read-only, rather than as the block's own text. */
+  const noteBody = (note: Note): readonly Html[] =>
+    note.body.split(/\n{2,}/u).map((block, index) => {
+      const parsed = parseNoteImageBlock(block);
+      return parsed === null
+        ? h.p([h.Key(`text:${index}`)], [block])
+        : image([
+            h.Key(`image:${parsed.id}`),
+            image.ImageId(parsed.id),
+            image.Src(`/groups/${groupRef}/images/${parsed.id}`),
+            image.Width(parsed.width),
+            image.Status("ready"),
+            image.ReadOnly(true),
+          ]);
+    });
+
   const noteItem = (note: Note): Html =>
     h.li(
       [
@@ -418,7 +558,7 @@ export const notesView = <Message>(
           : [h.Class("note")]),
       ],
       [
-        h.p([], [note.body]),
+        ...noteBody(note),
         ...(jumpToHighlight === undefined || note.highlights.length === 0
           ? []
           : [
@@ -539,9 +679,22 @@ export const notesView = <Message>(
           ]),
           ...(model.uploadingImage ? [h.span([h.Role("status")], ["Uploading image"])] : []),
           h.button(
-            [h.Type("submit"), h.Disabled(model.draft.trim() === "" || model.uploadingImage)],
+            [
+              h.Type("submit"),
+              // An image that has not settled carries no id to write into the
+              // note, so the draft waits for it either way.
+              h.Disabled(model.draft.trim() === "" || model.unresolvedImages > 0),
+            ],
             [model.editingNoteId === null ? "Post note" : "Save note"],
           ),
+          ...(model.unresolvedImages === 0
+            ? []
+            : [
+                h.p(
+                  [h.Class("note-editor-hint"), h.Role("status")],
+                  ["Finish or remove image uploads before saving."],
+                ),
+              ]),
           ...(model.editingNoteId === null
             ? []
             : [h.button([h.OnClick(CancelledNoteComposer())], ["Cancel"])]),
