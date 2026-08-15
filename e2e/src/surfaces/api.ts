@@ -41,7 +41,9 @@ export function makeApiSurface(baseUrl: string): ApiSurface {
   const request: ApiSurface["request"] = (who, path, init = {}) => {
     const headers = new Headers(init.headers);
     if (who) headers.set("Cookie", who.cookie);
-    if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    // FormData bodies must keep the boundary content-type fetch generates.
+    const stampJson = init.body && !(init.body instanceof FormData) && !headers.has("Content-Type");
+    if (stampJson) headers.set("Content-Type", "application/json");
     return fetch(url(path), { ...init, headers });
   };
 

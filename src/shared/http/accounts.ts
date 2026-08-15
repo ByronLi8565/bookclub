@@ -4,6 +4,7 @@ import { ClubProfile } from "../types/profiles.ts";
 import { ReadingPositionResponse, SetReadingPositionRequest } from "../types/readingPositions.ts";
 import { SetUserPrefsRequest, UserPrefsResponse } from "../types/userPrefs.ts";
 import { Created, StreamBytes } from "./compatibility.ts";
+import { FileUpload, MAX_IMAGE_UPLOAD_BYTES } from "./uploads.ts";
 import {
   BadRequestError,
   ForbiddenError,
@@ -48,6 +49,7 @@ export const AccountsHttp = HttpApiGroup.make("accounts").add(
     ],
   }),
   HttpApiEndpoint.put("uploadAvatar", "/me/avatar", {
+    payload: FileUpload(MAX_IMAGE_UPLOAD_BYTES),
     success: Created(Image),
     error: [BadRequestError, UnauthenticatedError, TooLargeError, InternalErrorSchema],
   }),

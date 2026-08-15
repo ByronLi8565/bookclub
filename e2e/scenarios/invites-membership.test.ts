@@ -12,6 +12,12 @@ scenario(
     const group = await api.createGroup(owner, "Rotating Invite Club");
     const ref = api.refFor(group);
 
+    const listed = await api.request(owner, "/groups");
+    expect(listed.status, "the owner's club index is readable").toBe(200);
+    expect(await listed.json(), "and contains the newly created club").toMatchObject({
+      groups: expect.arrayContaining([expect.objectContaining({ groupId: group.groupId })]),
+    });
+
     const staleToken = await api.inviteLink(owner, ref);
     const rotated = await api.request(owner, `/groups/${ref}/invite-link?rotate=1`, {
       method: "POST",
@@ -26,7 +32,7 @@ scenario(
       body: JSON.stringify({ token: staleToken }),
     });
     expect(staleJoin.status, "the replaced link can no longer admit somebody").toBe(403);
-    expect(await staleJoin.json(), "the refusal is specifically an invalid invite").toEqual({
+    expect(await staleJoin.json(), "the refusal is specifically an invalid invite").toMatchObject({
       error: "bad_invite",
     });
 
@@ -55,5 +61,30 @@ scenario(
       members.filter((member) => member.id === reader.user.id),
       "reopening the link did not add a duplicate roster entry",
     ).toHaveLength(1);
+
+    const renamed = await api.request(owner, `/groups/${ref}/title`, {
+      method: "PUT",
+      body: JSON.stringify({ title: "Renamed Invite Club" }),
+    });
+    expect(renamed.status, "the owner can rename the club").toBe(200);
+    expect(await renamed.json(), "the renamed summary is returned").toMatchObject({
+      group: { displayName: "Renamed Invite Club" },
+    });
+
+    const demoted = await api.request(owner, `/groups/${ref}/members/${reader.user.id}/role`, {
+      method: "PUT",
+      body: JSON.stringify({ role: "visitor" }),
+    });
+    expect(demoted.status, "the owner can change a member's role").toBe(200);
+    expect(await demoted.json(), "the returned roster carries the new role").toMatchObject({
+      members: expect.arrayContaining([
+        expect.objectContaining({ id: reader.user.id, role: "visitor" }),
+      ]),
+    });
+
+    const deleted = await api.request(owner, `/groups/${ref}`, { method: "DELETE" });
+    expect(deleted.status, "the owner can delete the club without a response body").toBe(204);
+    const missing = await api.request(owner, `/groups/${ref}`);
+    expect(missing.status, "the deleted public reference no longer resolves").toBe(404);
   },
 );

@@ -3,9 +3,11 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 import { PasskeyInfo } from "../types/passkeys.ts";
 import { JsonObject, PublicUser, Session } from "./compatibility.ts";
 import { AuthenticationResponse, RegistrationResponse } from "./webauthn.ts";
+import { Authentication } from "./middleware.ts";
 import {
   BadRequestError,
   ForbiddenError,
+  InternalErrorSchema,
   NotFoundError,
   RateLimitedError,
   UnauthenticatedError,
@@ -16,12 +18,16 @@ const DevSession = Schema.Struct({
   user: PublicUser,
   token: Schema.String,
 }).pipe(HttpApiSchema.status(200));
+const CookieHeaders = { "set-cookie": Schema.String };
+const DevSessionWithCookie = HttpApiSchema.WithHeaders(DevSession, CookieHeaders);
+const SessionWithCookie = HttpApiSchema.WithHeaders(Session, CookieHeaders);
+const SignedOut = HttpApiSchema.WithHeaders(HttpApiSchema.NoContent, CookieHeaders);
 
 export const AuthHttp = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("start", "/auth/start", {
     payload: Schema.Struct({ email: Schema.String }),
-    success: [DevSession, HttpApiSchema.NoContent],
-    error: [BadRequestError, RateLimitedError],
+    success: [DevSessionWithCookie, HttpApiSchema.NoContent],
+    error: [BadRequestError, RateLimitedError, InternalErrorSchema],
   }),
   HttpApiEndpoint.post("verify", "/auth/verify", {
     payload: Schema.Struct({
@@ -29,18 +35,18 @@ export const AuthHttp = HttpApiGroup.make("auth").add(
       code: Schema.String,
       displayName: Schema.optionalKey(Schema.String),
     }),
-    success: Session,
-    error: BadRequestError,
+    success: SessionWithCookie,
+    error: [BadRequestError, InternalErrorSchema],
   }),
-  HttpApiEndpoint.post("signout", "/auth/signout"),
+  HttpApiEndpoint.post("signout", "/auth/signout", { success: SignedOut }),
   HttpApiEndpoint.get("me", "/auth/me", {
     success: Schema.Struct({ user: PublicUser }),
     error: UnauthenticatedError,
-  }),
+  }).middleware(Authentication),
   HttpApiEndpoint.post("passwordLogin", "/auth/password", {
     payload: Schema.Struct({ email: Schema.String, password: Schema.String }),
-    success: Session,
-    error: [BadRequestError, RateLimitedError],
+    success: SessionWithCookie,
+    error: [BadRequestError, RateLimitedError, InternalErrorSchema],
   }),
   HttpApiEndpoint.put("setPassword", "/me/password", {
     payload: Schema.Struct({
@@ -48,15 +54,15 @@ export const AuthHttp = HttpApiGroup.make("auth").add(
       currentPassword: Schema.optionalKey(Schema.String),
     }),
     error: [BadRequestError, UnauthenticatedError, ForbiddenError],
-  }),
+  }).middleware(Authentication),
   HttpApiEndpoint.delete("removePassword", "/me/password", {
     payload: Schema.Struct({ currentPassword: Schema.String }),
     error: [BadRequestError, UnauthenticatedError, ForbiddenError],
-  }),
+  }).middleware(Authentication),
   HttpApiEndpoint.post("passkeyRegistrationOptions", "/auth/passkey/register/options", {
     success: JsonObject,
     error: UnauthenticatedError,
-  }),
+  }).middleware(Authentication),
   HttpApiEndpoint.post("verifyPasskeyRegistration", "/auth/passkey/register/verify", {
     payload: Schema.Struct({
       response: RegistrationResponse,
@@ -64,23 +70,23 @@ export const AuthHttp = HttpApiGroup.make("auth").add(
     }),
     success: Schema.Struct({ ok: Schema.Literal(true) }),
     error: [BadRequestError, UnauthenticatedError],
-  }),
+  }).middleware(Authentication),
   HttpApiEndpoint.post("passkeyLoginOptions", "/auth/passkey/login/options", {
     payload: Schema.Struct({ email: Schema.String }),
     success: JsonObject,
-    error: [BadRequestError, NotFoundError],
+    error: [BadRequestError, NotFoundError, InternalErrorSchema],
   }),
   HttpApiEndpoint.post("verifyPasskeyLogin", "/auth/passkey/login/verify", {
     payload: Schema.Struct({ response: AuthenticationResponse }),
     success: Session,
-    error: BadRequestError,
+    error: [BadRequestError, InternalErrorSchema],
   }),
   HttpApiEndpoint.get("passkeys", "/me/passkeys", {
     success: Schema.Struct({ passkeys: Schema.Array(PasskeyInfo), hasPassword: Schema.Boolean }),
     error: UnauthenticatedError,
-  }),
+  }).middleware(Authentication),
   HttpApiEndpoint.delete("removePasskey", "/me/passkeys/:id", {
     params: { id: Schema.String },
     error: [UnauthenticatedError, NotFoundError],
-  }),
+  }).middleware(Authentication),
 );

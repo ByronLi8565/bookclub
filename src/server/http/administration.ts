@@ -32,6 +32,8 @@ export const AdministrationLive = Layer.succeed(Administration, (effect) =>
       return yield* Effect.provideService(effect, CloudflareEnv, env);
     }
 
+    // SAFETY: the worker serves this API through the Effect Web adapter, whose
+    // request source is always the Fetch API `Request` it was constructed from.
     const identity = yield* Effect.tryPromise({
       try: () => currentStructuredIdentity(request.source as Request, env),
       catch: () => new InternalError({ error: "internal_error" }),

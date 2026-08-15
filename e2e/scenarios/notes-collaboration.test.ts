@@ -7,11 +7,17 @@ scenario("Notes · a member's note reaches another member live, server-stamped",
 
   const owner = await api.newIdentity({ label: "owner" });
   const reader = await api.newIdentity({ label: "reader" });
+  const outsider = await api.newIdentity({ label: "outsider" });
   const group = await api.createGroup(owner, "Moby-Dick Club");
   const ref = api.refFor(group);
   const token = await api.inviteLink(owner, ref);
   const joined = await api.join(reader, ref, token);
   expect(joined.memberCount, "both users are members after the join").toBe(2);
+
+  await expect(
+    notes.connect(group.groupId, outsider),
+    "a signed-in non-member cannot open the private NoteAgent",
+  ).rejects.toThrow();
 
   const readerSession = await notes.connect(group.groupId, reader);
   ctx.onCleanup(() => readerSession.close());
@@ -36,4 +42,12 @@ scenario("Notes · a member's note reaches another member live, server-stamped",
   expect(note.author.id, "author is stamped server-side to the owner").toBe(owner.user.id);
   expect(note.sourceId, "the note is tagged with its book").toBe("moby-dick");
   expect(note.seq, "the group-global sequence starts at 1").toBe(1);
+
+  ownerSession.close();
+  const remaining = await readerSession.waitForPresence((present) => present.length === 1, {
+    label: "the owner leaves presence after disconnecting",
+  });
+  expect(remaining, "presence retains only the still-connected reader").toMatchObject([
+    { id: reader.user.id, role: "member" },
+  ]);
 });

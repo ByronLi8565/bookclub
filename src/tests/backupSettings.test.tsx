@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBookclubArchive } from "../shared/backups/bookclubArchive.ts";
+import { UPLOAD_FILE_FIELD } from "../shared/http/uploads.ts";
 import { BackupControls } from "../client/ui/group/BackupControls.tsx";
 
 describe("local notes backup settings", () => {
@@ -104,7 +105,7 @@ describe("local notes backup settings", () => {
       ],
       images: [],
     });
-    const fetchMock = vi.fn(() =>
+    const fetchMock = vi.fn((_path: string, _init?: RequestInit) =>
       Promise.resolve(Response.json({ notes: 1, images: 0, createdAt: "2026-07-12T12:00:00Z" })),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -134,11 +135,16 @@ describe("local notes backup settings", () => {
       restore?.click();
       await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledWith("/groups/club-ref/backup", {
-      method: "PUT",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file,
-    });
+    const [path, init] = fetchMock.mock.calls[0] ?? [];
+    expect(path).toBe("/groups/club-ref/backup");
+    expect(init?.method).toBe("PUT");
+    // The browser has to generate the multipart boundary, so a manual
+    // Content-Type here would corrupt the request body.
+    expect(init?.headers).toBeUndefined();
+    const body = init?.body;
+    expect(body).toBeInstanceOf(FormData);
+    // SAFETY: the assertion above establishes that the body is a FormData.
+    expect((body as FormData).get(UPLOAD_FILE_FIELD)).toBe(file);
     expect(container.querySelector(".settings-backup-preview")).toBeNull();
   });
 });

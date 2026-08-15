@@ -1,5 +1,6 @@
 import { expect } from "vitest";
 import { scenario } from "../src/scenario.ts";
+import { UPLOAD_FILE_FIELD } from "../../src/shared/http/uploads.ts";
 
 const ONE_PIXEL_PNG = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -24,10 +25,15 @@ scenario(
     const token = await api.inviteLink(owner, ref);
     await api.join(reader, ref, token);
 
+    const imageForm = new FormData();
+    imageForm.append(
+      UPLOAD_FILE_FIELD,
+      new Blob([ONE_PIXEL_PNG], { type: "image/png" }),
+      "pixel.png",
+    );
     const upload = await api.request(owner, `/groups/${ref}/images`, {
       method: "POST",
-      headers: { "Content-Type": "image/png" },
-      body: ONE_PIXEL_PNG,
+      body: imageForm,
     });
     expect(upload.status, "a club member can upload a note image").toBe(201);
     // SAFETY: the successful note-image upload response returns its persisted metadata.

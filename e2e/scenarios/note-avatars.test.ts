@@ -1,5 +1,6 @@
 import { expect } from "vitest";
 import { scenario } from "../src/scenario.ts";
+import { UPLOAD_FILE_FIELD } from "../../src/shared/http/uploads.ts";
 
 const ONE_PIXEL_PNG = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -8,6 +9,12 @@ const ONE_PIXEL_PNG = Uint8Array.from([
   0x7f, 0x00, 0x09, 0xfb, 0x03, 0xfd, 0x05, 0x43, 0x45, 0xca, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
   0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 ]);
+
+const avatarForm = (): FormData => {
+  const form = new FormData();
+  form.append(UPLOAD_FILE_FIELD, new Blob([ONE_PIXEL_PNG], { type: "image/png" }), "avatar.png");
+  return form;
+};
 
 scenario(
   "Notes · an author's uploaded picture is the avatar shown on their note",
@@ -20,11 +27,7 @@ scenario(
     const group = await api.createGroup(author, "Portrait Reading Club");
     const ref = api.refFor(group);
 
-    const upload = await api.request(author, "/me/avatar", {
-      method: "PUT",
-      headers: { "Content-Type": "image/png" },
-      body: ONE_PIXEL_PNG,
-    });
+    const upload = await api.request(author, "/me/avatar", { method: "PUT", body: avatarForm() });
     expect(upload.status, "a member can upload a profile picture").toBe(201);
     // SAFETY: the successful avatar upload response returns its persisted metadata.
     const avatar = (await upload.json()) as { id: string; contentType: string; size: number };

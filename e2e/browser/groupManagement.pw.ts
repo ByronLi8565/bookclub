@@ -2,13 +2,14 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { strToU8, zipSync } from "fflate";
 import {
-  authenticateContext,
   BASE_URL,
+  authenticateContext,
+  books,
   joinGroup,
   openWorkspace,
   seedWorkspace,
-  books,
   uploadBook,
+  uploadPart,
 } from "./browserSupport.ts";
 
 function epubWithNavigationOnlyCover(): Buffer {
@@ -105,8 +106,7 @@ test("Group roles · an owner demotes a member and the live roster reflects it",
     ).toContainText("visitor", { timeout: 30_000 });
 
     const forbiddenUpload = await memberContext.request.post(`/groups/${ref}/images`, {
-      data: Uint8Array.from([1, 2, 3]),
-      headers: { "Content-Type": "image/png" },
+      multipart: uploadPart(Buffer.from([1, 2, 3]), "image/png", "pixel.png"),
     });
     expect(forbiddenUpload.status(), "the demoted visitor immediately loses write access").toBe(
       403,
@@ -226,11 +226,8 @@ test("Reader · a saved non-linear EPUB position falls forward to reading order"
   const uploaded = await page
     .context()
     .request.put(`/groups/${ref}/book`, {
-      data: epub,
-      headers: {
-        "Content-Type": "application/epub+zip",
-        "X-Source-Title": encodeURIComponent("Navigation-only cover"),
-      },
+      multipart: uploadPart(Buffer.from(epub), "application/epub+zip", "cover.epub"),
+      headers: { "X-Source-Title": encodeURIComponent("Navigation-only cover") },
     });
   expect(uploaded.ok(), "the regression EPUB uploads").toBe(true);
   // SAFETY: the checked successful upload response contains its content hash.

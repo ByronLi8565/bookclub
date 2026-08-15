@@ -9,6 +9,12 @@ import {
 } from "../types/groups.ts";
 import { Created, StreamBytes } from "./compatibility.ts";
 import {
+  FileUpload,
+  MAX_ARCHIVE_UPLOAD_BYTES,
+  MAX_BOOK_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_BYTES,
+} from "./uploads.ts";
+import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
@@ -22,12 +28,16 @@ import {
 const Group = Schema.Struct({ group: GroupSummary });
 const GroupRef = { groupRef: Schema.String };
 const GroupErrors = [
+  BadRequestError,
   UnauthenticatedError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
   InternalErrorSchema,
+  ServiceUnavailableError,
 ] as const;
 const Image = Schema.Struct({ id: Schema.String, contentType: Schema.String, size: Schema.Number });
+
 const GroupImage = Schema.Struct({
   id: Schema.String,
   size: Schema.Number,
@@ -40,18 +50,12 @@ const GroupImage = Schema.Struct({
 export const GroupsHttp = HttpApiGroup.make("groups").add(
   HttpApiEndpoint.get("list", "/groups", {
     success: Schema.Struct({ groups: Schema.Array(GroupSummary) }),
-    error: [UnauthenticatedError, InternalErrorSchema],
+    error: GroupErrors,
   }),
   HttpApiEndpoint.post("create", "/groups", {
     payload: Schema.Struct({ displayName: Schema.String }),
     success: Group.pipe(HttpApiSchema.status(201)),
-    error: [
-      BadRequestError,
-      UnauthenticatedError,
-      ConflictError,
-      InternalErrorSchema,
-      ServiceUnavailableError,
-    ],
+    error: GroupErrors,
   }),
   HttpApiEndpoint.get("get", "/groups/:groupRef", {
     params: GroupRef,
@@ -106,11 +110,11 @@ export const GroupsHttp = HttpApiGroup.make("groups").add(
   HttpApiEndpoint.put("uploadBook", "/groups/:groupRef/book", {
     params: GroupRef,
     headers: {
-      "content-type": Schema.optionalKey(Schema.String),
       "x-source-title": Schema.optionalKey(Schema.String),
       "x-source-author": Schema.optionalKey(Schema.String),
       "x-source-word-count": Schema.optionalKey(Schema.String),
     },
+    payload: FileUpload(MAX_BOOK_UPLOAD_BYTES),
     success: Schema.Struct({ hash: Schema.String }),
     error: [BadRequestError, ...GroupErrors],
   }),
@@ -134,7 +138,7 @@ export const GroupsHttp = HttpApiGroup.make("groups").add(
   HttpApiEndpoint.delete("delete", "/groups/:groupRef", { params: GroupRef, error: GroupErrors }),
   HttpApiEndpoint.post("uploadImage", "/groups/:groupRef/images", {
     params: GroupRef,
-    headers: { "content-type": Schema.optionalKey(Schema.String) },
+    payload: FileUpload(MAX_IMAGE_UPLOAD_BYTES),
     success: Created(Image),
     error: [BadRequestError, TooLargeError, ...GroupErrors],
   }),
@@ -159,6 +163,7 @@ export const GroupsHttp = HttpApiGroup.make("groups").add(
   }),
   HttpApiEndpoint.put("restoreBackup", "/groups/:groupRef/backup", {
     params: GroupRef,
+    payload: FileUpload(MAX_ARCHIVE_UPLOAD_BYTES),
     success: Schema.Struct({
       notes: Schema.Number,
       images: Schema.Number,

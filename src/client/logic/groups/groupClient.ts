@@ -8,6 +8,7 @@ import {
   type GroupRole,
 } from "../../../shared/types/groups.ts";
 import { EPUB_CONTENT_TYPE, extensionFor, sourceKindFor } from "../../../shared/types/sources.ts";
+import { UPLOAD_FILE_FIELD } from "../../../shared/http/uploads.ts";
 import { parseHttpError } from "../../http.ts";
 import { decode } from "../../../shared/schema.ts";
 import { ClubProfile } from "../../../shared/types/profiles.ts";
@@ -277,6 +278,20 @@ export async function resolveBookTitle(
   return body ? { ok: true, value: body.group } : { ok: false, error: "bad_response" };
 }
 
+/**
+ * Uploads travel as multipart so the browser streams the file from disk. The
+ * `Content-Type` header is deliberately left unset: the browser must generate it
+ * with the boundary, and any manual value would corrupt the request.
+ */
+function uploadBody(file: Blob, filename: string): FormData {
+  const form = new FormData();
+  // Appending a Blob with a filename re-wraps it in a new File; a real File is
+  // appended as-is so the browser keeps streaming the original from disk.
+  if (file instanceof File) form.append(UPLOAD_FILE_FIELD, file);
+  else form.append(UPLOAD_FILE_FIELD, file, filename);
+  return form;
+}
+
 export async function uploadSource(
   groupRef: string,
   file: File,
@@ -284,11 +299,15 @@ export async function uploadSource(
   author: string | null,
   wordCount: number | null,
 ): Promise<ApiResult<string>> {
-  const headers = new Headers({ "Content-Type": file.type || EPUB_CONTENT_TYPE });
+  const headers = new Headers();
   if (title) headers.set("X-Source-Title", encodeURIComponent(title));
   if (author) headers.set("X-Source-Author", encodeURIComponent(author));
   if (wordCount !== null) headers.set("X-Source-Word-Count", String(wordCount));
-  const r = await apiFetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
+  const r = await apiFetch(`/groups/${groupRef}/book`, {
+    method: "PUT",
+    headers,
+    body: uploadBody(file, file.name || "book"),
+  });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadBookResponse);
   return body ? { ok: true, value: body.hash } : { ok: false, error: "bad_response" };
@@ -327,8 +346,7 @@ export async function uploadNoteImage(groupRef: string, file: File): Promise<Api
   const image = compressed.value;
   const r = await apiFetch(`/groups/${groupRef}/images`, {
     method: "POST",
-    headers: { "Content-Type": image.type || "application/octet-stream" },
-    body: image,
+    body: uploadBody(image, "image"),
   });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadImageResponse);
@@ -370,8 +388,7 @@ export async function restoreGroupBackup(
 ): Promise<ApiResult<{ notes: number; images: number; createdAt: string }>> {
   const r = await apiFetch(`/groups/${groupRef}/backup`, {
     method: "PUT",
-    headers: { "Content-Type": file.type || "application/octet-stream" },
-    body: file,
+    body: uploadBody(file, file.name || "backup"),
   });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, RestoreBackupResponse);
@@ -382,11 +399,7 @@ export async function uploadAvatarImage(file: File): Promise<ApiResult<string>> 
   const compressed = await compressedImage(file, "avatar");
   if (!compressed.ok) return compressed;
   const image = compressed.value;
-  const r = await apiFetch("/me/avatar", {
-    method: "PUT",
-    headers: { "Content-Type": image.type || "application/octet-stream" },
-    body: image,
-  });
+  const r = await apiFetch("/me/avatar", { method: "PUT", body: uploadBody(image, "avatar") });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadImageResponse);
   return body ? { ok: true, value: body.id } : { ok: false, error: "bad_response" };

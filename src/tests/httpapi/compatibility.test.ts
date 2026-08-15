@@ -1,5 +1,4 @@
 import { Context, Effect, Layer, Schema, Stream } from "effect";
-import { Hono } from "hono";
 import {
   HttpApi,
   HttpApiBuilder,
@@ -122,19 +121,13 @@ const Routes = Layer.merge(
   NativeCors,
 ).pipe(Layer.provide(HttpServer.layerServices));
 const effect = HttpRouter.toWebHandler(Routes, { disableLogger: true });
-const app = new Hono<{ Bindings: { requestId: string } }>();
-
-app.all("*", (context) =>
-  effect.handler(context.req.raw, Context.make(RequestId, context.env.requestId)),
-);
-
 afterAll(effect.dispose);
 
 const request = (path: string, requestId = "request", init?: RequestInit) =>
-  app.request(`http://localhost${path}`, init, { requestId });
+  effect.handler(new Request(`http://localhost${path}`, init), Context.make(RequestId, requestId));
 
 describe("Effect HttpApi compatibility", () => {
-  it("keeps per-request context isolated through the Hono adapter", async () => {
+  it("keeps per-request context isolated through the web adapter", async () => {
     const [slow, fast] = await Promise.all([
       request("/probe/echo", "slow-env", {
         method: "POST",

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { expect, type BrowserContext, type Page } from "@playwright/test";
 import { ulid } from "ulidx";
+import { UPLOAD_FILE_FIELD } from "../../src/shared/http/uploads.ts";
 
 export const BASE_URL = "http://localhost:5173";
 export const books = {
@@ -64,14 +65,19 @@ export async function seedWorkspace(
   return { group, ref, owner, sourceId };
 }
 
+/** Uploads are multipart, so the media type rides on the part rather than on the request. */
+export function uploadPart(buffer: Buffer, mimeType: string, name: string) {
+  return { [UPLOAD_FILE_FIELD]: { name, mimeType, buffer } };
+}
+
 export async function uploadBook(
   context: BrowserContext,
   ref: string,
   book: (typeof books)[keyof typeof books],
 ): Promise<string> {
   const uploaded = await context.request.put(`/groups/${ref}/book`, {
-    data: await readFile(book.file),
-    headers: { "Content-Type": book.contentType, "X-Source-Title": encodeURIComponent(book.title) },
+    multipart: uploadPart(await readFile(book.file), book.contentType, book.title),
+    headers: { "X-Source-Title": encodeURIComponent(book.title) },
   });
   expect(uploaded.ok(), "the club has a real book to lay out").toBe(true);
   // SAFETY: the checked successful upload response contains its content hash.

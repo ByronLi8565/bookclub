@@ -20,10 +20,36 @@ scenario(
     const readerSession = await notes.connect(group.groupId, reader);
     ctx.onCleanup(() => readerSession.close());
 
-    const { noteId: parentId } = await ownerSession.addNote("shared-book", "First draft");
+    const highlight = {
+      id: ulid(),
+      sourceId: "shared-book",
+      anchor: { kind: "epub-cfi" as const, value: "epubcfi(/6/2)" },
+      quote: { type: "TextQuoteSelector" as const, exact: "First draft", prefix: "", suffix: "" },
+      createdAt: new Date().toISOString(),
+    };
+    const { noteId: parentId } = await ownerSession.addNote("shared-book", "First draft", [
+      highlight,
+    ]);
     await readerSession.waitForNotes((all) => all.some((note) => note.id === parentId), {
       label: "the owner's note reaches the reader",
     });
+
+    const tagOp = {
+      opId: ulid(),
+      kind: "update-tags" as const,
+      noteId: parentId,
+      add: ["theme"],
+      remove: [],
+    };
+    await ownerSession.applyOperations([tagOp]);
+    const tagged = await readerSession.waitForNotes(
+      (all) => all.some((note) => note.id === parentId && note.tags?.includes("theme")),
+      { label: "the note tag reaches the reader" },
+    );
+    expect(
+      tagged.find((note) => note.id === parentId),
+      "tags and highlight anchors converge",
+    ).toMatchObject({ tags: ["theme"], highlights: [highlight] });
 
     const replyId = ulid();
     const replyOp = {
@@ -90,7 +116,7 @@ scenario(
     expect(
       edited.find((note) => note.id === parentId)?.version,
       "the shared note advances to its next revision",
-    ).toBe(2);
+    ).toBe(3);
 
     const removeOp = {
       opId: ulid(),
@@ -106,7 +132,7 @@ scenario(
     expect(
       afterDelete.find((note) => note.id === parentId),
       "a parent with replies remains as a tombstone so the conversation stays intact",
-    ).toMatchObject({ id: parentId, deletedAt: removeOp.at, version: 3 });
+    ).toMatchObject({ id: parentId, deletedAt: removeOp.at, version: 4 });
     expect(
       afterDelete.find((note) => note.id === replyId)?.body,
       "deleting the parent preserves the reader's reply",
