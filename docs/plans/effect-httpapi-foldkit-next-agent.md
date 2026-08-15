@@ -67,21 +67,43 @@ The harness cannot use the production source cache: Playwright's WebKit build re
 `Blob` in IndexedDB. It substitutes a byte loader that fetches the fixture URL, which is only
 possible because the loader is injected when the slice is constructed.
 
-## Validation — 2026-08-18 (second pass, after the dev-run fixes)
+## Validation — 2026-08-19 (after the shell restructure)
 
 - `bun run check` passes (format, lint, typecheck).
-- `bun run test` — 307 passed across 48 files.
-- `bun run test:foldkit` — 99 passed across 11 files.
+- `bun run test` — 313 passed across 49 files.
+- `bun run test:foldkit` — 105 passed across 12 files.
 - `bun run e2e` — 10 passed across 9 scenarios against a booted wrangler worker.
 - `bun run build` passes; the React client is 359.00 kB gzip, so Foldkit stays out of it.
-- `bun run test:e2e` (Playwright) — 51/51, including 11 Foldkit reader scenarios and 3 note-image
-  scenarios. Earlier full runs saw one WebKit-under-load failure that passed in isolation; see
-  "Known flakiness".
+- `foldkitApp.pw.ts` — passes on Desktop Chrome, run repeatedly.
+- **The WebKit projects were not run.** See "Running the browser suite": they cannot start in a
+  detached session. They passed 51/51 on 2026-08-18 and nothing since then touched the reader,
+  gesture, or composer paths, but that is an inference and not a result.
 
-None of these gates caught the four defects in "What running the app turned up". Every one of them
-lives in the seam between the application and the real server, which no slice test and no harness
-crosses. **Phase 8 needs a browser test that drives the real Foldkit entry against a booted worker**,
-not more slice coverage.
+Every defect in "What running the app turned up" slipped through the gates that existed at the time,
+because they all live in the seam between the assembled client and a real server. `foldkitApp.pw.ts`
+is that missing gate and now covers the whole journey — sign in, clubs, club, book, split reader —
+with an assertion at each stage that names the failure it guards against.
+
+## Running the browser suite
+
+`bun run test:e2e` needs a launchd session attached to the user's GUI session. In a detached one —
+an agent session parented to a daemon rather than to a terminal — `launchctl managername` fails with
+`141`, and a browser that registers a mach service or an `NSApplication` aborts on startup:
+
+- **Chromium** dies in `mach_port_rendezvous` registering its `MachPortRendezvousServer`. Setting
+  `PW_DETACHED_SESSION=1` starts it with `--single-process --no-zygote`, which skips that
+  registration. Only **one browser context** survives per launch there, which is why
+  `foldkitApp.pw.ts` is a single journey rather than several tests.
+- **WebKit** dies in AppKit's `_RegisterApplication`, and there is no equivalent flag. Everything on
+  the Desktop/Mobile Safari projects — the reader, gesture, and composer suites — **cannot run in a
+  detached session at all** and has to be run from a terminal.
+
+So `PW_DETACHED_SESSION=1 bunx playwright test src/tests/playwright/foldkitApp.pw.ts` is what an
+agent can verify by itself; the WebKit projects need the reader to run them.
+
+Editing a source file and immediately running the suite flakes: the page can load while Vite is
+mid-invalidation and render nothing, failing on the first assertion. Give the dev server a few
+seconds to settle before re-running.
 
 ## Known flakiness — read before debugging
 
@@ -185,7 +207,36 @@ Two smaller things came with them: the catalog listed books as inert text, so no
 could open the reader at all, and the shell was a bare `<main>` without `.app`, so the workspace
 split had no height and the notes pane stacked under the reader instead of beside it.
 
-### 4. Phase 8 cutover — delete React
+Restructuring the shell (below) surfaced two more of the same kind:
+
+- **A `<dialog>` without `open` is hidden by the UA stylesheet.** The sign-in modal rendered into
+  the DOM and was invisible, so clicking "sign in" appeared to do nothing at all. `querySelector`
+  finds a hidden dialog perfectly well, which is why the first jsdom test missed it; it now asserts
+  `dialog.modal[open]`.
+- **Two inputs reporting one message overwrite each other.** Both login fields sent
+  `ChangedLogin({ email, password })`, each filling in the other field from the model its handler
+  had closed over. Editing the second field wrote a stale value back over the first, so the form
+  could never hold both at once and the submit button stayed disabled forever. They are
+  `ChangedLoginEmail` and `ChangedLoginPassword` now. **One message per field is the rule** — a
+  message carrying a sibling field's value is a stale write waiting to happen.
+
+### 4. The shell, restructured
+
+Home, login, club, and account render React's own card markup — `.home > .home-card` with
+`.home-corner--login`, `.home-main`, `.home-title`, `.home-create`, `.home-club-list`, and the
+credit corner — so `home.css` and `shared.css` apply unchanged. Signing in is a modal over the card
+(`.modal-backdrop > dialog.modal[open]`), matching how React presents it. The scaffold `<h1>` and
+nav row are gone; React has no such chrome. Error toasts render as `.toast-viewport`.
+
+The stylesheet was never the problem — it loads through `entry.ts`. Class names were: every
+`h.Class` in `application.ts` was a workspace or pager class, so element selectors styled the page
+and every `home-*` rule matched nothing.
+
+`src/tests/foldkit/shellView.test.ts` renders each route through the real runtime under jsdom and
+asserts that structure, because a view with the right elements and the wrong classes is unstyled
+markup that no Model-level test can see.
+
+### 5. Phase 8 cutover — delete React
 
 In plan order: run the browser suite against both entries on the same user-meaningful scenarios and
 fix parity in Foldkit; make Foldkit the production entry and verify PWA, Capacitor iOS, and Android
@@ -200,7 +251,7 @@ Two specifics worth planning for:
   cutover. Re-baseline **after** the parity scenarios pass, and diff old against new for unintended
   visual changes rather than accepting the new images blind.
 
-### 5. Phase 9 — documentation, hardening, deployment
+### 6. Phase 9 — documentation, hardening, deployment
 
 Replace the migration wording in `AGENTS.md` with steady-state rules, review OpenAPI and the Foldkit
 Model for accidental secret or internal fields, and inspect both bundles for Node-only dependencies,
@@ -209,13 +260,10 @@ authorized.
 
 ## Known gaps in the Foldkit shell
 
-The reader, the composer, and the notes list are at parity. What surrounds them is still scaffold,
-and is what Phase 8 has to finish:
+The reader, the composer, the notes list, and the card pages are at parity. What is still missing:
 
-- The shell chrome is an `<h1>` and three buttons. No topbar, no avatar, no settings, no group
-  switcher, no book menu.
-- The club page renders its catalog, roster, and controls as unstyled lists. React's group CSS is
-  not applied to any of it.
+- No settings modal, info screen, presence indicator, avatar, or upload flow. A club with no book
+  has no way to add one from the Foldkit entry.
 - The desktop split opens at React's default 62% and has no divider to drag; the expand-a-pane
   states (`split--expanded-left`/`right`) have no trigger.
 - Sign-in is password-only. The email-code flow, passkey sign-in, and dev sign-in have no view.
@@ -262,6 +310,10 @@ put a `Blob` in IndexedDB, and the reader shell must supply its surface's height
   endpoint fails to decode in a browser while succeeding everywhere else.
 - A `groupRef` is `slug-publicId`, never a bare `publicId`: the server resolves it by taking the
   segment after the last `-`. Build one with `groupUrlName(group)`.
+- A `<dialog>` needs `h.Open(true)`, or the UA stylesheet hides it and the route silently renders
+  nothing the reader can see.
+- **One message per input.** A message carrying a sibling field reads that field from the model its
+  handler closed over, and writes a stale value back over it on the next edit.
 
 ## Working agreements
 
