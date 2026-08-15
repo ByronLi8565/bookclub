@@ -35,6 +35,7 @@ const A_PLACE: EpubPlace = {
   spineIndex: 3,
   cfi: "epubcfi(/6/8!/4/2/2)",
   page: 1,
+  count: { page: 0, total: 0, percentage: 0 },
   atStart: false,
   atEnd: false,
 };
@@ -91,8 +92,26 @@ function makeFakeEngine({ load }: FakeEngineOptions = {}): FakeEngine {
         lifecycle.push(`goTo:${cfi}`);
         return Promise.resolve();
       },
-      setFontSize: (percent) => lifecycle.push(`fontSize:${percent}`),
-      clearSelection: () => lifecycle.push("clearSelection"),
+      setFontSize: (percent) => {
+        lifecycle.push(`fontSize:${percent}`);
+      },
+      clearSelection: () => {
+        lifecycle.push("clearSelection");
+      },
+      syncHighlights: (highlights) => {
+        lifecycle.push(`highlights:${highlights.map((one) => one.id).join(",") || "none"}`);
+      },
+      setSearchHighlight: (cfi) => {
+        lifecycle.push(`search:${cfi ?? "none"}`);
+      },
+      setSpread: (spread) => {
+        lifecycle.push(`spread:${spread}`);
+        return Promise.resolve();
+      },
+      measurePagination: (isCancelled) => {
+        lifecycle.push("measured");
+        return Promise.resolve(!isCancelled());
+      },
       destroy() {
         lifecycle.push("destroyed");
         marker.remove();
@@ -137,6 +156,8 @@ function describeMessage(message: EpubMountMessage): string {
       return `SelectedEpubText:${message.sourceId}:${message.quote}`;
     case "ClearedEpubSelection":
       return `ClearedEpubSelection:${message.sourceId}`;
+    case "ClickedEpubHighlight":
+      return `ClickedEpubHighlight:${message.sourceId}:${message.highlightId}`;
     case "FailedEpubLoad":
       return `FailedEpubLoad:${message.sourceId}:${message.message}`;
   }
@@ -378,6 +399,10 @@ describe("EPUB Foldkit Mount", () => {
         onMoved: () => () => {},
         turnPage: () => Promise.resolve(),
         goTo: () => Promise.resolve(),
+        syncHighlights: () => {},
+        setSearchHighlight: () => {},
+        setSpread: () => Promise.resolve(),
+        measurePagination: () => Promise.resolve(false),
         setFontSize: () => {},
         clearSelection: () => {},
         destroy: () => book.destroy(),

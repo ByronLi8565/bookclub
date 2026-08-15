@@ -144,6 +144,7 @@ interface Pane {
   inner: HTMLDivElement;
   canvas: HTMLCanvasElement;
   highlight: HTMLDivElement;
+  underline: HTMLDivElement;
   selection: HTMLDivElement;
   builder: TextLayerBuilder | null;
   textLayer: HTMLDivElement | null;
@@ -161,6 +162,10 @@ interface Session {
   readonly wrap: HTMLDivElement;
   readonly panes: Pane[];
   readonly geometry: Map<number, PageGeometry>;
+  /** The highlights the reader wants painted, by id. A spread change or a page
+   *  turn rebuilds the panes, so the session repaints from this rather than
+   *  from what the previous panes held. */
+  readonly highlights: Map<string, HighlightAnchor>;
   readonly renderTasks: Set<PdfRenderTask>;
   readonly teardown: (() => void)[];
   readonly emit: (message: PdfMountMessage) => void;
@@ -169,6 +174,7 @@ interface Session {
   renderSeq: number;
   page: number;
   spread: boolean;
+  searchAnchor: HighlightAnchor | null;
   released: boolean;
 }
 
@@ -187,13 +193,15 @@ function createPane(): Pane {
     return node;
   };
   const highlight = layer("pdf-highlights");
+  const underline = layer("pdf-underlines");
   const selection = layer("pdf-selection");
-  for (const child of [canvas, highlight, selection]) inner.appendChild(child);
+  for (const child of [canvas, highlight, underline, selection]) inner.appendChild(child);
   return {
     el,
     inner,
     canvas,
     highlight,
+    underline,
     selection,
     builder: null,
     textLayer: null,
@@ -256,17 +264,37 @@ export function boundingClientRect(rects: readonly DOMRect[]): DOMRect {
 /** Renderer-independent in-page search: the same text scan the React reader
  *  uses, resolved against captured page geometry into page anchors. Commands
  *  call this with the geometry the Mount has published; it touches no DOM. */
+export interface PdfSearchMatch {
+  anchor: HighlightAnchor;
+  excerpt: string;
+}
+
+const EXCERPT_CONTEXT = 40;
+
+export function pdfSearchMatches(
+  geometry: ReadonlyMap<number, PageGeometry>,
+  query: string,
+): PdfSearchMatch[] {
+  return [...geometry.entries()]
+    .toSorted(([a], [b]) => a - b)
+    .flatMap(([page, pageGeom]) =>
+      scanText(pageGeom.text, query).map((match) => {
+        const end = match.start + query.length;
+        return {
+          anchor: pdfAnchor(page, rectsForRange(pageGeom, match.start, end)),
+          excerpt: pageGeom.text
+            .slice(Math.max(0, match.start - EXCERPT_CONTEXT), end + EXCERPT_CONTEXT)
+            .trim(),
+        };
+      }),
+    );
+}
+
 export function pdfSearchAnchors(
   geometry: ReadonlyMap<number, PageGeometry>,
   query: string,
 ): HighlightAnchor[] {
-  return [...geometry.entries()]
-    .toSorted(([a], [b]) => a - b)
-    .flatMap(([page, pageGeom]) =>
-      scanText(pageGeom.text, query).map((match) =>
-        pdfAnchor(page, rectsForRange(pageGeom, match.start, match.start + query.length)),
-      ),
-    );
+  return pdfSearchMatches(geometry, query).map((match) => match.anchor);
 }
 
 function paintRects(layer: HTMLDivElement, rects: readonly PdfRect[], className: string): void {
@@ -280,6 +308,25 @@ function paintRects(layer: HTMLDivElement, rects: readonly PdfRect[], className:
     }px;width:${rect.width * width}px;height:${rect.height * height}px;`;
     layer.appendChild(node);
   }
+}
+
+/** Paint every wanted annotation into the pane showing its page. Panes are
+ *  rebuilt on each render, so this is the only way annotations survive a page
+ *  turn or a spread change. */
+function paintAnnotations(session: Session): void {
+  for (const pane of session.panes) {
+    pane.highlight.replaceChildren();
+    pane.underline.replaceChildren();
+  }
+  const paint = (anchor: HighlightAnchor, layerOf: (pane: Pane) => HTMLDivElement, cls: string) => {
+    if (anchor.kind !== "pdf-text") return;
+    const pane = session.panes.find((candidate) => candidate.page === anchor.page);
+    if (pane) paintRects(layerOf(pane), anchor.rects, cls);
+  };
+  for (const anchor of session.highlights.values()) {
+    paint(anchor, (pane) => pane.highlight, "bc-highlight");
+  }
+  if (session.searchAnchor) paint(session.searchAnchor, (pane) => pane.underline, "bc-search");
 }
 
 function documentCacheKey(environment: PdfMountEnvironment, sourceId: string, bytes: number) {
@@ -310,6 +357,7 @@ function openSession(
     wrap,
     panes: [],
     geometry: new Map(),
+    highlights: new Map(),
     renderTasks: new Set(),
     teardown: [],
     emit,
@@ -318,6 +366,7 @@ function openSession(
     renderSeq: 0,
     page: Math.max(1, Math.round(args.initialPage)),
     spread: false,
+    searchAnchor: null,
     released: false,
   };
 
@@ -598,6 +647,7 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
       percentage: doc.numPages > 0 ? left / doc.numPages : 0,
     }),
   );
+  paintAnnotations(session);
   captureSnapshot(session, doc.numPages);
   publishPosition(session);
 }
@@ -655,7 +705,35 @@ async function startSession(session: Session, environment: PdfMountEnvironment):
  * acquires, which is what makes source switching deterministic.
  */
 export const makePdfDocumentMount = (environment: PdfMountEnvironment) =>
-  Mount.defineStream(
+  makePdfMount(environment).Mount;
+
+/**
+ * The PDF.js adapter: the Mount plus the imperative operations the reader's
+ * Commands need against whichever document is currently displayed. The Mount
+ * owns the document handle, page render tasks, canvases, text-layer builders,
+ * the resize observer, and the selection listener, and publishes only domain
+ * events back into the Message loop.
+ *
+ * Args are captured at mount, so a source or layout change is expressed as a
+ * new element key in the view. That destroys this element — cancelling
+ * in-flight render tasks and destroying the document — before the replacement
+ * acquires, which is what makes source switching deterministic. Everything the
+ * reader changes *without* rebuilding the document (page, highlights, search
+ * match) goes through the operations below instead.
+ */
+export const makePdfMount = (environment: PdfMountEnvironment) => {
+  let live: Session | null = null;
+
+  const onLiveSession = (use: (session: Session) => Promise<void> | void) =>
+    Effect.suspend(() => {
+      const session = live;
+      if (session === null || session.released) return Effect.void;
+      return Effect.promise(async () => {
+        await use(session);
+      });
+    });
+
+  const PdfDocument = Mount.defineStream(
     "PdfDocument",
     {
       sourceId: Schema.String,
@@ -673,15 +751,82 @@ export const makePdfDocumentMount = (environment: PdfMountEnvironment) =>
       Stream.callback<PdfMountMessage>((queue) =>
         Effect.gen(function* () {
           const session = yield* Effect.acquireRelease(
-            Effect.sync(() =>
-              openSession(element, environment, args, (message) => {
+            Effect.sync(() => {
+              const opened = openSession(element, environment, args, (message) => {
                 Queue.offerUnsafe(queue, message);
+              });
+              live = opened;
+              return opened;
+            }),
+            (opened) =>
+              Effect.sync(() => {
+                // A previous scope can release after the next one acquires, so
+                // only the session that is still current clears the handle.
+                if (live === opened) live = null;
+                closeSession(opened);
               }),
-            ),
-            (opened) => Effect.sync(() => closeSession(opened)),
           );
           yield* Effect.promise(() => startSession(session, environment));
           return yield* Effect.never;
         }),
       ),
   );
+
+  const showPage = (session: Session, page: number) => {
+    const total = session.document?.numPages ?? 1;
+    const next = clamp(Math.round(page), 1, Math.max(1, total));
+    if (next === session.page) return Promise.resolve();
+    session.page = next;
+    // A page entered from a turn rests at its top rather than inheriting the
+    // previous page's scroll offset.
+    session.scroller.scrollTop = 0;
+    return renderSpread(session, environment);
+  };
+
+  return {
+    Mount: PdfDocument,
+    turnPage: (direction: "next" | "previous") =>
+      onLiveSession((session) => {
+        const step = (session.spread ? 2 : 1) * (direction === "next" ? 1 : -1);
+        return showPage(session, session.page + step);
+      }),
+    goTo: (anchor: HighlightAnchor) =>
+      onLiveSession((session) => {
+        if (anchor.kind !== "pdf-text") return;
+        return showPage(session, anchor.page);
+      }),
+    syncHighlights: (highlights: readonly { id: string; anchor: HighlightAnchor }[]) =>
+      onLiveSession((session) => {
+        session.highlights.clear();
+        for (const { id, anchor } of highlights) session.highlights.set(id, anchor);
+        paintAnnotations(session);
+      }),
+    setSearchHighlight: (anchor: HighlightAnchor | null) =>
+      onLiveSession((session) => {
+        session.searchAnchor = anchor;
+        paintAnnotations(session);
+      }),
+    /** The renderer-independent text scan over the geometry the open document
+     *  has captured, so search does not reach back into the DOM. */
+    search: (query: string) =>
+      Effect.suspend(() => {
+        const session = live;
+        if (session === null || session.document === null) {
+          return Effect.succeed<readonly PdfSearchMatch[]>([]);
+        }
+        const doc = session.document;
+        return Effect.promise(async () => {
+          for (let page = 1; page <= doc.numPages; page++) {
+            if (session.released) break;
+            await geometryFor(session, page);
+          }
+          return pdfSearchMatches(session.geometry, query);
+        });
+      }),
+    dismissSelection: Effect.sync(() => {
+      globalThis.getSelection?.()?.removeAllRanges();
+    }),
+  };
+};
+
+export type PdfMountAdapter = ReturnType<typeof makePdfMount>;

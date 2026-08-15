@@ -322,6 +322,19 @@ export const updateNotes = (
   }
 };
 
+/** Every highlight the reader should be painting for a source: the committed
+ *  ones carried by live notes, plus the ones on the note being composed. */
+export const notesHighlights = (
+  model: NotesModel,
+  sourceId: string,
+): readonly { id: string; anchor: Highlight["anchor"] }[] =>
+  [
+    ...model.notes.filter((note) => note.deletedAt === null).flatMap((note) => note.highlights),
+    ...model.draftHighlights,
+  ]
+    .filter((highlight) => highlight.sourceId === sourceId)
+    .map((highlight) => ({ id: highlight.id, anchor: highlight.anchor }));
+
 const noteThread = (notes: readonly Note[], parent: string | null): readonly Note[] =>
   notes.filter((note) => note.parent === parent && note.deletedAt === null);
 

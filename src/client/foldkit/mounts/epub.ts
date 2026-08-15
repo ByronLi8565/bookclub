@@ -9,6 +9,11 @@ import {
   type HighlightAnchor,
   type SourceReader,
 } from "../../logic/notes/highlights.ts";
+import {
+  epubPageCount,
+  measureEpubPagination,
+  type EpubPagination,
+} from "../../ui/reader/engine/epubPagination.ts";
 import { makeEpubReader } from "../../ui/reader/engine/epubReader.ts";
 
 export const EpubSpread = Schema.Literals(["auto", "none"]);
@@ -16,10 +21,20 @@ export type EpubSpread = typeof EpubSpread.Type;
 
 // Where the reader sits, in the renderer's own terms. Turning this into a page
 // count belongs to the pagination helpers, not to the Mount.
+export const EpubPageCount = Schema.Struct({
+  page: Schema.Number,
+  total: Schema.Number,
+  percentage: Schema.Number,
+});
+export type EpubPageCount = typeof EpubPageCount.Type;
+
 export const EpubPlace = Schema.Struct({
   spineIndex: Schema.Number,
   cfi: Schema.NullOr(Schema.String),
   page: Schema.Number,
+  /** Where this place falls in the measured book. Zero pages until a
+   *  pagination measurement has landed. */
+  count: EpubPageCount,
   atStart: Schema.Boolean,
   atEnd: Schema.Boolean,
 });
@@ -41,6 +56,10 @@ export const SelectedEpubText = m("SelectedEpubText", {
   point: EpubPoint,
 });
 export const ClearedEpubSelection = m("ClearedEpubSelection", { sourceId: Schema.String });
+export const ClickedEpubHighlight = m("ClickedEpubHighlight", {
+  sourceId: Schema.String,
+  highlightId: Schema.String,
+});
 export const FailedEpubLoad = m("FailedEpubLoad", {
   sourceId: Schema.String,
   message: Schema.String,
@@ -51,6 +70,7 @@ export type EpubMountMessage =
   | typeof MovedEpub.Type
   | typeof SelectedEpubText.Type
   | typeof ClearedEpubSelection.Type
+  | typeof ClickedEpubHighlight.Type
   | typeof FailedEpubLoad.Type;
 
 export interface EpubSelectionReading {
@@ -72,13 +92,34 @@ export interface EpubSession {
   goTo(cfi: string): Promise<void>;
   setFontSize(percent: number): void;
   clearSelection(): void;
+  /** Paint the given highlights and erase every other painted one. epub.js
+   *  annotations are keyed by CFI, so the session keeps its own id-to-CFI map
+   *  rather than asking the rendition what it has drawn. */
+  syncHighlights(highlights: readonly PaintedHighlight[]): void;
+  /** The one search match the reader is standing on, painted in its own class
+   *  so it survives independently of committed highlights. */
+  setSearchHighlight(cfi: string | null): void;
+  /** Relayout in place. A remount would reload the book and lose the reader's
+   *  place, so a spread change redisplays the current CFI and repaints the
+   *  annotations the relayout dropped. */
+  setSpread(spread: EpubSpread): Promise<void>;
+  /** Measure the whole book at the current viewport and zoom. Resolves false
+   *  when a newer measurement superseded this one. */
+  measurePagination(isCancelled: () => boolean): Promise<boolean>;
   destroy(): void;
+}
+
+/** A highlight the reader wants painted, in the renderer's own terms. */
+export interface PaintedHighlight {
+  id: string;
+  cfi: string;
 }
 
 export interface EpubSessionOptions {
   element: Element;
   spread: EpubSpread;
   fontSizePercent: number;
+  onHighlightClick: (id: string) => void;
 }
 
 // Constructing a session must be synchronous: the Mount registers teardown
@@ -101,7 +142,7 @@ function linearSpineTarget(book: Book, target: string | null | undefined): strin
   }
 }
 
-function readPlace(rendition: Rendition): EpubPlace | null {
+function readPlace(rendition: Rendition, pagination: EpubPagination | null): EpubPlace | null {
   const currentLocation: unknown = rendition.currentLocation();
   // SAFETY: epub.js currentLocation uses this documented location shape after display.
   const location = currentLocation as
@@ -117,6 +158,7 @@ function readPlace(rendition: Rendition): EpubPlace | null {
     spineIndex: start.index,
     cfi: start.cfi ?? null,
     page: start.displayed.page,
+    count: epubPageCount(pagination, { spineIndex: start.index, page: start.displayed.page }),
     atStart: location?.atStart ?? false,
     atEnd: location?.atEnd ?? false,
   };
@@ -150,14 +192,28 @@ function clearContentSelections(rendition: Rendition): void {
   }
 }
 
-export const epubJsEngine: EpubEngine = ({ element, spread, fontSizePercent }) => {
+export const HIGHLIGHT_CLASS = "bc-highlight";
+export const SEARCH_HIGHLIGHT_CLASS = "bc-search";
+
+export const epubJsEngine: EpubEngine = ({
+  element,
+  spread,
+  fontSizePercent,
+  onHighlightClick,
+}) => {
   const book = ePub();
   const rendition = book.renderTo(element, { width: "100%", height: "100%", spread });
+  const drawn = new Map<string, string>();
+  let searchCfi: string | null = null;
+  let pagination: EpubPagination | null = null;
+  let currentSpread: EpubSpread = spread;
+  let currentFontSize = fontSizePercent;
   rendition.themes.default({ body: { "-webkit-user-select": "text", "user-select": "text" } });
   rendition.themes.fontSize(`${fontSizePercent}%`);
 
-  // SAFETY: epub.js accepts an omitted target to display its first linear section.
-  const display = rendition.display as (target?: string) => Promise<void>;
+  // SAFETY: epub.js accepts an omitted target to display its first linear
+  // section. Bound, because epub.js reads `this.displaying` inside `display`.
+  const display = rendition.display.bind(rendition) as (target?: string) => Promise<void>;
 
   return {
     book,
@@ -183,7 +239,7 @@ export const epubJsEngine: EpubEngine = ({ element, spread, fontSizePercent }) =
       }
       throw new Error("No displayable section found in epub");
     },
-    place: () => readPlace(rendition),
+    place: () => readPlace(rendition, pagination),
     selection: () => readSelection(rendition),
     onMoved(handler) {
       rendition.on("relocated", handler);
@@ -191,8 +247,73 @@ export const epubJsEngine: EpubEngine = ({ element, spread, fontSizePercent }) =
     },
     turnPage: (direction) => (direction === "next" ? rendition.next() : rendition.prev()),
     goTo: (cfi) => display(cfi),
-    setFontSize: (percent) => rendition.themes.fontSize(`${percent}%`),
+    setFontSize(percent) {
+      currentFontSize = percent;
+      rendition.themes.fontSize(`${percent}%`);
+    },
     clearSelection: () => clearContentSelections(rendition),
+    syncHighlights(highlights) {
+      const wanted = new Map(highlights.map((highlight) => [highlight.id, highlight.cfi]));
+      for (const [id, cfi] of drawn) {
+        if (wanted.get(id) === cfi) continue;
+        rendition.annotations.remove(cfi, "highlight");
+        drawn.delete(id);
+      }
+      for (const [id, cfi] of wanted) {
+        if (drawn.has(id)) continue;
+        rendition.annotations.highlight(cfi, { id }, () => onHighlightClick(id), HIGHLIGHT_CLASS);
+        drawn.set(id, cfi);
+      }
+    },
+    setSearchHighlight(cfi) {
+      if (searchCfi !== null && searchCfi !== cfi) {
+        rendition.annotations.remove(searchCfi, "highlight");
+        // Removing by CFI takes the committed annotation with it when both sit
+        // on the same passage, so that one is drawn again.
+        const committed = [...drawn].find(([, drawnCfi]) => drawnCfi === searchCfi);
+        if (committed) {
+          const [id, drawnCfi] = committed;
+          rendition.annotations.highlight(
+            drawnCfi,
+            { id },
+            () => onHighlightClick(id),
+            HIGHLIGHT_CLASS,
+          );
+        }
+      }
+      searchCfi = cfi;
+      if (cfi !== null) {
+        rendition.annotations.highlight(cfi, {}, () => {}, SEARCH_HIGHLIGHT_CLASS);
+      }
+    },
+    async setSpread(next) {
+      if (next === currentSpread) return;
+      currentSpread = next;
+      rendition.spread(next);
+      const place = readPlace(rendition, pagination);
+      if (place?.cfi) await display(place.cfi);
+      // The relayout rebuilds the content documents, so every annotation the
+      // rendition had drawn is gone with them.
+      const painted = [...drawn].map(([id, cfi]) => ({ id, cfi }));
+      drawn.clear();
+      const search = searchCfi;
+      searchCfi = null;
+      this.syncHighlights(painted);
+      this.setSearchHighlight(search);
+    },
+    async measurePagination(isCancelled) {
+      const measured = await measureEpubPagination(
+        book,
+        element.clientWidth,
+        element.clientHeight,
+        currentFontSize,
+        currentSpread,
+        isCancelled,
+      );
+      if (measured === null || isCancelled()) return false;
+      pagination = measured;
+      return true;
+    },
     destroy() {
       rendition.destroy();
       book.destroy();
@@ -221,6 +342,7 @@ function failureMessage(error: unknown): string {
 // keeps none of it — the Mount publishes domain Messages instead.
 export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOptions) {
   let live: EpubSession | null = null;
+  let measureSeq = 0;
 
   const onLiveSession = <A>(fallback: A, use: (session: EpubSession) => Promise<A>) =>
     Effect.suspend(() => {
@@ -240,6 +362,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     MovedEpub,
     SelectedEpubText,
     ClearedEpubSelection,
+    ClickedEpubHighlight,
     FailedEpubLoad,
   )(
     ({ sourceId, initialCfi, spread, fontSizePercent }) =>
@@ -252,7 +375,13 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
 
             const session = yield* Effect.acquireRelease(
               Effect.sync(() => {
-                const created = engine({ element, spread, fontSizePercent });
+                const created = engine({
+                  element,
+                  spread,
+                  fontSizePercent,
+                  onHighlightClick: (highlightId) =>
+                    emit(ClickedEpubHighlight({ sourceId, highlightId })),
+                });
                 live = created;
                 return created;
               }),
@@ -326,6 +455,27 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
       }),
     dismissSelection: Effect.sync(() => {
       live?.clearSelection();
+    }),
+    syncHighlights: (highlights: readonly PaintedHighlight[]) =>
+      Effect.sync(() => {
+        live?.syncHighlights(highlights);
+      }),
+    setSearchHighlight: (anchor: HighlightAnchor | null) =>
+      Effect.sync(() => {
+        live?.setSearchHighlight(anchor?.kind === "epub-cfi" ? anchor.value : null);
+      }),
+    setSpread: (spread: EpubSpread) =>
+      onLiveSession(undefined, (session) => session.setSpread(spread)),
+    /** Measurement is expensive and viewport-dependent, so a newer request
+     *  cancels the one in flight rather than queueing behind it. */
+    measurePagination: Effect.suspend(() => {
+      const session = live;
+      if (session === null) return Effect.succeed(null);
+      const seq = ++measureSeq;
+      return Effect.tryPromise(() => session.measurePagination(() => seq !== measureSeq)).pipe(
+        Effect.map((measured) => (measured ? session.place() : null)),
+        Effect.orElseSucceed(() => null),
+      );
     }),
   };
 }

@@ -89,7 +89,14 @@ describe("Foldkit application slice seams", () => {
       OpenedEpub({
         sourceId: "source-1",
         title: "Dorian Gray",
-        place: { spineIndex: 0, cfi: "epubcfi(/6/2)", page: 1, atStart: true, atEnd: false },
+        place: {
+          spineIndex: 0,
+          cfi: "epubcfi(/6/2)",
+          page: 1,
+          count: { page: 1, total: 4, percentage: 0.25 },
+          atStart: true,
+          atEnd: false,
+        },
       }),
     );
     expect(loaded.reader?.loading).toBe(false);

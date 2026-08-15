@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from "effect";
-import { Command, Runtime } from "foldkit";
+import { Command, Runtime, Subscription } from "foldkit";
 import { m } from "foldkit/message";
 import { r } from "foldkit/route";
 import { ts } from "foldkit/schema";
@@ -23,6 +23,7 @@ import {
   NotesModel,
   initialNotesModel,
   isNotesMessage,
+  notesHighlights,
   notesView,
   updateNotes,
   type NotesMessage,
@@ -30,12 +31,18 @@ import {
 import {
   ReaderRoute,
   ReaderWorkspace,
+  ShowedReaderHighlights,
+  browserReaderEnvironment,
   isReaderMessage,
+  makeReaderSlice,
+  makeReaderSubscriptions,
   openReader,
-  readerView,
-  updateReader,
   type ReaderMessage,
 } from "./reader.ts";
+
+// One slice per application: the Mounts inside it own the live book handles.
+const reader = makeReaderSlice(browserReaderEnvironment);
+const { update: updateReader, view: readerView } = reader;
 
 export const FOLDKIT_RUNTIME_ID = "bookclub-foldkit";
 
@@ -381,9 +388,24 @@ const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
   return next === null ? [model, []] : [{ ...model, reader: next[0] }, next[1]];
 };
 
+const sameHighlights = (a: readonly { id: string }[], b: readonly { id: string }[]): boolean =>
+  a.length === b.length && a.every((left, index) => left.id === b[index]?.id);
+
+/**
+ * Notes own the highlights; the reader paints them. Feeding the reader slice
+ * the desired set as a Message keeps the painting Command on the reader's side
+ * of the seam instead of teaching the notes slice about the renderer.
+ */
 const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
   const [notes, commands] = updateNotes(model.notes, message);
-  return [{ ...model, notes }, commands];
+  const withNotes = { ...model, notes };
+  if (withNotes.reader === null) return [withNotes, commands];
+  const highlights = notesHighlights(notes, withNotes.reader.sourceId);
+  if (sameHighlights(withNotes.reader.highlights, highlights)) return [withNotes, commands];
+  const painted = updateReader(withNotes.reader, ShowedReaderHighlights({ highlights }));
+  return painted === null
+    ? [withNotes, commands]
+    : [{ ...withNotes, reader: painted[0] }, [...commands, ...painted[1]]];
 };
 
 export const update = (model: Model, message: Message): Update => {
@@ -545,6 +567,16 @@ const noteAgentSubscriptions = makeNoteAgentSubscriptions<Model, Message>({
   toMessage: (message) => message,
 });
 
+const readerSubscriptions = makeReaderSubscriptions<Model, Message>({
+  modelToReader: (model) => model.reader,
+  toMessage: (message) => message,
+});
+
+const subscriptions = Subscription.aggregate<Model, Message, NoteAgentService>()(
+  noteAgentSubscriptions,
+  readerSubscriptions,
+);
+
 export const makeBookclubApplication = (container: HTMLElement) => {
   container.id = FOLDKIT_RUNTIME_ID;
   return Runtime.makeApplication<Model, Message, never, NoteAgentService>({
@@ -553,7 +585,7 @@ export const makeBookclubApplication = (container: HTMLElement) => {
     init,
     update,
     managedResources: noteAgentResources,
-    subscriptions: noteAgentSubscriptions,
+    subscriptions,
     view: (model, h) => {
       const page =
         model.route._tag === "Login"

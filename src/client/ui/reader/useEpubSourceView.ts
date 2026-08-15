@@ -19,6 +19,11 @@ import {
   type HighlightAnchor,
   type SourceReader,
 } from "../../logic/notes/highlights.ts";
+import {
+  epubPageCount,
+  measureEpubPagination,
+  type EpubPagination,
+} from "./engine/epubPagination.ts";
 import type Navigation from "epubjs/types/navigation";
 import { makeEpubReader } from "./engine/epubReader.ts";
 import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
@@ -64,68 +69,6 @@ interface RawLocation {
   atEnd: boolean;
 }
 
-// The book measured as arrow-key presses to the end. `offsetByIndex` maps a
-// spine index to the number of presses that precede that section.
-interface Pagination {
-  total: number;
-  divisor: number;
-  offsetByIndex: Map<number, number>;
-}
-
-// Count the page-turns (arrow presses) for the whole book at a given viewport
-// and zoom, by laying every section out in a hidden, throwaway rendition over
-// the *same* already-parsed book and reading the real per-section page count.
-// One press advances by `layout.delta`; with a 2-up spread `divisor` is 2.
-async function measurePagination(
-  book: Book,
-  width: number,
-  height: number,
-  fontSizePct: number,
-  spread: string,
-  isCancelled: () => boolean,
-): Promise<Pagination | null> {
-  if (width <= 0 || height <= 0) return null;
-
-  const host = document.createElement("div");
-  host.setAttribute("aria-hidden", "true");
-  host.style.cssText = `position:absolute;left:-99999px;top:0;width:${width}px;height:${height}px;visibility:hidden;pointer-events:none;`;
-  document.body.appendChild(host);
-
-  const probe = book.renderTo(host, { width, height, spread, flow: "paginated" });
-  probe.themes.fontSize(`${fontSizePct}%`);
-  try {
-    const bookSpine: unknown = book.spine;
-    // SAFETY: epub.js populates spineItems after the book has opened, but its published type omits it.
-    const items = (bookSpine as { spineItems: { index: number; href: string; linear?: string }[] })
-      .spineItems;
-
-    const offsetByIndex = new Map<number, number>();
-    let total = 0;
-    let divisor = 1;
-    for (const item of items) {
-      if (isCancelled()) return null;
-      offsetByIndex.set(item.index, total);
-      if (item.linear === "no") continue;
-      await probe.display(item.href);
-      if (isCancelled()) return null;
-      const currentLocation: unknown = probe.currentLocation();
-      // SAFETY: epub.js currentLocation uses this documented location shape when a section is displayed.
-      const loc = currentLocation as { start?: { displayed?: { total?: number } } } | undefined;
-      const renditionProbe: unknown = probe;
-      // SAFETY: epub.js stores the active layout divisor on its internal rendition manager.
-      const props = (renditionProbe as { manager?: { layout?: { props?: { divisor?: number } } } })
-        .manager?.layout?.props;
-      if (props?.divisor) divisor = props.divisor;
-      const pages = loc?.start?.displayed?.total ?? 1;
-      total += Math.max(1, Math.ceil(pages / divisor));
-    }
-    return { total, divisor, offsetByIndex };
-  } finally {
-    probe.destroy();
-    host.remove();
-  }
-}
-
 interface LiveView {
   book: Book;
   rendition: Rendition;
@@ -156,7 +99,7 @@ interface EpubViewState {
   ready: boolean;
   title: string | null;
   raw: RawLocation | null;
-  pagination: Pagination | null;
+  pagination: EpubPagination | null;
   viewportTick: number;
   selection: { x: number; y: number } | null;
 }
@@ -166,7 +109,7 @@ type EpubViewAction =
   | { type: "ready"; ready: boolean }
   | { type: "title"; title: string | null }
   | { type: "raw"; raw: RawLocation | null }
-  | { type: "pagination"; pagination: Pagination | null }
+  | { type: "pagination"; pagination: EpubPagination | null }
   | { type: "viewport"; raw?: RawLocation }
   | { type: "selection"; selection: { x: number; y: number } | null };
 
@@ -530,10 +473,17 @@ export function useEpubSourceView(
     const spread = spreadModeRef.current;
 
     const seq = ++measureSeqRef.current;
-    const measure = Effect.fn("EpubReader.measurePagination")(function* () {
+    const measure = Effect.fn("EpubReader.measureEpubPagination")(function* () {
       if (seq !== measureSeqRef.current) return;
       const result = yield* Effect.tryPromise(() =>
-        measurePagination(book, width, height, pct, spread, () => seq !== measureSeqRef.current),
+        measureEpubPagination(
+          book,
+          width,
+          height,
+          pct,
+          spread,
+          () => seq !== measureSeqRef.current,
+        ),
       );
       if (result && seq === measureSeqRef.current) {
         yield* Effect.sync(() => dispatchView({ type: "pagination", pagination: result }));
@@ -734,19 +684,8 @@ export function useEpubSourceView(
   // page-turn controls.
   const location = useMemo<SourceLocation | null>(() => {
     if (!raw) return null;
-    if (!pagination || pagination.total <= 0) {
-      return { page: 0, total: 0, percentage: 0, atStart: raw.atStart, atEnd: raw.atEnd };
-    }
-    const before = pagination.offsetByIndex.get(raw.index) ?? 0;
-    const within = Math.max(1, Math.ceil(raw.page / pagination.divisor));
-    const index = Math.min(pagination.total, before + within);
-    return {
-      page: index,
-      total: pagination.total,
-      percentage: index / pagination.total,
-      atStart: raw.atStart,
-      atEnd: raw.atEnd,
-    };
+    const counted = epubPageCount(pagination, { spineIndex: raw.index, page: raw.page });
+    return { ...counted, atStart: raw.atStart, atEnd: raw.atEnd };
   }, [raw, pagination]);
 
   const position = useMemo<SourceReadingPosition | null>(() => {
