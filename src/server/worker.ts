@@ -10,6 +10,7 @@ import { readJson } from "./http.ts";
 import { backupAll, listBackups, pruneBackups, restoreFrom } from "./backup.ts";
 import { constantTimeEqual } from "../shared/crypto.ts";
 import { isDevAuth } from "./auth/devAuth.ts";
+import { bookclubHttpFallback, BOOKCLUB_HTTP_PREFIXES } from "./http/live.ts";
 
 export { NoteAgent } from "./state/NoteAgent.ts";
 export { AuthAgent } from "./state/AuthAgent.ts";
@@ -135,6 +136,13 @@ app.post("/admin/restore", async (c) => {
     return c.json({ error: "restore_failed", reason: String(error) }, 404);
   }
 });
+
+for (const prefix of BOOKCLUB_HTTP_PREFIXES) {
+  const fallback = (c: Context<{ Bindings: Env }>) =>
+    bookclubHttpFallback.handler(c.req.raw, c.env);
+  app.all(prefix, fallback);
+  app.all(`${prefix}/*`, fallback);
+}
 
 const noteGate = async (c: Context<{ Bindings: Env }>): Promise<Response> => {
   const me = await currentIdentity(c.req.raw, c.env);

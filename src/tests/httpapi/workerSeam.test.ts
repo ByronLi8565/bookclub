@@ -1,0 +1,160 @@
+import { Context } from "effect";
+import { readFileSync } from "node:fs";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import type { Env } from "../../server/env.ts";
+import { mintSessionToken } from "../../server/auth/cookies.ts";
+import { currentStructuredIdentity } from "../../server/http/authentication.ts";
+import { CloudflareEnv, cloudflareRequestContext } from "../../server/http/cloudflare.ts";
+import { bookclubHttpFallback } from "../../server/http/live.ts";
+import { DEFAULT_USER_PREFS } from "../../shared/types/userPrefs.ts";
+
+const agents = vi.hoisted(() => new Map<string, object>());
+vi.mock("agents", () => ({
+  getAgentByName: async (_namespace: object, name: string) => agents.get(name),
+}));
+
+const env = (secret: string): Env =>
+  Object.assign(Object.create(null), { SESSION_HMAC_SECRET: secret });
+const API_PREFIXES = ["/auth", "/me", "/users", "/groups", "/admin"] as const;
+
+afterAll(bookclubHttpFallback.dispose);
+
+describe("Bookclub Worker HttpApi seam", () => {
+  it("keeps Cloudflare bindings request-scoped", async () => {
+    const first = env("first");
+    const second = env("second");
+
+    const [firstSeen, secondSeen] = await Promise.all([
+      Promise.resolve(Context.get(cloudflareRequestContext(first), CloudflareEnv)),
+      Promise.resolve(Context.get(cloudflareRequestContext(second), CloudflareEnv)),
+    ]);
+
+    expect(firstSeen).toBe(first);
+    expect(secondSeen).toBe(second);
+  });
+
+  it("does not authenticate structured HTTP with a query token", async () => {
+    const bindings = env("query-token-secret");
+    const token = await mintSessionToken(bindings, {
+      id: "user-1",
+      email: "reader@example.com",
+      displayName: "Reader",
+      groupIds: [],
+      createdAt: "2026-08-15T00:00:00.000Z",
+    });
+
+    await expect(
+      currentStructuredIdentity(
+        new Request(`https://bookclub.test/me/prefs?token=${token}`),
+        bindings,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      currentStructuredIdentity(
+        new Request("https://bookclub.test/me/prefs", {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+        bindings,
+      ),
+    ).resolves.toMatchObject({ id: "user-1", email: "reader@example.com" });
+  });
+
+  it("owns bare and nested API prefixes with a JSON 404", async () => {
+    const bindings = env("fallback-secret");
+
+    for (const prefix of API_PREFIXES) {
+      for (const path of [prefix, `${prefix}/missing`]) {
+        const response = await bookclubHttpFallback.handler(
+          new Request(`https://bookclub.test${path}`),
+          bindings,
+        );
+        expect(response.status, path).toBe(404);
+        await expect(response.json(), path).resolves.toEqual({ error: "not_found" });
+      }
+    }
+  });
+
+  it("serves typed preferences and reading positions through the Worker adapter", async () => {
+    const bindings = env("account-secret");
+    const user = {
+      id: "user-1",
+      email: "reader@example.com",
+      displayName: "Reader",
+      groupIds: [],
+      createdAt: "2026-08-15T00:00:00.000Z",
+    };
+    const position = {
+      kind: "epub" as const,
+      cfi: "epubcfi(/6/2)",
+      percentage: 0.25,
+      groupId: "group-1",
+      sourceId: "source-1",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    };
+    agents.set(user.email, {
+      getPrefs: async () => DEFAULT_USER_PREFS,
+      setPrefs: async () => DEFAULT_USER_PREFS,
+      getReadingPosition: async () => position,
+      setReadingPosition: async () => position,
+    });
+    agents.set("group-1", {
+      membership: async () => ({ isMember: true, role: "member" }),
+      getSummary: async () => ({
+        sources: [position.sourceId],
+        sourceMeta: { [position.sourceId]: { kind: "epub" } },
+      }),
+    });
+    const token = await mintSessionToken(bindings, user);
+    const request = (path: string, init?: RequestInit) =>
+      bookclubHttpFallback.handler(
+        new Request(`https://bookclub.test${path}`, {
+          ...init,
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        }),
+        bindings,
+      );
+
+    const getPrefs = await request("/me/prefs");
+    const setPrefs = await request("/me/prefs", {
+      method: "PUT",
+      body: JSON.stringify({ prefs: DEFAULT_USER_PREFS }),
+    });
+    const getPosition = await request(
+      `/me/reading-position?groupId=${position.groupId}&sourceId=${position.sourceId}`,
+    );
+    const setPosition = await request("/me/reading-position", {
+      method: "PUT",
+      body: JSON.stringify({ groupId: position.groupId, sourceId: position.sourceId, position }),
+    });
+
+    expect([getPrefs.status, setPrefs.status, getPosition.status, setPosition.status]).toEqual([
+      200, 200, 200, 200,
+    ]);
+    await expect(getPrefs.json()).resolves.toEqual({ prefs: DEFAULT_USER_PREFS });
+    await expect(setPrefs.json()).resolves.toEqual({ prefs: DEFAULT_USER_PREFS });
+    await expect(getPosition.json()).resolves.toEqual({ position });
+    await expect(setPosition.json()).resolves.toEqual({ position });
+  });
+
+  it("authenticates before decoding protected account input", async () => {
+    const bindings = env("precedence-secret");
+    const malformed = [
+      new Request("https://bookclub.test/me/prefs", { method: "PUT", body: "{" }),
+      new Request("https://bookclub.test/me/reading-position"),
+      new Request("https://bookclub.test/me/reading-position", { method: "PUT", body: "{" }),
+    ];
+
+    for (const request of malformed) {
+      const response = await bookclubHttpFallback.handler(request, bindings);
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toMatchObject({ error: "unauthenticated" });
+    }
+  });
+
+  it("keeps service-worker navigation fallback aligned with API prefixes", () => {
+    const config = readFileSync(new URL("../../../vite.config.ts", import.meta.url), "utf8");
+    expect(config).toContain(
+      "navigateFallbackDenylist: [/^\\/(auth|groups|me|users|agents|admin)(?:\\/|$)/u]",
+    );
+  });
+});

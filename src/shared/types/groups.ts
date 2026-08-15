@@ -49,6 +49,11 @@ export const SourceMeta = Schema.Struct({
 
 export interface SourceMeta extends SchemaType<typeof SourceMeta> {}
 
+export const BookMetadataPatchSchema = Schema.Struct({
+  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+});
+
 export interface BookMetadataPatch {
   author?: string | null;
   wordCount?: number | null;

@@ -96,7 +96,7 @@ export default defineConfig(({ command }) => ({
       workbox: {
         globPatterns: ["**/*.{js,css,html,wasm}"],
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/(auth|groups|me|agents|admin)\//u],
+        navigateFallbackDenylist: [/^\/(auth|groups|me|users|agents|admin)(?:\/|$)/u],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
       devOptions: { enabled: false },
