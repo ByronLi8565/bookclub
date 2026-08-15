@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Env } from "../server/env.ts";
 import { sendInvite } from "../server/services/email.ts";
 
 describe("invite email", () => {
@@ -9,7 +8,7 @@ describe("invite email", () => {
       messages.push(message);
       return Promise.resolve();
     });
-    const env = { EMAIL: { send }, EMAIL_FROM: "bookclub@example.com" } as unknown as Env;
+    const env = { EMAIL: { send }, EMAIL_FROM: "bookclub@example.com" };
 
     await sendInvite(
       env,

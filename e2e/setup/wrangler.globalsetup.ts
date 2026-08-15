@@ -70,6 +70,7 @@ export default async function setup(): Promise<() => void> {
   } catch (error) {
     stop(child);
     throw new Error(
+      // SAFETY: this catch receives the Error thrown by the wrangler startup promise.
       `${(error as Error).message}\nSee e2e/runs/.wrangler/dev.log for wrangler output.`,
       { cause: error },
     );

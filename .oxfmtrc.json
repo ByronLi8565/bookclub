@@ -1,5 +1,18 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "objectWrap": "collapse",
-  "ignorePatterns": []
+  "ignorePatterns": [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**"
+  ]
 }

@@ -17,6 +17,7 @@ scenario(
       method: "POST",
     });
     expect(rotated.status, "a member can replace the club's open invite").toBe(200);
+    // SAFETY: the successful rotate response contains the current invite token.
     const { token: currentToken } = (await rotated.json()) as { token: string };
     expect(currentToken, "rotation mints a different token").not.toBe(staleToken);
 
@@ -39,6 +40,7 @@ scenario(
 
     const view = await api.request(owner, `/groups/${ref}`);
     expect(view.status, "the owner can inspect the updated roster").toBe(200);
+    // SAFETY: the successful members response uses the scenario's asserted member envelope.
     const { members } = (await view.json()) as { members: Array<{ id: string; role: string }> };
     expect(
       members.map(({ id, role }) => ({ id, role })),

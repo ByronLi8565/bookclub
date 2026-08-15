@@ -71,12 +71,17 @@ const requestUserPrefs = Effect.fn("UserPrefs.request")(function* (
   method: "GET" | "PUT",
   next?: UserPrefs,
 ): Effect.fn.Return<UserPrefs, ApiRequestError> {
-  const response = yield* request("UserPrefs.request", "/me/prefs", {
-    method,
-    ...(method === "PUT"
-      ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prefs: next }) }
-      : {}),
-  });
+  const response = yield* request(
+    "UserPrefs.request",
+    "/me/prefs",
+    method === "PUT"
+      ? {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prefs: next }),
+        }
+      : { method },
+  );
   const body = yield* decodeJson("UserPrefs.decode", response, UserPrefsResponse);
   return mergeUserPrefs(body.prefs);
 });

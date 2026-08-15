@@ -23,7 +23,7 @@ export function useOpeningReadingPosition({
   sourceId: string | null;
   sourceKind: SourceKind | null;
   policy: ReadingPositionOpenPolicy;
-}): { ready: boolean; position: SourceReadingPosition | null } {
+}) {
   const key =
     userId && groupId && sourceId && sourceKind ? `${userId}:${groupId}:${sourceId}` : null;
   const localPosition = useMemo(

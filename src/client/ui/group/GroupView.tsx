@@ -237,11 +237,9 @@ export function GroupView({
             ...current,
             members: current.members.map((member) =>
               member.id === profile.id
-                ? {
-                    ...member,
-                    name: profile.displayName,
-                    ...(profile.avatarImageId ? { avatarImageId: profile.avatarImageId } : {}),
-                  }
+                ? profile.avatarImageId
+                  ? { ...member, name: profile.displayName, avatarImageId: profile.avatarImageId }
+                  : { ...member, name: profile.displayName }
                 : member,
             ),
           }

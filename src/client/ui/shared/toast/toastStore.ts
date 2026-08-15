@@ -7,12 +7,16 @@ export interface Toast {
   type: ToastType;
   title: string;
   message: string;
+  action?: { label: string; href: string };
   durationMs: number;
+  dedupeKey?: string;
 }
 
 export interface ToastOptions {
   type?: ToastType;
   durationMs?: number;
+  action?: { label: string; href: string };
+  dedupeKey?: string;
 }
 
 type Listener = (toasts: Toast[]) => void;
@@ -22,12 +26,19 @@ const listeners = new Set<Listener>();
 const timers = new Map<string, number>();
 
 export function spawnToast(title: string, message: string, options: ToastOptions = {}): string {
+  const existing = options.dedupeKey
+    ? toasts.find((toast) => toast.dedupeKey === options.dedupeKey)
+    : undefined;
+  if (existing) return existing.id;
+
   const toast: Toast = {
     id: crypto.randomUUID(),
     type: options.type ?? "info",
     title,
     message,
+    action: options.action,
     durationMs: options.durationMs ?? DEFAULT_DURATION_MS,
+    dedupeKey: options.dedupeKey,
   };
   toasts = [toast, ...toasts];
   timers.set(

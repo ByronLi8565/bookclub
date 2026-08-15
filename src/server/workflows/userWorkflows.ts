@@ -6,6 +6,7 @@ import {
 } from "../../shared/types/readingPositions.ts";
 import { SetUserPrefsRequest, type UserPrefs } from "../../shared/types/userPrefs.ts";
 import { MAX_DISPLAY_NAME_LENGTH, type ClubProfile } from "../../shared/types/profiles.ts";
+import { ApiError } from "../../shared/types/errors.ts";
 import { deleteImages, getImage, storeImage, validImageId } from "../services/images.ts";
 import type { Env } from "../env.ts";
 import type { Identity } from "../state/GroupAgent.ts";
@@ -18,7 +19,6 @@ import {
   tryPromise,
   type WorkflowFailureError,
   type WorkflowResult,
-  WorkflowError,
 } from "./runtime.ts";
 import { GroupFailureReason } from "../../shared/types/groups.ts";
 
@@ -97,7 +97,7 @@ export function getReadingPosition(
     "UserWorkflows.getReadingPosition",
     Effect.gen(function* () {
       if (!groupId || !sourceId) {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
       const me = yield* requireIdentity(env, request);
       yield* requireSource(env, me, groupId, sourceId);
@@ -118,12 +118,12 @@ export function setReadingPosition(
       const decoded = yield* decodeRequest(SetReadingPositionRequest, body);
       const { position } = decoded;
       if (position.groupId !== decoded.groupId || position.sourceId !== decoded.sourceId) {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
       const me = yield* requireIdentity(env, request);
       const source = yield* requireSource(env, me, position.groupId, position.sourceId);
       if (source.kind !== position.kind) {
-        return yield* Effect.fail(fail(400, WorkflowError.KindMismatch));
+        return yield* Effect.fail(fail(400, ApiError.KindMismatch));
       }
       const auth = yield* authFor(env, me);
       return { position: yield* tryPromise(() => auth.setReadingPosition(position)) };
@@ -150,7 +150,7 @@ export function uploadAvatar(
         return yield* Effect.fail(fail(status, stored.reason));
       }
       const user = yield* tryPromise(() => auth.setAvatarImageId(stored.image.id));
-      if (!user) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
+      if (!user) return yield* Effect.fail(fail(401, ApiError.Unauthenticated));
       yield* Effect.forEach(
         user.groupIds,
         (groupId) =>
@@ -188,10 +188,10 @@ export function setClubProfile(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof rawDisplayName !== "string") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
       const displayName = rawDisplayName.trim();
-      if (!displayName) return yield* Effect.fail(fail(400, WorkflowError.InvalidName));
+      if (!displayName) return yield* Effect.fail(fail(400, ApiError.InvalidName));
       const name = displayName.slice(0, MAX_DISPLAY_NAME_LENGTH);
       const group = yield* tryPromise(() => getAgentByName(env.GroupAgent, groupId));
       const membership = yield* tryPromise(() => group.membership(me.id));
@@ -200,19 +200,16 @@ export function setClubProfile(
       }
       const auth = yield* authFor(env, me);
       const user = yield* tryPromise(() => auth.setClubDisplayName(groupId, name));
-      if (!user) return yield* Effect.fail(fail(401, WorkflowError.Unauthenticated));
+      if (!user) return yield* Effect.fail(fail(401, ApiError.Unauthenticated));
       const member = yield* tryPromise(() =>
         group.setMemberProfile(me.id, name, user.avatarImageId),
       );
       if (!member) return yield* Effect.fail(fail(403, GroupFailureReason.NotMember));
       const notes = yield* tryPromise(() => getAgentByName(env.NoteAgent, groupId));
       yield* tryPromise(() => notes.updateMemberProfile(me.id, name, user.avatarImageId));
+      const profile = { id: me.id, displayName: name };
       return {
-        profile: {
-          id: me.id,
-          displayName: name,
-          ...(user.avatarImageId ? { avatarImageId: user.avatarImageId } : {}),
-        },
+        profile: user.avatarImageId ? { ...profile, avatarImageId: user.avatarImageId } : profile,
       };
     }),
   );

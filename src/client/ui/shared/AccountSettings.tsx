@@ -10,15 +10,15 @@ import {
 } from "../../logic/auth/authClient.ts";
 import { spawnToast } from "./toast/toastStore.ts";
 
-const MESSAGES: Record<string, string> = {
-  weak_password: "Password must be at least 8 characters.",
-  bad_current: "Current password is incorrect.",
-  passkey_cancelled: "Passkey setup was cancelled.",
-  verification_failed: "Couldn't register that passkey. Try again.",
-  challenge_expired: "That took too long. Try again.",
-  unauthenticated: "Please sign in again.",
-};
-const msg = (error: string): string => MESSAGES[error] ?? "Something went wrong. Try again.";
+const MESSAGES = new Map([
+  ["weak_password", "Password must be at least 8 characters."],
+  ["bad_current", "Current password is incorrect."],
+  ["passkey_cancelled", "Passkey setup was cancelled."],
+  ["verification_failed", "Couldn't register that passkey. Try again."],
+  ["challenge_expired", "That took too long. Try again."],
+  ["unauthenticated", "Please sign in again."],
+]);
+const msg = (error: string): string => MESSAGES.get(error) ?? "Something went wrong. Try again.";
 
 interface State {
   passkeys: PasskeyInfo[];

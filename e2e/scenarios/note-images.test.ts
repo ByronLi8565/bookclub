@@ -1,10 +1,6 @@
 import { expect } from "vitest";
 import { scenario } from "../src/scenario.ts";
 
-// A pasted note image is not just note text: it has to survive the Worker/R2
-// boundary, remain private to club members, and travel through the same live
-// NoteAgent path as every other note body. This drives that full public journey.
-
 const ONE_PIXEL_PNG = Uint8Array.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
   0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
@@ -34,6 +30,7 @@ scenario(
       body: ONE_PIXEL_PNG,
     });
     expect(upload.status, "a club member can upload a note image").toBe(201);
+    // SAFETY: the successful note-image upload response returns its persisted metadata.
     const image = (await upload.json()) as { id: string; contentType: string; size: number };
     expect(image.contentType, "the uploaded object keeps its image content type").toBe("image/png");
     expect(image.size, "the stored object records the uploaded byte size").toBe(

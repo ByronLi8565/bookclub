@@ -30,12 +30,12 @@ export const GroupAction = {
 
 export type GroupAction = (typeof GroupAction)[keyof typeof GroupAction];
 
-const ROLE_LEVEL: Record<GroupRole, number> = {
+const ROLE_LEVEL = {
   [GroupRole.Visitor]: 0,
   [GroupRole.Member]: 1,
   [GroupRole.Admin]: 2,
   [GroupRole.Owner]: 3,
-};
+} satisfies Record<GroupRole, number>;
 
 export const ACTION_MINIMUM_ROLE = {
   [GroupAction.ViewClub]: GroupRole.Visitor,

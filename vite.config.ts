@@ -29,6 +29,7 @@ function pdfjsWasm(): Plugin {
     configureServer(server) {
       server.middlewares.use(PDFJS_WASM_PATH, (request, response, next) => {
         const name = request.url?.split("?", 1)[0]?.replace(/^\//u, "");
+        // SAFETY: the pathname regex only captures one of the filenames registered above.
         const source = name ? files.get(name as (typeof PDFJS_WASM_FILES)[number]) : undefined;
         if (!source) return next();
         response.setHeader(

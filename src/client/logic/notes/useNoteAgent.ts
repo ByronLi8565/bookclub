@@ -70,18 +70,15 @@ export function useNoteAgent(
   const agent = useAgent<NoteAgent, NoteState>({
     agent: "note-agent",
     name: groupId ?? "idle",
-    ...(isNative
-      ? {
-          host: new URL(apiOrigin).host,
-          // null tokens are dropped by partysocket's query serializer, so an
-          // unauthenticated socket simply omits the param (and the gate 401s).
-          query: async () => ({ token: await loadSessionToken() }),
-        }
-      : {}),
+    host: isNative ? new URL(apiOrigin).host : undefined,
+    // null tokens are dropped by partysocket's query serializer, so an
+    // unauthenticated socket simply omits the param (and the gate 401s).
+    query: isNative ? async () => ({ token: await loadSessionToken() }) : undefined,
     onStateUpdate: (state, source) => {
       if (source === "server" && store) Effect.runFork(store.ingestServer(state));
     },
     onMessage: (event) => {
+      // SAFETY: the Agent websocket protocol sends JSON text messages with this presence envelope.
       const msg = JSON.parse(event.data as string) as { type?: string; users?: OnlinePeer[] };
       if (msg.type === "presence" && msg.users) setPresence({ groupId, online: msg.users });
     },
@@ -183,7 +180,7 @@ function noopSubscribe(): () => void {
 
 const EMPTY_VIEW = {
   ready: true,
-  notes: [] as Note[],
+  notes: [],
   pendingNoteIds: new Set<string>(),
   failedNoteIds: new Set<string>(),
   pendingCount: 0,

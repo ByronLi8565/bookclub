@@ -26,7 +26,7 @@ export function putRenderSnapshot(snapshot: RenderSnapshot): void {
   snapshots.delete(snapshot.sourceId);
   snapshots.set(snapshot.sourceId, snapshot);
   while (snapshots.size > MAX_SNAPSHOTS) {
-    const oldest = snapshots.keys().next().value as string | undefined;
+    const oldest = snapshots.keys().next().value;
     if (!oldest) return;
     snapshots.delete(oldest);
   }

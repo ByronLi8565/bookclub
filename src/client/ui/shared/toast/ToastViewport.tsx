@@ -14,6 +14,7 @@ export function ToastViewport() {
         <div
           key={toast.id}
           className={`toast toast--${toast.type}`}
+          // SAFETY: React's CSSProperties omits custom properties that the stylesheet consumes.
           style={{ "--toast-duration": `${toast.durationMs}ms` } as CSSProperties}
         >
           <div className="toast-head">
@@ -27,7 +28,10 @@ export function ToastViewport() {
               x
             </button>
           </div>
-          <p>{toast.message}</p>
+          <div className="toast-body">
+            <p>{toast.message}</p>
+            {toast.action ? <a href={toast.action.href}>{toast.action.label}</a> : null}
+          </div>
         </div>
       ))}
     </div>

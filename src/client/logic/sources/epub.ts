@@ -24,6 +24,7 @@ interface SpineSection {
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    // SAFETY: readAsDataURL yields a string result on the load event.
     reader.addEventListener("load", () => resolve(reader.result as string));
     reader.addEventListener("error", () => reject(reader.error ?? new Error("read_failed")));
     reader.readAsDataURL(blob);
@@ -69,7 +70,9 @@ export async function inspectEpub(
   try {
     await book.open(await file.arrayBuffer(), "binary");
     await book.loaded.spine;
-    const items = (book.spine as unknown as { spineItems?: SpineSection[] }).spineItems ?? [];
+    const bookSpine: unknown = book.spine;
+    // SAFETY: epub.js populates spineItems after loaded.spine resolves, but its declaration omits it.
+    const items = (bookSpine as { spineItems?: SpineSection[] }).spineItems ?? [];
     if (items.length === 0) {
       return {
         health: healthError([

@@ -21,13 +21,24 @@
   box-shadow: var(--shadow-md);
   animation: toast-fade var(--toast-duration) linear forwards;
   pointer-events: auto;
+}
+
+.toast-body {
+  padding: 10px 12px;
 
   & p {
     margin: 0;
-    padding: 10px 12px;
     overflow-wrap: anywhere;
     font-size: var(--font-xs);
     line-height: 1.4;
+  }
+
+  & a {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: var(--font-xs);
+    font-weight: 700;
+    text-decoration: underline;
   }
 }
 

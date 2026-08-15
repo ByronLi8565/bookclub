@@ -11,6 +11,7 @@ describe("club user settings", () => {
   let root: ReturnType<typeof createRoot>;
 
   beforeEach(() => {
+    // SAFETY: React's test-only act flag is intentionally absent from the standard global type.
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     container = window.document.createElement("div");
     window.document.documentElement.appendChild(container);

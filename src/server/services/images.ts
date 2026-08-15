@@ -46,13 +46,11 @@ export async function storeImage(
   if (!IMAGE_TYPES.has(type)) return { ok: false, reason: "unsupported_type" };
 
   const id = ulid();
+  const customMetadata = { groupId, size: String(bytes.byteLength) };
+  if (uploadedBy) Object.assign(customMetadata, { uploadedBy });
   await env.IMAGES.put(imageKey(groupId, id), bytes, {
     httpMetadata: { contentType: type },
-    customMetadata: {
-      groupId,
-      size: String(bytes.byteLength),
-      ...(uploadedBy ? { uploadedBy } : {}),
-    },
+    customMetadata,
   });
   return { ok: true, image: { id, contentType: type, size: bytes.byteLength } };
 }
@@ -77,13 +75,11 @@ export function restoreImage(
   contentType: string,
   uploadedBy: string | null,
 ): Promise<R2Object> {
+  const customMetadata = { groupId, size: String(bytes.byteLength) };
+  if (uploadedBy) Object.assign(customMetadata, { uploadedBy });
   return env.IMAGES.put(imageKey(groupId, imageId), bytes, {
     httpMetadata: { contentType },
-    customMetadata: {
-      groupId,
-      size: String(bytes.byteLength),
-      ...(uploadedBy ? { uploadedBy } : {}),
-    },
+    customMetadata,
   });
 }
 

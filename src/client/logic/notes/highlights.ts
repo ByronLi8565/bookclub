@@ -1,5 +1,6 @@
 import type * as Effect from "effect/Effect";
 import type { Highlight, HighlightAnchor, QuoteSelector } from "../../../shared/types/notes.ts";
+import { needsBoundarySpace } from "../text.ts";
 
 export type {
   Highlight,
@@ -33,7 +34,7 @@ export function expandToWordBoundaries(range: Range): Range {
   return r;
 }
 
-export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: number } {
+export function popupPoint(rect: DOMRect, frame?: DOMRect) {
   const vv = window.visualViewport;
   const ox = vv?.offsetLeft ?? 0;
   const oy = vv?.offsetTop ?? 0;
@@ -47,10 +48,6 @@ export function popupPoint(rect: DOMRect, frame?: DOMRect): { x: number; y: numb
 }
 
 const CONTEXT = 32;
-
-function shouldInsertBoundarySpace(text: string, next: string): boolean {
-  return text.length > 0 && next.length > 0 && /\S$/u.test(text) && /^\S/u.test(next);
-}
 
 function rangeText(range: Range): string {
   const root = range.commonAncestorContainer;
@@ -70,7 +67,7 @@ function rangeText(range: Range): string {
     if (node === range.endContainer) str = str.slice(0, range.endOffset);
     if (str.length === 0) continue;
 
-    if (shouldInsertBoundarySpace(text, str)) text += " ";
+    if (needsBoundarySpace(text, str)) text += " ";
     text += str;
   }
 

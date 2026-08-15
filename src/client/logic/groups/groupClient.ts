@@ -77,10 +77,10 @@ const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 type ImageUploadKind = "note" | "avatar";
 
-const IMAGE_UPLOAD_PRESETS: Record<ImageUploadKind, { edges: number[]; qualities: number[] }> = {
+const IMAGE_UPLOAD_PRESETS = {
   note: { edges: [1600, 1400, 1200, 960], qualities: [0.78, 0.68, 0.58] },
   avatar: { edges: [768, 512, 384], qualities: [0.78, 0.68, 0.58] },
-};
+} satisfies Record<ImageUploadKind, { edges: number[]; qualities: number[] }>;
 
 async function compressedImage(file: File, kind: ImageUploadKind): Promise<ApiResult<File>> {
   if (!file.type.startsWith("image/")) return { ok: false, error: "unsupported_type" };
@@ -284,10 +284,10 @@ export async function uploadSource(
   author: string | null,
   wordCount: number | null,
 ): Promise<ApiResult<string>> {
-  const headers: Record<string, string> = { "Content-Type": file.type || EPUB_CONTENT_TYPE };
-  if (title) headers["X-Source-Title"] = encodeURIComponent(title);
-  if (author) headers["X-Source-Author"] = encodeURIComponent(author);
-  if (wordCount !== null) headers["X-Source-Word-Count"] = String(wordCount);
+  const headers = new Headers({ "Content-Type": file.type || EPUB_CONTENT_TYPE });
+  if (title) headers.set("X-Source-Title", encodeURIComponent(title));
+  if (author) headers.set("X-Source-Author", encodeURIComponent(author));
+  if (wordCount !== null) headers.set("X-Source-Word-Count", String(wordCount));
   const r = await apiFetch(`/groups/${groupRef}/book`, { method: "PUT", headers, body: file });
   if (!r.ok) return { ok: false, error: await parseHttpError(r) };
   const body = await parseJson(r, UploadBookResponse);

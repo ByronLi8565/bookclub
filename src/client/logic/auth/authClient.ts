@@ -30,6 +30,7 @@ export async function loadAccountSecurity(): Promise<
 export async function registerPasskey(label: string): Promise<Result> {
   const optionsRes = await apiFetch("/auth/passkey/register/options", { method: "POST" });
   if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
+  // SAFETY: the registration-options endpoint returns SimpleWebAuthn's creation options contract.
   const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialCreationOptionsJSON;
 
   let attestation;

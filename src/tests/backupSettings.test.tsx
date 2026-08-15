@@ -10,6 +10,7 @@ describe("local notes backup settings", () => {
   let root: ReturnType<typeof createRoot>;
 
   beforeEach(() => {
+    // SAFETY: React's test-only act flag is intentionally absent from the standard global type.
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -25,14 +26,17 @@ describe("local notes backup settings", () => {
 
   it("asks for confirmation before it downloads a backup", async () => {
     const fetchMock = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        headers: new Headers({
-          "Content-Type": "application/vnd.bookclub.backup+zip",
-          "Content-Disposition": 'attachment; filename="readers.bookclub"',
-        }),
-        blob: () => Promise.resolve(new Blob(["x".repeat(1536)])),
-      } as Response),
+      Promise.resolve(
+        // SAFETY: downloadBackup only reads the Response members supplied by this focused stub.
+        {
+          ok: true,
+          headers: new Headers({
+            "Content-Type": "application/vnd.bookclub.backup+zip",
+            "Content-Disposition": 'attachment; filename="readers.bookclub"',
+          }),
+          blob: () => Promise.resolve(new Blob(["x".repeat(1536)])),
+        } as Response,
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});

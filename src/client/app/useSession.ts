@@ -65,6 +65,7 @@ function revalidateSession(): void {
   void apiFetch("/auth/me")
     .then(async (r) => {
       if (r.ok) {
+        // SAFETY: the authenticated session endpoint returns the shared SessionUser envelope.
         const user = ((await r.json()) as { user: SessionUser }).user;
         cacheUser(user);
         setSessionSnapshot({ user, status: "authed" });
@@ -107,6 +108,7 @@ export function useSession(): Session {
     if (!r.ok) return { ok: false, error: await parseHttpError(r) };
 
     if (r.status !== 204) {
+      // SAFETY: the login endpoint returns the shared session envelope on a successful response.
       const body = (await r.json()) as {
         devSignedIn?: boolean;
         user?: SessionUser;
@@ -130,6 +132,7 @@ export function useSession(): Session {
         body: JSON.stringify({ email, code, displayName }),
       });
       if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+      // SAFETY: the verification endpoint returns the shared session envelope on success.
       const body = (await r.json()) as { user: SessionUser; token?: string };
       await setSessionToken(body.token ?? null);
       cacheUser(body.user);
@@ -147,6 +150,7 @@ export function useSession(): Session {
         body: JSON.stringify({ email, password }),
       });
       if (!r.ok) return { ok: false, error: await parseHttpError(r) };
+      // SAFETY: the registration endpoint returns the shared session envelope on success.
       const body = (await r.json()) as { user: SessionUser; token?: string };
       await setSessionToken(body.token ?? null);
       cacheUser(body.user);
@@ -163,6 +167,7 @@ export function useSession(): Session {
       body: JSON.stringify({ email }),
     });
     if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
+    // SAFETY: the login-options endpoint returns SimpleWebAuthn's request options contract.
     const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialRequestOptionsJSON;
 
     let assertion;
@@ -178,6 +183,7 @@ export function useSession(): Session {
       body: JSON.stringify({ response: assertion }),
     });
     if (!verifyRes.ok) return { ok: false, error: await parseHttpError(verifyRes) };
+    // SAFETY: the passkey verification endpoint returns the shared session envelope on success.
     const body = (await verifyRes.json()) as { user: SessionUser; token?: string };
     await setSessionToken(body.token ?? null);
     cacheUser(body.user);

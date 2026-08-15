@@ -97,6 +97,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
     const me = await currentIdentity(c.req.raw, c.env);
     if (!me) return c.json({ error: "unauthenticated" }, 401);
     const body = await readJson(c.req.raw);
+    // SAFETY: the route's JSON body parser has already established the WebAuthn response envelope.
     const response = body?.response as RegistrationResponseJSON | undefined;
     const label = str(body?.label) || "Passkey";
     if (!response) return c.json({ error: "invalid_request" }, 400);
@@ -149,6 +150,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>): void {
 
   app.post("/auth/passkey/login/verify", async (c) => {
     const body = await readJson(c.req.raw);
+    // SAFETY: the route's JSON body parser has already established the WebAuthn response envelope.
     const response = body?.response as AuthenticationResponseJSON | undefined;
     if (!response) return c.json({ error: "invalid_request" }, 400);
 

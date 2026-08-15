@@ -36,6 +36,7 @@ export function DropdownMenu<P extends object = object>({
   items,
   children,
   Trigger,
+  // SAFETY: an omitted optional triggerProps contributes no props to the cloned trigger.
   triggerProps = {} as P,
   openSignal,
 }: DropdownMenuProps<P>): React.ReactElement {

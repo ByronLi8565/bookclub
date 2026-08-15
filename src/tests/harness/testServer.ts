@@ -3,10 +3,10 @@ import { stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import type { Plugin } from "vite";
 
-const TYPES: Record<string, string> = {
-  ".epub": "application/epub+zip",
-  ".pdf": "application/pdf",
-};
+const TYPES = new Map([
+  [".epub", "application/epub+zip"],
+  [".pdf", "application/pdf"],
+]);
 
 export function fixtureServer(assetsDir: string): Plugin {
   return {
@@ -22,7 +22,7 @@ export function fixtureServer(assetsDir: string): Plugin {
         void stat(file)
           .then((s) => {
             if (!s.isFile()) return next();
-            res.setHeader("Content-Type", TYPES[extname(file)] ?? "application/octet-stream");
+            res.setHeader("Content-Type", TYPES.get(extname(file)) ?? "application/octet-stream");
             createReadStream(file).pipe(res);
           })
           .catch(() => next());

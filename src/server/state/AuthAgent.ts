@@ -180,10 +180,10 @@ export class AuthAgent extends Agent<Env, AuthState> {
   getClubProfile(groupId: string): { displayName: string; avatarImageId?: string } | null {
     const user = this.state.user;
     if (!user) return null;
-    return {
-      displayName: user.clubDisplayNames?.[groupId] ?? user.displayName,
-      ...(user.avatarImageId ? { avatarImageId: user.avatarImageId } : {}),
-    };
+    const displayName = user.clubDisplayNames?.[groupId] ?? user.displayName;
+    return user.avatarImageId
+      ? { displayName, avatarImageId: user.avatarImageId }
+      : { displayName };
   }
 
   setClubDisplayName(groupId: string, displayName: string): User | null {

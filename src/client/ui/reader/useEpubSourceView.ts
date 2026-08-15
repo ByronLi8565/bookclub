@@ -24,13 +24,35 @@ import { makeEpubReader } from "./engine/epubReader.ts";
 import { useReaderPrefs } from "../../logic/settings/userPrefs.ts";
 import { useLatestRef } from "../../logic/useLatestRef.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
+import { reportUnexpectedError } from "../shared/toast/reportError.ts";
 import type { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { type OnSelect, type SelectIntent } from "./types.ts";
 import { type SourceView } from "./types.ts";
 import { type SourceLocation } from "./types.ts";
 
-function firstChapterHref(nav: Navigation): string | undefined {
-  return nav.landmark?.("bodymatter")?.href ?? nav.toc?.[0]?.href;
+function readingStartHref(nav: Navigation): string | undefined {
+  return nav.landmark?.("bodymatter")?.href;
+}
+
+function linearSpineTarget(book: Book, target: string | null | undefined): string | undefined {
+  if (!target) return undefined;
+  try {
+    return book.spine.get(target)?.linear ? target : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function turnEpubPage(rendition: Rendition, direction: "next" | "previous"): void {
+  const turn = direction === "next" ? rendition.next() : rendition.prev();
+  void turn.catch((error: unknown) =>
+    reportUnexpectedError({
+      title: "Page couldn't turn",
+      message: `Bookclub couldn't turn to the ${direction} EPUB page.`,
+      context: `failed to turn epub page ${direction}`,
+      error,
+    }),
+  );
 }
 
 // Where the reader currently sits, before it is turned into a press count.
@@ -72,9 +94,10 @@ async function measurePagination(
   const probe = book.renderTo(host, { width, height, spread, flow: "paginated" });
   probe.themes.fontSize(`${fontSizePct}%`);
   try {
-    const items = (
-      book.spine as unknown as { spineItems: { index: number; href: string; linear?: string }[] }
-    ).spineItems;
+    const bookSpine: unknown = book.spine;
+    // SAFETY: epub.js populates spineItems after the book has opened, but its published type omits it.
+    const items = (bookSpine as { spineItems: { index: number; href: string; linear?: string }[] })
+      .spineItems;
 
     const offsetByIndex = new Map<number, number>();
     let total = 0;
@@ -85,12 +108,13 @@ async function measurePagination(
       if (item.linear === "no") continue;
       await probe.display(item.href);
       if (isCancelled()) return null;
-      const loc = probe.currentLocation() as unknown as
-        | { start?: { displayed?: { total?: number } } }
-        | undefined;
-      const props = (
-        probe as unknown as { manager?: { layout?: { props?: { divisor?: number } } } }
-      ).manager?.layout?.props;
+      const currentLocation: unknown = probe.currentLocation();
+      // SAFETY: epub.js currentLocation uses this documented location shape when a section is displayed.
+      const loc = currentLocation as { start?: { displayed?: { total?: number } } } | undefined;
+      const renditionProbe: unknown = probe;
+      // SAFETY: epub.js stores the active layout divisor on its internal rendition manager.
+      const props = (renditionProbe as { manager?: { layout?: { props?: { divisor?: number } } } })
+        .manager?.layout?.props;
       if (props?.divisor) divisor = props.divisor;
       const pages = loc?.start?.displayed?.total ?? 1;
       total += Math.max(1, Math.ceil(pages / divisor));
@@ -283,7 +307,9 @@ export function useEpubSourceView(
 
     const selectionFiber = Effect.runFork(
       Effect.sync(() => {
-        const views = rendition.getContents() as unknown as Contents[];
+        const renditionContents: unknown = rendition.getContents();
+        // SAFETY: epub.js getContents returns its Contents instances despite the incomplete declaration.
+        const views = renditionContents as Contents[];
         const active = views.find((c) => {
           const currentSelection = c.window.getSelection();
           return (
@@ -315,10 +341,10 @@ export function useEpubSourceView(
             return;
           if (event.key === "ArrowLeft") {
             event.preventDefault();
-            void rendition.prev();
+            turnEpubPage(rendition, "previous");
           } else if (event.key === "ArrowRight") {
             event.preventDefault();
-            void rendition.next();
+            turnEpubPage(rendition, "next");
           }
         };
         doc.addEventListener("keydown", onKeyDown);
@@ -327,7 +353,9 @@ export function useEpubSourceView(
     });
 
     const showLocation = () => {
-      const loc = rendition.currentLocation() as unknown as
+      const currentLocation: unknown = rendition.currentLocation();
+      // SAFETY: epub.js currentLocation uses this documented location shape after display.
+      const loc = currentLocation as
         | {
             start?: { index: number; cfi?: string; displayed?: { page: number } };
             atStart?: boolean;
@@ -364,24 +392,25 @@ export function useEpubSourceView(
         dispatchView({ type: "title", title: metadata?.title?.trim() || null }),
       );
       const start = yield* Effect.tryPromise(() => book.loaded.navigation).pipe(
-        Effect.map(firstChapterHref),
+        Effect.map(readingStartHref),
         // oxlint-disable-next-line no-useless-undefined
         Effect.orElseSucceed(() => undefined),
       );
       yield* Effect.tryPromise(async () => {
         // Try the most specific target first, then progressively fall back.
-        // A TOC/landmark href (`start`) can fail to resolve to a spine item
+        // A body-matter landmark can fail to resolve to a spine item
         // ("No Section Found") when it doesn't match the canonicalized spine
-        // href, so we end at epub.js's own "first linear section" behavior
-        // (`display()` with no target) and finally spine index 0.
-        const candidates: (string | number | undefined)[] = [
-          ...(initialEpubCfi ? [initialEpubCfi] : []),
-          start,
+        // href, so we end at epub.js's own "first linear section" behavior.
+        // TOC order cannot stand in for reading order: EPUBs may list a
+        // navigation-only cover whose spine item deliberately has no next page.
+        const candidates: (string | undefined)[] = [
+          linearSpineTarget(book, initialEpubCfi),
+          linearSpineTarget(book, start),
           undefined,
-          0,
         ];
         for (const target of candidates) {
           try {
+            // SAFETY: epub.js accepts an omitted target to display its first linear section.
             await (rendition.display as (t?: string | number) => Promise<void>)(target);
             return;
           } catch {
@@ -396,7 +425,16 @@ export function useEpubSourceView(
 
     const fiber = Effect.runFork(
       load().pipe(
-        Effect.tapError((error) => Effect.sync(() => console.error("failed to open epub", error))),
+        Effect.tapError((error) =>
+          Effect.sync(() =>
+            reportUnexpectedError({
+              title: "Book couldn't open",
+              message: "Bookclub couldn't open this EPUB.",
+              context: "failed to open epub",
+              error,
+            }),
+          ),
+        ),
         Effect.ignore,
       ),
     );
@@ -425,7 +463,9 @@ export function useEpubSourceView(
         resizeFrame = undefined;
         try {
           rendition.resize(el.clientWidth, el.clientHeight);
-          const loc = rendition.currentLocation() as unknown as
+          const currentLocation: unknown = rendition.currentLocation();
+          // SAFETY: epub.js currentLocation uses this documented location shape after resize.
+          const loc = currentLocation as
             | {
                 start?: { index: number; cfi?: string; displayed?: { page: number } };
                 atStart?: boolean;
@@ -446,7 +486,12 @@ export function useEpubSourceView(
               : undefined,
           });
         } catch (error) {
-          console.error("failed to resize rendition", error);
+          reportUnexpectedError({
+            title: "Reader layout failed",
+            message: "Bookclub couldn't resize this EPUB to fit the reader.",
+            context: "failed to resize epub rendition",
+            error,
+          });
         }
       });
     });
@@ -498,7 +543,14 @@ export function useEpubSourceView(
       measure().pipe(
         Effect.delay("250 millis"),
         Effect.tapError((error) =>
-          Effect.sync(() => console.error("failed to paginate epub", error)),
+          Effect.sync(() =>
+            reportUnexpectedError({
+              title: "Page count unavailable",
+              message: "Bookclub couldn't calculate the page count for this EPUB.",
+              context: "failed to paginate epub",
+              error,
+            }),
+          ),
         ),
         Effect.ignore,
       ),
@@ -532,9 +584,9 @@ export function useEpubSourceView(
     let cancelled = false;
     void (async () => {
       view.rendition.spread(pdfPageLayout === "auto" ? "auto" : "none");
-      const loc = view.rendition.currentLocation() as unknown as
-        | { start?: { cfi?: string } }
-        | undefined;
+      const currentLocation: unknown = view.rendition.currentLocation();
+      // SAFETY: epub.js currentLocation exposes the displayed CFI after spread relayout.
+      const loc = currentLocation as { start?: { cfi?: string } } | undefined;
       const cfi = loc?.start?.cfi;
       if (cfi) await view.rendition.display(cfi);
       await afterLayout();
@@ -543,7 +595,14 @@ export function useEpubSourceView(
         view.rendition.annotations.remove(drawn.cfi, "highlight");
         view.rendition.annotations.highlight(drawn.cfi, { id }, drawn.onClick, "bc-highlight");
       }
-    })().catch((error: unknown) => console.error("failed to change epub spread", error));
+    })().catch((error: unknown) =>
+      reportUnexpectedError({
+        title: "Reader layout failed",
+        message: "Bookclub couldn't change the EPUB page layout.",
+        context: "failed to change epub spread",
+        error,
+      }),
+    );
     return () => {
       cancelled = true;
     };
@@ -556,20 +615,33 @@ export function useEpubSourceView(
     },
     [onView],
   );
-  const next = useCallback(() => onView((v) => void v.rendition.next()), [onView]);
-  const prev = useCallback(() => onView((v) => void v.rendition.prev()), [onView]);
+  const next = useCallback(() => onView((v) => turnEpubPage(v.rendition, "next")), [onView]);
+  const prev = useCallback(() => onView((v) => turnEpubPage(v.rendition, "previous")), [onView]);
   const goTo = useCallback(
     async (anchor: HighlightAnchor): Promise<void> => {
       if (anchor.kind !== "epub-cfi") return;
       const view = currentView();
-      if (view) await view.rendition.display(anchor.value);
+      if (!view) return;
+      try {
+        await view.rendition.display(anchor.value);
+      } catch (error) {
+        reportUnexpectedError({
+          title: "Location couldn't open",
+          message: "Bookclub couldn't jump to that location in the EPUB.",
+          context: "failed to navigate to epub location",
+          error,
+        });
+        throw error;
+      }
     },
     [currentView],
   );
   const flashHighlight = useCallback(() => {
     const view = currentView();
     if (!view) return;
-    const contents = view.rendition.getContents() as unknown as Contents[];
+    const renditionContents: unknown = view.rendition.getContents();
+    // SAFETY: epub.js getContents returns its Contents instances despite the incomplete declaration.
+    const contents = renditionContents as Contents[];
     const flashed: Element[] = [];
     for (const content of contents) {
       for (const el of content.document.querySelectorAll(".bc-highlight")) {

@@ -81,6 +81,7 @@ export async function collectSnapshot(env: Env): Promise<BackupSnapshot> {
         [email, await (await getAgentByName(env.AuthAgent, email)).exportState()] as const,
     ),
   );
+  // SAFETY: every entry is produced from an AuthState row keyed by its durable-object id.
   const auth = Object.fromEntries(authEntries) as Record<string, AuthState>;
 
   return { version: 1, takenAt: new Date().toISOString(), registry, groups, notes, auth };
@@ -200,6 +201,7 @@ export interface RestoreResult {
 export async function restoreFrom(env: Env, key: string): Promise<RestoreResult> {
   const object = await env.BACKUPS.get(key);
   if (!object) throw new Error(`backup not found: ${key}`);
+  // SAFETY: this R2 object is written only by createBackup using the BackupSnapshot schema.
   const snapshot = (await object.json()) as BackupSnapshot;
 
   const [{ getAgentByName }, { REGISTRY_ID }] = await Promise.all([

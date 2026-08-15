@@ -1,4 +1,5 @@
 import { Agent, getAgentByName } from "agents";
+import * as Encoding from "effect/Encoding";
 import {
   GroupFailureReason,
   GroupRole,
@@ -8,7 +9,6 @@ import {
   type SourceMeta,
 } from "../../shared/types/groups.ts";
 import { slugForGroup } from "../../shared/groupUrls.ts";
-import { randomHexToken } from "../../shared/crypto.ts";
 import { canonicalEmail } from "../../shared/email.ts";
 import type { Env } from "../env.ts";
 import { GroupAction, permits } from "../../shared/groupPermissions.ts";
@@ -89,7 +89,7 @@ export type DeleteGroupResult =
 const MAX_TITLE_LENGTH = 100;
 
 function token(): string {
-  return randomHexToken(16);
+  return Encoding.encodeHex(crypto.getRandomValues(new Uint8Array(16)));
 }
 
 export class GroupAgent extends Agent<Env, GroupState> {
@@ -209,42 +209,38 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   roster(): RosterEntry[] {
-    return Object.entries(this.state.members).map(([id, m]) => ({
-      id,
-      name: m.name,
-      email: m.email,
-      role: m.role,
-      ...(m.avatarImageId ? { avatarImageId: m.avatarImageId } : {}),
-    }));
+    return Object.entries(this.state.members).map(([id, m]) => {
+      return m.avatarImageId
+        ? { id, name: m.name, email: m.email, role: m.role, avatarImageId: m.avatarImageId }
+        : { id, name: m.name, email: m.email, role: m.role };
+    });
   }
 
   memberProfile(userId: string): RosterEntry | null {
     const member = this.state.members[userId];
     if (!member) return null;
-    return {
-      id: userId,
-      name: member.name,
-      email: member.email,
-      role: member.role,
-      ...(member.avatarImageId ? { avatarImageId: member.avatarImageId } : {}),
-    };
+    return member.avatarImageId
+      ? {
+          id: userId,
+          name: member.name,
+          email: member.email,
+          role: member.role,
+          avatarImageId: member.avatarImageId,
+        }
+      : { id: userId, name: member.name, email: member.email, role: member.role };
   }
 
   setMemberProfile(userId: string, name: string, avatarImageId?: string): RosterEntry | null {
     const member = this.state.members[userId];
     if (!member) return null;
     const { avatarImageId: _oldAvatar, ...base } = member;
-    const next = { ...base, name, ...(avatarImageId ? { avatarImageId } : {}) };
-    if (next.name !== member.name || next.avatarImageId !== member.avatarImageId) {
+    const next = avatarImageId ? { ...base, name, avatarImageId } : { ...base, name };
+    if (next.name !== member.name || avatarImageId !== member.avatarImageId) {
       this.setState({ ...this.state, members: { ...this.state.members, [userId]: next } });
     }
-    return {
-      id: userId,
-      name: next.name,
-      email: next.email,
-      role: next.role,
-      ...(next.avatarImageId ? { avatarImageId: next.avatarImageId } : {}),
-    };
+    return avatarImageId
+      ? { id: userId, name: next.name, email: next.email, role: next.role, avatarImageId }
+      : { id: userId, name: next.name, email: next.email, role: next.role };
   }
 
   renameGroup(callerId: string, rawTitle: string): RenameGroupResult {

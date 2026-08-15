@@ -1,5 +1,9 @@
-import { base64urlDecode, base64urlEncode } from "../../shared/base64url.ts";
+import * as Encoding from "effect/Encoding";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { constantTimeEqualBytes } from "../../shared/crypto.ts";
+import { hmacKey } from "./hmac.ts";
 
 export interface SessionClaims {
   userId: string;
@@ -8,25 +12,22 @@ export interface SessionClaims {
   exp: number;
 }
 
+const SessionClaimsSchema = Schema.Struct({
+  userId: Schema.String,
+  email: Schema.String,
+  name: Schema.String,
+  exp: Schema.Number,
+});
+
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 const encoder = new TextEncoder();
 
-function hmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
-
 export async function signSession(claims: SessionClaims, secret: string): Promise<string> {
-  const payload = base64urlEncode(encoder.encode(JSON.stringify(claims)));
+  const payload = Encoding.encodeBase64Url(encoder.encode(JSON.stringify(claims)));
   const key = await hmacKey(secret);
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-  return `${payload}.${base64urlEncode(new Uint8Array(sig))}`;
+  return `${payload}.${Encoding.encodeBase64Url(new Uint8Array(sig))}`;
 }
 
 export async function verifySession(token: string, secret: string): Promise<SessionClaims | null> {
@@ -44,18 +45,22 @@ export async function verifySession(token: string, secret: string): Promise<Sess
   }
   let provided: Uint8Array;
   try {
-    provided = base64urlDecode(signature);
+    provided = Result.getOrThrow(Encoding.decodeBase64Url(signature));
   } catch {
     return null;
   }
   if (!constantTimeEqualBytes(new Uint8Array(expected), provided)) return null;
 
-  let claims: SessionClaims;
+  let claims: SessionClaims | null;
   try {
-    claims = JSON.parse(new TextDecoder().decode(base64urlDecode(payload))) as SessionClaims;
+    claims = Option.getOrNull(
+      Schema.decodeUnknownOption(SessionClaimsSchema)(
+        JSON.parse(new TextDecoder().decode(Result.getOrThrow(Encoding.decodeBase64Url(payload)))),
+      ),
+    );
   } catch {
     return null;
   }
-  if (typeof claims.exp !== "number" || claims.exp < Date.now()) return null;
+  if (claims === null || claims.exp < Date.now()) return null;
   return claims;
 }

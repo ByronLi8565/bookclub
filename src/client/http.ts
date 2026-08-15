@@ -2,6 +2,7 @@
 // synthetic `http_<status>` code when the body is missing or not JSON.
 export async function parseHttpError(response: Response): Promise<string> {
   try {
+    // SAFETY: Bookclub error responses use the shared optional error-message envelope.
     const body = (await response.json()) as { error?: string };
     return body.error ?? `http_${response.status}`;
   } catch {

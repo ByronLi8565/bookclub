@@ -37,6 +37,7 @@ export async function authenticateContext(
 ): Promise<BrowserIdentity> {
   const auth = await context.request.post("/auth/start", { data: { email } });
   expect(auth.ok(), "dev auth creates a real browser session").toBe(true);
+  // SAFETY: the checked successful auth response uses the test harness identity envelope.
   const { token, user } = (await auth.json()) as { token: string; user: BrowserIdentity };
   // Local WebKit will not retain the production Secure cookie over HTTP, so
   // install the public dev-auth token in the browser jar used by the SPA.
@@ -55,6 +56,7 @@ export async function seedWorkspace(
     data: { displayName: "Workspace Regression Club" },
   });
   expect(created.status(), "the signed-in user can create a club").toBe(201);
+  // SAFETY: the checked successful group creation response uses the shared group envelope.
   const { group } = (await created.json()) as { group: GroupSummary };
   const ref = `${group.slug}-${group.publicId}`;
 
@@ -72,6 +74,7 @@ export async function uploadBook(
     headers: { "Content-Type": book.contentType, "X-Source-Title": encodeURIComponent(book.title) },
   });
   expect(uploaded.ok(), "the club has a real book to lay out").toBe(true);
+  // SAFETY: the checked successful upload response contains its content hash.
   const { hash } = (await uploaded.json()) as { hash: string };
   return hash;
 }
@@ -83,6 +86,7 @@ export async function joinGroup(
 ): Promise<void> {
   const invite = await ownerContext.request.post(`/groups/${ref}/invite-link`);
   expect(invite.ok(), "the owner can create an invite for browser setup").toBe(true);
+  // SAFETY: the checked successful invite response contains the invite token.
   const { token } = (await invite.json()) as { token: string };
   const joined = await memberContext.request.post(`/groups/${ref}/join`, { data: { token } });
   expect(joined.ok(), "the second browser joins the club through its invite").toBe(true);

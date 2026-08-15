@@ -28,6 +28,7 @@ test("Reading position · a manual sync opens the same page in another browser",
   );
   await page.keyboard.press("Meta+s");
   const syncResponse = await synced;
+  // SAFETY: the checked successful sync response returns the requested stored position.
   const stored = (await syncResponse.json()) as { position: { page: number } };
   expect(stored.position.page, "the server stores the page chosen in the first browser").toBe(
     syncedPage,

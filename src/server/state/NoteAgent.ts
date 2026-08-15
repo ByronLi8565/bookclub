@@ -84,12 +84,14 @@ export class NoteAgent extends Agent<Env, NoteState> {
     const group = await getAgentByName(this.env.GroupAgent, this.name);
     const profile = await group.memberProfile(me.id);
     if (!profile) return connection.close(1008, "forbidden");
-    connection.setState({
+    const identity = {
       userId: me.id,
       name: profile.name,
       role: profile.role,
-      ...(profile.avatarImageId ? { avatarImageId: profile.avatarImageId } : {}),
-    } satisfies ConnIdentity);
+    } satisfies ConnIdentity;
+    connection.setState(
+      profile.avatarImageId ? { ...identity, avatarImageId: profile.avatarImageId } : identity,
+    );
     this.broadcastPresence();
   }
 
@@ -103,12 +105,8 @@ export class NoteAgent extends Agent<Env, NoteState> {
       if (conn.id === excludeId) continue;
       const s = conn.state;
       if (s?.userId) {
-        seen.set(s.userId, {
-          id: s.userId,
-          name: s.name,
-          role: s.role,
-          ...(s.avatarImageId ? { avatarImageId: s.avatarImageId } : {}),
-        });
+        const peer = { id: s.userId, name: s.name, role: s.role } satisfies OnlinePeer;
+        seen.set(s.userId, s.avatarImageId ? { ...peer, avatarImageId: s.avatarImageId } : peer);
       }
     }
     this.broadcast(JSON.stringify({ type: "presence", users: [...seen.values()] }));
@@ -117,6 +115,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
   private get me(): ConnIdentity {
     const { connection } = getCurrentAgent<NoteAgent>();
     if (!connection) throw new Error("note mutation outside a connection");
+    // SAFETY: every accepted websocket connection stores ConnIdentity as its state.
     return connection.state as ConnIdentity;
   }
 
@@ -253,7 +252,9 @@ export class NoteAgent extends Agent<Env, NoteState> {
     for (const connection of this.getConnections<ConnIdentity>()) {
       if (connection.state?.userId === userId) {
         const { avatarImageId: _oldAvatar, ...current } = connection.state;
-        connection.setState({ ...current, name, ...(avatarImageId ? { avatarImageId } : {}) });
+        connection.setState(
+          avatarImageId ? { ...current, name, avatarImageId } : { ...current, name },
+        );
       }
     }
     this.broadcastPresence();

@@ -2,12 +2,6 @@ import { ulid } from "ulidx";
 import type { GroupSummary } from "../../../src/shared/types/groups.ts";
 import { groupUrlName } from "../../../src/shared/groupUrls.ts";
 
-// The typed HTTP surface — the same public routes the SPA calls. Everything here
-// is black-box `fetch` against the running worker; nothing imports server
-// internals. Identity is a real signed session cookie minted via dev-auth
-// (`POST /auth/start` auto-signs-in when `DEV_AUTH=true`), so a
-// scenario can create as many isolated users as it likes with no mailbox.
-
 export interface Identity {
   readonly user: { id: string; email: string; name: string };
   /** The `bc_session=...` cookie pair, sent on every request this identity makes. */
@@ -56,6 +50,7 @@ export function makeApiSurface(baseUrl: string): ApiSurface {
       const body = await res.text();
       throw new ApiError(`${context} failed: ${res.status} ${body}`, res.status, body);
     }
+    // SAFETY: each caller supplies the response contract for the scenario endpoint it invokes.
     return (await res.json()) as T;
   }
 
@@ -78,6 +73,7 @@ export function makeApiSurface(baseUrl: string): ApiSurface {
           body,
         );
       }
+      // SAFETY: the successful auth response uses the shared identity envelope.
       const { user } = (await res.json()) as { user: Identity["user"] };
       return { user, cookie: raw.split(";")[0]!, label: opts.label ?? user.name };
     },

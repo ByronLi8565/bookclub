@@ -37,6 +37,7 @@ describe("addNote", () => {
 
     expect(next.nextSeq).toBe(2);
     expect(next.notes).toHaveLength(1);
+    // SAFETY: the preceding length assertion and addNote contract establish the first note.
     const note = next.notes[0] as Note;
     expect(note).toMatchObject({
       id: "id-1",
@@ -77,6 +78,7 @@ describe("addReply", () => {
 
     expect(next.nextSeq).toBe(3);
     expect(next.notes).toHaveLength(2);
+    // SAFETY: the preceding length assertion and addReply contract establish the second note.
     const reply = next.notes[1] as Note;
     expect(reply).toMatchObject({
       id: "id-2",
@@ -95,6 +97,7 @@ describe("editNote", () => {
 
     const next = editNote(base, "id-1", "after", "2026-02-02T00:00:00.000Z", ALICE.id);
 
+    // SAFETY: addNote created the edited note at index zero.
     const note = next.notes[0] as Note;
     expect(note.body).toBe("after");
     expect(note.version).toBe(2);
@@ -107,6 +110,7 @@ describe("editNote", () => {
     const next = editNote(base, "id-1", "after", "2026-02-02T00:00:00.000Z", BOB.id);
 
     expect(next.notes[0]).toBe(base.notes[0]);
+    // SAFETY: addNote created the unchanged note at index zero.
     expect((next.notes[0] as Note).body).toBe("before");
   });
 
@@ -114,12 +118,15 @@ describe("editNote", () => {
     const base = addNote(emptyNoteState(), "book", ALICE, "before", [], fakeStamp());
     const tombstoned: NoteState = {
       ...base,
+      // SAFETY: addNote created the base note at index zero.
       notes: [{ ...(base.notes[0] as Note), deletedAt: "2026-01-15T00:00:00.000Z" }],
     };
 
     const next = editNote(tombstoned, "id-1", "after", "2026-02-02T00:00:00.000Z", ALICE.id);
 
+    // SAFETY: the tombstoned fixture contains the unchanged note at index zero.
     expect((next.notes[0] as Note).body).toBe("before");
+    // SAFETY: the tombstoned fixture contains the unchanged note at index zero.
     expect((next.notes[0] as Note).version).toBe(1);
   });
 });
@@ -130,6 +137,7 @@ describe("rebindHighlight", () => {
 
     const next = rebindHighlight(base, "id-1", "h1", epubAnchor("cfi-fresh"));
 
+    // SAFETY: addNote created the rebound note at index zero.
     expect((next.notes[0] as Note).highlights[0]?.anchor).toEqual(epubAnchor("cfi-fresh"));
   });
 });
@@ -168,6 +176,7 @@ describe("removeNote", () => {
 
     const next = removeNote(state, "id-1", at, ALICE.id, false);
 
+    // SAFETY: the referenced note remains at index zero as a tombstone.
     const tomb = next.notes[0] as Note;
     expect(tomb.deletedAt).toBe(at);
     // The original body must be redacted, not just flagged — assert the content
@@ -185,6 +194,7 @@ describe("removeNote", () => {
     const next = removeNote(state, "id-1", at, ALICE.id, false);
 
     expect(next.notes).toHaveLength(2);
+    // SAFETY: the preceding length assertion establishes the tombstoned root note.
     expect((next.notes[0] as Note).deletedAt).toBe(at);
   });
 });

@@ -1,10 +1,22 @@
-import type { Env } from "../env.ts";
 import { escapeHtml } from "../../shared/format.ts";
+
+interface EmailEnv {
+  EMAIL?: {
+    send(message: {
+      from: string;
+      to: string;
+      subject: string;
+      text: string;
+      html: string;
+    }): Promise<unknown>;
+  };
+  EMAIL_FROM?: string;
+}
 
 // Send an email when a provider is configured; otherwise log it (dev fallback).
 // `logLine` is what gets printed when no provider is bound.
 async function sendEmail(
-  env: Env,
+  env: EmailEnv,
   message: { to: string; subject: string; text: string; html: string },
   logLine: string,
 ): Promise<void> {
@@ -15,7 +27,7 @@ async function sendEmail(
   console.log(logLine);
 }
 
-export async function sendLoginCode(env: Env, email: string, code: string): Promise<void> {
+export async function sendLoginCode(env: EmailEnv, email: string, code: string): Promise<void> {
   await sendEmail(
     env,
     {
@@ -36,7 +48,7 @@ export async function sendLoginCode(env: Env, email: string, code: string): Prom
 }
 
 export async function sendInvite(
-  env: Env,
+  env: EmailEnv,
   email: string,
   groupDisplayName: string,
   link: string,

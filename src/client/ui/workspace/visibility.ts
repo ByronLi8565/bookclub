@@ -7,6 +7,7 @@ export function stepChromeVisibility(
   level: ChromeVisibilityLevel,
   direction: "hide" | "show",
 ): ChromeVisibilityLevel {
+  // SAFETY: clamping an integer visibility level to [0, 2] produces every member of the union.
   return Math.min(2, Math.max(0, level + (direction === "hide" ? 1 : -1))) as ChromeVisibilityLevel;
 }
 

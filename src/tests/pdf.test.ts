@@ -5,6 +5,7 @@ import { captureHighlight, epubAnchor, pdfAnchor } from "../client/logic/notes/h
 import { pageGeometry, pageText, rectsForRange } from "../client/logic/sources/pdf.ts";
 
 function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPageProxy {
+  // SAFETY: pageText and pageGeometry only call the two PDFPageProxy methods supplied here.
   return {
     getTextContent: () =>
       Promise.resolve({
@@ -16,7 +17,7 @@ function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPag
         })),
       }),
     getViewport: () => ({ width: 100, height: 100 }),
-  } as unknown as PDFPageProxy;
+  } as PDFPageProxy;
 }
 
 describe("PDF text extraction", () => {

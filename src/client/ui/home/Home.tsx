@@ -13,10 +13,10 @@ import { Login, LoginModal } from "../shared/Login.tsx";
 import { SettingsModal } from "../workspace/SettingsModal.tsx";
 import { spawnToast } from "../shared/toast/toastStore.ts";
 
-const NAME_ERRORS: Record<string, string> = {
-  empty: "Enter a name for your club.",
-  too_long: "That name is too long! 100 characters max.",
-};
+const NAME_ERRORS = new Map([
+  ["empty", "Enter a name for your club."],
+  ["too_long", "That name is too long! 100 characters max."],
+]);
 
 interface GroupsStore {
   groups: GroupSummary[];
@@ -162,7 +162,7 @@ export function Home({ session }: { session: Session }): React.ReactElement {
     const result = await createGroup(name).catch(() => ({ ok: false as const, error: "network" }));
     createInFlight.current = false;
     if (!result.ok) {
-      const message = NAME_ERRORS[result.error] ?? "Couldn't create that club. Try again.";
+      const message = NAME_ERRORS.get(result.error) ?? "Couldn't create that club. Try again.";
       dispatch({ type: "createError", error: message });
       spawnToast("Invalid club name", message, { type: "error", durationMs: 6000 });
       return;

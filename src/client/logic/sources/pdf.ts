@@ -1,6 +1,7 @@
 import type * as PdfjsModule from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import type * as PdfViewerModule from "pdfjs-dist/web/pdf_viewer.mjs";
+import { needsBoundarySpace } from "../text.ts";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import {
   healthError,
@@ -41,6 +42,7 @@ interface PdfInfo {
 
 // Covers pdf.js fake-worker fallback on Safari/iOS before Promise.withResolvers exists.
 function installPromiseWithResolvers(): void {
+  // SAFETY: Promise.withResolvers is feature-detected before this constructor member is called.
   const ctor = Promise as PromiseConstructor & {
     withResolvers?: <T>() => {
       promise: Promise<T>;
@@ -74,6 +76,7 @@ function pdfjsLib(): Promise<typeof PdfjsModule> {
 // TextLayerBuilder reads pdfjsLib from globalThis at import time.
 export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilder> {
   const lib = await pdfjsLib();
+  // SAFETY: pdf.js looks up this documented global using the same module shape imported above.
   (globalThis as { pdfjsLib?: typeof PdfjsModule }).pdfjsLib = lib;
   viewerPromise ??= import("pdfjs-dist/web/pdf_viewer.mjs");
   return (await viewerPromise).TextLayerBuilder;
@@ -83,6 +86,7 @@ function isPasswordException(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
+    // SAFETY: pdf.js rejections expose their error class through the optional name field.
     (error as { name?: string }).name === "PasswordException"
   );
 }
@@ -116,15 +120,11 @@ export async function pageText(page: PDFPageProxy): Promise<string> {
   return joinPdfTextItems(await pageTextItems(page)).text;
 }
 
-function shouldInsertBoundarySpace(text: string, next: string): boolean {
-  return text.length > 0 && next.length > 0 && /\S$/u.test(text) && /^\S/u.test(next);
-}
-
-function joinPdfTextItems(items: PdfTextItem[]): { text: string; starts: number[] } {
+function joinPdfTextItems(items: PdfTextItem[]) {
   const starts: number[] = [];
   let text = "";
   for (const item of items) {
-    if (shouldInsertBoundarySpace(text, item.str)) text += " ";
+    if (needsBoundarySpace(text, item.str)) text += " ";
     starts.push(text.length);
     text += item.str;
   }
@@ -225,6 +225,7 @@ export async function inspectPdf(
 
   try {
     const meta = await doc.getMetadata().catch(() => null);
+    // SAFETY: pdf.js metadata info is the PdfInfo dictionary declared by this module.
     const info = meta?.info as PdfInfo | undefined;
     const cover = await doc
       .getPage(1)

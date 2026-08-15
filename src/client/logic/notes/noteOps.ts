@@ -11,7 +11,7 @@ export function addNoteOp(
   highlights: Highlight[],
   tags: string[] = [],
 ): NoteOp {
-  return {
+  const op = {
     opId: ulid(),
     kind: "add",
     noteId: ulid(),
@@ -19,8 +19,8 @@ export function addNoteOp(
     body,
     highlights,
     createdAt: now(),
-    ...(tags.length > 0 ? { tags } : {}),
-  };
+  } satisfies Extract<NoteOp, { kind: "add" }>;
+  return tags.length > 0 ? { ...op, tags } : op;
 }
 
 export function addReplyOp(
@@ -29,7 +29,7 @@ export function addReplyOp(
   body: string,
   tags: string[] = [],
 ): NoteOp {
-  return {
+  const op = {
     opId: ulid(),
     kind: "reply",
     noteId: ulid(),
@@ -37,8 +37,8 @@ export function addReplyOp(
     parent,
     body,
     createdAt: now(),
-    ...(tags.length > 0 ? { tags } : {}),
-  };
+  } satisfies Extract<NoteOp, { kind: "reply" }>;
+  return tags.length > 0 ? { ...op, tags } : op;
 }
 
 export function updateTagsOp(noteId: string, add: string[], remove: string[]): NoteOp {
@@ -51,15 +51,13 @@ export function editNoteOp(
   addTags: string[] = [],
   removeTags: string[] = [],
 ): NoteOp {
-  return {
-    opId: ulid(),
-    kind: "edit",
-    noteId,
-    body,
-    at: now(),
-    ...(addTags.length > 0 ? { addTags } : {}),
-    ...(removeTags.length > 0 ? { removeTags } : {}),
-  };
+  const op = { opId: ulid(), kind: "edit", noteId, body, at: now() } satisfies Extract<
+    NoteOp,
+    { kind: "edit" }
+  >;
+  if (addTags.length > 0 && removeTags.length > 0) return { ...op, addTags, removeTags };
+  if (addTags.length > 0) return { ...op, addTags };
+  return removeTags.length > 0 ? { ...op, removeTags } : op;
 }
 
 export function removeNoteOp(noteId: string): NoteOp {

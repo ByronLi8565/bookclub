@@ -1,5 +1,9 @@
-import { base64urlDecode, base64urlEncode } from "../../shared/base64url.ts";
+import * as Encoding from "effect/Encoding";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { constantTimeEqualBytes } from "../../shared/crypto.ts";
+import { hmacKey } from "./hmac.ts";
 
 // The passkey authentication ceremony spans two requests, but no session yet
 // exists to anchor server-side state. Rather than add a store, the challenge is
@@ -16,21 +20,17 @@ interface ChallengePayload {
   exp: number;
 }
 
-function hmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
+const ChallengePayloadSchema = Schema.Struct({
+  email: Schema.String,
+  challenge: Schema.String,
+  exp: Schema.Number,
+});
 
 async function sign(payload: ChallengePayload, secret: string): Promise<string> {
-  const encoded = base64urlEncode(encoder.encode(JSON.stringify(payload)));
+  const encoded = Encoding.encodeBase64Url(encoder.encode(JSON.stringify(payload)));
   const key = await hmacKey(secret);
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(encoded));
-  return `${encoded}.${base64urlEncode(new Uint8Array(sig))}`;
+  return `${encoded}.${Encoding.encodeBase64Url(new Uint8Array(sig))}`;
 }
 
 async function verify(token: string, secret: string): Promise<ChallengePayload | null> {
@@ -43,16 +43,18 @@ async function verify(token: string, secret: string): Promise<ChallengePayload |
   let provided: Uint8Array;
   try {
     expected = await crypto.subtle.sign("HMAC", key, encoder.encode(encoded));
-    provided = base64urlDecode(signature);
+    provided = Result.getOrThrow(Encoding.decodeBase64Url(signature));
   } catch {
     return null;
   }
   if (!constantTimeEqualBytes(new Uint8Array(expected), provided)) return null;
   try {
-    const payload = JSON.parse(
-      new TextDecoder().decode(base64urlDecode(encoded)),
-    ) as ChallengePayload;
-    if (typeof payload.exp !== "number" || payload.exp < Date.now()) return null;
+    const payload = Option.getOrNull(
+      Schema.decodeUnknownOption(ChallengePayloadSchema)(
+        JSON.parse(new TextDecoder().decode(Result.getOrThrow(Encoding.decodeBase64Url(encoded)))),
+      ),
+    );
+    if (payload === null || payload.exp < Date.now()) return null;
     return payload;
   } catch {
     return null;

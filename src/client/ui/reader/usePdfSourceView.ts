@@ -44,6 +44,7 @@ import {
   type RenderSnapshot,
 } from "./engine/renderSnapshot.ts";
 import { useReaderSearch } from "./useReaderSearch.ts";
+import { reportUnexpectedError } from "../shared/toast/reportError.ts";
 import {
   SPREAD_GUTTER_PX,
   cropBox,
@@ -88,11 +89,7 @@ const PDF_RECT_Y_NUDGE_PX = 4;
 // remember which content point sits under the cursor/viewport-center so it can
 // be restored after a re-render at a new zoom. Falls back to the center (0.5)
 // when the box has no extent.
-function focalFraction(
-  wrap: HTMLElement,
-  clientX: number,
-  clientY: number,
-): { fracX: number; fracY: number } {
+function focalFraction(wrap: HTMLElement, clientX: number, clientY: number) {
   const r = wrap.getBoundingClientRect();
   return {
     fracX: r.width > 0 ? clamp((clientX - r.left) / r.width, 0, 1) : 0.5,
@@ -472,7 +469,7 @@ export function usePdfSourceView(
 
   // Vertical text bounds across the visible spread (union of all panes' text),
   // so smart-arrow scrolling and fit reuse the same top/bottom detection.
-  const scrollBounds = useCallback((): { floor: number; ceil: number } => {
+  const scrollBounds = useCallback(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return { floor: 0, ceil: 0 };
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
@@ -639,6 +636,7 @@ export function usePdfSourceView(
         const TextLayerBuilderCtor = await loadTextLayerBuilderCtor();
         if (seq !== renderSeqRef.current) return;
         const builder = new TextLayerBuilderCtor({ pdfPage: page });
+        // SAFETY: the builder only consumes the viewport member supplied by pdf.js here.
         await builder.render({ viewport } as Parameters<typeof builder.render>[0]);
         if (seq !== renderSeqRef.current || !panesRef.current.includes(pane)) {
           builder.cancel();
@@ -960,6 +958,7 @@ export function usePdfSourceView(
         return loaded;
       });
       const meta = yield* Effect.tryPromise(() => doc.getMetadata().catch(() => null));
+      // SAFETY: pdf.js metadata info is an optional string-keyed dictionary.
       const info = meta?.info as { Title?: string } | undefined;
       dispatchView({ type: "title", title: info?.Title?.trim() || null });
       if (initialPdfPage !== null) {
@@ -985,7 +984,16 @@ export function usePdfSourceView(
     });
     const fiber = Effect.runFork(
       open().pipe(
-        Effect.tapError((error) => Effect.sync(() => console.error("failed to open pdf", error))),
+        Effect.tapError((error) =>
+          Effect.sync(() =>
+            reportUnexpectedError({
+              title: "Book couldn't open",
+              message: "Bookclub couldn't open this PDF.",
+              context: "failed to open pdf",
+              error,
+            }),
+          ),
+        ),
         Effect.ignore,
       ),
     );
@@ -1241,15 +1249,42 @@ export function usePdfSourceView(
   const next = useCallback(() => {
     if (scrollWithinPage("down")) return;
     const numPages = docRef.current?.numPages ?? pageRef.current;
-    void goToPage(spreadEnd(pageRef.current, spreadActiveRef.current, numPages) + 1);
+    void goToPage(spreadEnd(pageRef.current, spreadActiveRef.current, numPages) + 1).catch(
+      (error: unknown) =>
+        reportUnexpectedError({
+          title: "Page couldn't turn",
+          message: "Bookclub couldn't turn to the next PDF page.",
+          context: "failed to turn pdf page next",
+          error,
+        }),
+    );
   }, [scrollWithinPage, goToPage]);
   const prev = useCallback(() => {
     if (scrollWithinPage("up")) return;
-    void goToPage(spreadStart(pageRef.current, spreadActiveRef.current) - 1);
+    void goToPage(spreadStart(pageRef.current, spreadActiveRef.current) - 1).catch(
+      (error: unknown) =>
+        reportUnexpectedError({
+          title: "Page couldn't turn",
+          message: "Bookclub couldn't turn to the previous PDF page.",
+          context: "failed to turn pdf page previous",
+          error,
+        }),
+    );
   }, [scrollWithinPage, goToPage]);
   const goTo = useCallback(
     async (anchor: HighlightAnchor): Promise<void> => {
-      if (anchor.kind === "pdf-text") await goToPage(anchor.page, () => scrollToAnchor(anchor));
+      if (anchor.kind !== "pdf-text") return;
+      try {
+        await goToPage(anchor.page, () => scrollToAnchor(anchor));
+      } catch (error) {
+        reportUnexpectedError({
+          title: "Location couldn't open",
+          message: "Bookclub couldn't jump to that location in the PDF.",
+          context: "failed to navigate to pdf location",
+          error,
+        });
+        throw error;
+      }
     },
     [goToPage, scrollToAnchor],
   );
@@ -1501,7 +1536,7 @@ export function usePdfSourceView(
     const search = Effect.fn("PdfReader.search")(function* (query: string) {
       return yield* Effect.tryPromise(async () => {
         const doc = docRef.current;
-        if (!doc || query.trim() === "") return [] as SearchMatch[];
+        if (!doc || query.trim() === "") return [];
         const matchesByPage = await Promise.all(
           Array.from({ length: doc.numPages }, async (_, index) => {
             const pageNum = index + 1;
@@ -1514,7 +1549,7 @@ export function usePdfSourceView(
           }),
         );
         return matchesByPage.flat();
-      }).pipe(Effect.orElseSucceed(() => [] as SearchMatch[]));
+      }).pipe(Effect.orElseSucceed((): SearchMatch[] => []));
     });
     return { locateHighlight, search };
   }, [geometryFor]);

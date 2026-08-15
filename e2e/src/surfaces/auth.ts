@@ -2,12 +2,6 @@ import type { PasskeyInfo } from "../../../src/shared/types/passkeys.ts";
 import type { Identity } from "./api.ts";
 import { SoftwareAuthenticator } from "./webauthn-authenticator.ts";
 
-// The auth surface: the passwordless-and-more sign-in paths a real client uses,
-// driven purely over HTTP. Password login is plain JSON; passkey login is a full
-// WebAuthn ceremony carried out by an in-process SoftwareAuthenticator that
-// stands in for a browser + platform authenticator. Nothing here imports server
-// internals — it only speaks the public /auth and /me routes.
-
 export interface AuthSurface {
   /** Set (or change) a password for an already-signed-in identity. */
   setPassword(who: Identity, password: string, current?: string): Promise<Response>;
@@ -72,6 +66,7 @@ export function makeAuthSurface(baseUrl: string): AuthSurface {
     }
     const cookie = sessionCookie(res);
     if (!cookie) throw new AuthError(`${context}: no session cookie set`, res.status, "");
+    // SAFETY: the successful auth response uses the shared identity envelope.
     const { user } = (await res.json()) as { user: Identity["user"] };
     return { user, cookie, label: user.name };
   }
@@ -96,6 +91,7 @@ export function makeAuthSurface(baseUrl: string): AuthSurface {
       if (!optionsRes.ok) {
         throw new AuthError("register options failed", optionsRes.status, await optionsRes.text());
       }
+      // SAFETY: the successful registration-options response supplies these WebAuthn fields.
       const options = (await optionsRes.json()) as { challenge: string; rp: { id: string } };
       const attestation = await authenticator.attest(options, origin);
       const verifyRes = await post(who, "/auth/passkey/register/verify", {
@@ -113,6 +109,7 @@ export function makeAuthSurface(baseUrl: string): AuthSurface {
       if (!optionsRes.ok) {
         throw new AuthError("login options failed", optionsRes.status, await optionsRes.text());
       }
+      // SAFETY: the successful login-options response supplies these WebAuthn fields.
       const options = (await optionsRes.json()) as { challenge: string; rpId: string };
       // The login options request set the signed challenge cookie; carry it into
       // the verify request exactly as a browser would.
@@ -133,6 +130,7 @@ export function makeAuthSurface(baseUrl: string): AuthSurface {
     async listPasskeys(who) {
       const res = await fetch(url("/me/passkeys"), { headers: { Cookie: who.cookie } });
       if (!res.ok) throw new AuthError("listPasskeys failed", res.status, await res.text());
+      // SAFETY: the successful passkey listing response uses the shared passkey envelope.
       const { passkeys } = (await res.json()) as { passkeys: PasskeyInfo[] };
       return passkeys;
     },

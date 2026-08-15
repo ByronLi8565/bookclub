@@ -85,11 +85,8 @@ export function updateNoteTags(
         return note;
       }
       const { tags: _tags, ...withoutTags } = note;
-      return {
-        ...withoutTags,
-        ...(next.length > 0 ? { tags: next } : {}),
-        version: bumpVersion ? note.version + 1 : note.version,
-      };
+      const updated = { ...withoutTags, version: bumpVersion ? note.version + 1 : note.version };
+      return next.length > 0 ? { ...updated, tags: next } : updated;
     }),
   );
 }
@@ -195,7 +192,7 @@ function append(
   tags: string[],
 ): NoteState {
   const seq = state.nextSeq ?? 1;
-  const note: Note = {
+  const noteWithoutTags = {
     id,
     seq,
     sourceId,
@@ -207,10 +204,12 @@ function append(
     editedAt: null,
     deletedAt: null,
     version: 1,
-    // Only carry the field when there's something to say, so untagged notes
-    // stay byte-for-byte identical to their pre-tags shape.
-    ...(normalizeTags(tags).length > 0 ? { tags: normalizeTags(tags) } : {}),
   };
+  // Only carry the field when there's something to say, so untagged notes
+  // stay byte-for-byte identical to their pre-tags shape.
+  const normalizedTags = normalizeTags(tags);
+  const note: Note =
+    normalizedTags.length > 0 ? { ...noteWithoutTags, tags: normalizedTags } : noteWithoutTags;
   return {
     ...state,
     notes: [...state.notes, note],

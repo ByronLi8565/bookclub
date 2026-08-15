@@ -20,6 +20,7 @@ import {
   type BookMetadataPatch,
 } from "../../shared/types/groups.ts";
 import { currentSource, sourceById } from "../../shared/sources.ts";
+import { ApiError, ApiErrorReason } from "../../shared/types/errors.ts";
 import {
   deleteImages,
   deleteImagesForScope,
@@ -57,8 +58,6 @@ import {
   requireIdentity,
   runWorkflow,
   tryPromise,
-  WorkflowError,
-  WorkflowReason,
   type WorkflowEffect,
   type WorkflowFailureError,
   type WorkflowResult,
@@ -103,7 +102,7 @@ const reservePublicId = Effect.fn("GroupWorkflows.reservePublicId")(function* (
     const reserved = yield* tryPromise(() => registry.reservePublicId(publicId, groupId));
     if (reserved.ok) return publicId;
   }
-  return yield* Effect.fail(fail(503, WorkflowError.IdExhausted));
+  return yield* Effect.fail(fail(503, ApiError.IdExhausted));
 });
 
 const ensurePublicUrl = Effect.fn("GroupWorkflows.ensurePublicUrl")(function* (
@@ -144,7 +143,7 @@ const requireGroupAction = Effect.fn("GroupWorkflows.requireGroupAction")(functi
   me: Identity,
   groupRef: string,
   action: GroupActionType,
-  denyError: WorkflowError = GroupFailureReason.Forbidden,
+  denyError: ApiError = GroupFailureReason.Forbidden,
 ): Effect.fn.Return<ResolvedGroup, WorkflowFailureError> {
   const resolved = yield* requireGroup(env, groupRef);
   const membership = yield* tryPromise(() => resolved.group.membership(me.id));
@@ -157,7 +156,7 @@ const requireGroupAction = Effect.fn("GroupWorkflows.requireGroupAction")(functi
 
 type FailureReason = GroupFailureReason;
 
-const REASON_STATUS: Record<FailureReason, number> = {
+const REASON_STATUS = {
   [GroupFailureReason.Exists]: 409,
   [GroupFailureReason.NotMember]: 403,
   [GroupFailureReason.NotFound]: 404,
@@ -167,14 +166,11 @@ const REASON_STATUS: Record<FailureReason, number> = {
   [GroupFailureReason.WrongEmail]: 403,
   [GroupFailureReason.Forbidden]: 403,
   [GroupFailureReason.BadMember]: 404,
-};
+} satisfies Record<FailureReason, number>;
 
 const failReason = (reason: FailureReason): WorkflowFailureError =>
   fail(REASON_STATUS[reason], reason);
 
-// Shared scaffold for the rename/resolve-title endpoints: authenticate, resolve
-// the group, run the caller-supplied agent rename (which also validates its
-// inputs), then map the agent result to a group summary or a failure.
 const titleWorkflow = (
   operation: string,
   env: Env,
@@ -228,14 +224,14 @@ export function createGroup(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof rawDisplayName !== "string") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidName, WorkflowReason.Empty));
+        return yield* Effect.fail(fail(400, ApiError.InvalidName, ApiErrorReason.Empty));
       }
       const displayName = rawDisplayName.trim();
       if (displayName === "") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidName, WorkflowReason.Empty));
+        return yield* Effect.fail(fail(400, ApiError.InvalidName, ApiErrorReason.Empty));
       }
       if (displayName.length > MAX_GROUP_TITLE_LENGTH) {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidName, WorkflowReason.TooLong));
+        return yield* Effect.fail(fail(400, ApiError.InvalidName, ApiErrorReason.TooLong));
       }
       const groupId = ulid();
       const publicId = yield* reservePublicId(env, groupId);
@@ -316,7 +312,7 @@ export function renameGroupTitle(
     (group, callerId) =>
       Effect.gen(function* () {
         if (typeof title !== "string") {
-          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+          return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
         }
         return yield* tryPromise(() => group.renameGroup(callerId, title));
       }),
@@ -333,7 +329,7 @@ export function renameBookTitle(
   return titleWorkflow("GroupWorkflows.renameBookTitle", env, request, groupId, (group, callerId) =>
     Effect.gen(function* () {
       if (typeof sourceId !== "string" || typeof title !== "string") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
       return yield* tryPromise(() => group.renameBook(callerId, sourceId, title));
     }),
@@ -355,7 +351,7 @@ export function resolveBookTitle(
     (group, callerId) =>
       Effect.gen(function* () {
         if (typeof sourceId !== "string" || typeof title !== "string") {
-          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+          return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
         }
         return yield* tryPromise(() => group.resolveBookTitle(callerId, sourceId, title));
       }),
@@ -373,7 +369,7 @@ export function inviteByEmail(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       const email = normalizeEmail(rawEmail);
-      if (!email) return yield* Effect.fail(fail(400, WorkflowError.InvalidEmail));
+      if (!email) return yield* Effect.fail(fail(400, ApiError.InvalidEmail));
       const { group, summary } = yield* requireGroup(env, groupId);
       const result = yield* tryPromise(() => group.invite(me.id, email));
       if (!result.ok) return yield* Effect.fail(failReason(result.reason));
@@ -402,7 +398,7 @@ export function redeemInvite(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof token !== "string" || token === "")
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       const { group } = yield* requireGroup(env, groupId);
       const result = yield* tryPromise(() => group.redeem(token, me));
       if (!result.ok) return yield* Effect.fail(failReason(result.reason));
@@ -428,7 +424,7 @@ export function uploadSource(
         return yield* Effect.fail(
           stored.reason === GroupFailureReason.Empty
             ? fail(400, GroupFailureReason.Empty)
-            : fail(400, WorkflowError.UnsupportedType),
+            : fail(400, ApiError.UnsupportedType),
         );
       }
       const rawTitle = request.headers.get("X-Source-Title");
@@ -471,7 +467,7 @@ export function changeMemberRole(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (!isGroupRole(rawRole)) {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
       const { group, summary } = yield* requireGroup(env, groupId);
       const result: SetRoleResult = yield* tryPromise(() =>
@@ -496,7 +492,7 @@ export function deleteBook(
     Effect.gen(function* () {
       const me = yield* requireIdentity(env, request);
       if (typeof sourceId !== "string") {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
       const { group, summary } = yield* requireGroup(env, groupId);
       const result: DeleteSourceResult = yield* tryPromise(() =>
@@ -525,7 +521,7 @@ export function updateBookMetadata(
       const patch: BookMetadataPatch = {};
       if (Object.hasOwn(input, "author")) {
         if (input.author !== null && typeof input.author !== "string") {
-          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+          return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
         }
         const author = typeof input.author === "string" ? input.author.trim() : null;
         patch.author = author ? author.slice(0, 200) : null;
@@ -536,12 +532,12 @@ export function updateBookMetadata(
           wordCount === undefined ||
           (wordCount !== null && (!Number.isSafeInteger(wordCount) || wordCount < 0))
         ) {
-          return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+          return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
         }
         patch.wordCount = wordCount;
       }
       if (!Object.hasOwn(patch, "author") && !Object.hasOwn(patch, "wordCount")) {
-        return yield* Effect.fail(fail(400, WorkflowError.InvalidRequest));
+        return yield* Effect.fail(fail(400, ApiError.InvalidRequest));
       }
 
       const { group } = yield* requireGroup(env, groupId);
@@ -600,9 +596,9 @@ export function fetchSource(
       const me = yield* requireIdentity(env, request);
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ReadBook);
       const source = sourceId ? sourceById(summary, sourceId) : currentSource(summary);
-      if (!source) return yield* Effect.fail(fail(404, WorkflowError.NoBook));
+      if (!source) return yield* Effect.fail(fail(404, ApiError.NoBook));
       const object = yield* tryPromise(() => getSource(env, source.id));
-      if (!object) return yield* Effect.fail(fail(404, WorkflowError.NoBook));
+      if (!object) return yield* Effect.fail(fail(404, ApiError.NoBook));
       return { hash: source.id, contentType: source.contentType, object };
     }),
   );
@@ -699,7 +695,7 @@ export function deleteImageUpload(
         return yield* Effect.fail(fail(403, GroupFailureReason.Forbidden));
       }
       const referenced = yield* tryPromise(() => notes.referencesImage(imageId));
-      if (referenced) return yield* Effect.fail(fail(409, WorkflowError.InvalidRequest));
+      if (referenced) return yield* Effect.fail(fail(409, ApiError.InvalidRequest));
       yield* tryPromise(() => deleteImages(env, summary.groupId, [imageId]));
       return null;
     }),
@@ -748,7 +744,7 @@ export function exportGroupBackup(
         (imageId) =>
           Effect.gen(function* () {
             const object = yield* tryPromise(() => getImage(env, summary.groupId, imageId));
-            if (!object) return yield* Effect.fail(fail(500, WorkflowError.InternalError));
+            if (!object) return yield* Effect.fail(fail(500, ApiError.InternalError));
             const bytes = new Uint8Array(yield* tryPromise(() => object.arrayBuffer()));
             return {
               id: imageId,
@@ -775,7 +771,7 @@ export function exportGroupBackup(
         }),
       );
       if (bytes.byteLength > MAX_BOOKCLUB_ARCHIVE_BYTES) {
-        return yield* Effect.fail(fail(413, WorkflowError.TooLarge));
+        return yield* Effect.fail(fail(413, ApiError.TooLarge));
       }
       const timestamp = createdAt.replaceAll(":", "-").replace(".", "-");
       return { bytes, filename: `${summary.slug}-${timestamp}${BOOKCLUB_ARCHIVE_EXTENSION}` };
@@ -795,7 +791,7 @@ export function restoreGroupBackup(
       const { summary } = yield* requireGroupAction(env, me, groupId, GroupAction.ManageBackups);
       const contentLength = Number(request.headers.get("Content-Length"));
       if (Number.isFinite(contentLength) && contentLength > MAX_BOOKCLUB_ARCHIVE_BYTES) {
-        return yield* Effect.fail(fail(413, WorkflowError.TooLarge));
+        return yield* Effect.fail(fail(413, ApiError.TooLarge));
       }
       const raw = new Uint8Array(yield* tryPromise(() => request.arrayBuffer()));
       const decoded = yield* tryPromise(() => decodeBookclubArchive(raw));
@@ -803,13 +799,13 @@ export function restoreGroupBackup(
         const status = decoded.error === BookclubArchiveError.TooLarge ? 413 : 400;
         const error =
           decoded.error === BookclubArchiveError.TooLarge
-            ? WorkflowError.TooLarge
-            : WorkflowError.InvalidBackup;
+            ? ApiError.TooLarge
+            : ApiError.InvalidBackup;
         return yield* Effect.fail(fail(status, error));
       }
       const backup = decoded.value;
       if (backup.manifest.club.id !== summary.groupId) {
-        return yield* Effect.fail(fail(409, WorkflowError.BackupClubMismatch));
+        return yield* Effect.fail(fail(409, ApiError.BackupClubMismatch));
       }
 
       const existingImages = yield* tryPromise(() => listImages(env, summary.groupId));

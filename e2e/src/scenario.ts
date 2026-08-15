@@ -8,13 +8,6 @@ import { makeApiSurface, type ApiSurface } from "./surfaces/api.ts";
 import { makeNotesSurface, type NotesSurface } from "./surfaces/notes.ts";
 import { makeAuthSurface, type AuthSurface } from "./surfaces/auth.ts";
 
-// scenario(): the one way an e2e test is written. Modelled on executor's
-// scenario() — the body declares what it needs by asking the context for
-// surfaces; asking for one the current target can't provide skips the test and
-// records why, instead of failing. Each run writes a small result.json under
-// runs/<target>/<slug>/ so a pass/fail matrix can be assembled later. The test
-// name should read like a product guarantee, and the body like a spec.
-
 export const RUNS_DIR = fileURLToPath(new URL("../runs/", import.meta.url));
 
 interface SurfaceMap {
@@ -25,17 +18,13 @@ interface SurfaceMap {
 
 export interface ScenarioContext {
   readonly target: Target;
-  /** This run's artifact directory. */
   readonly runDir: string;
-  /** Get a surface, or skip the scenario if this target can't provide it. */
   need<K extends Capability>(capability: K): SurfaceMap[K];
-  /** Register a finalizer (runs on success OR failure), like Effect.ensuring. */
   onCleanup(fn: () => unknown | Promise<unknown>): void;
 }
 
 export interface ScenarioOptions {
   readonly timeout?: number;
-  /** Register as skipped without running — only for a tracked, out-of-scope gap. */
   readonly skip?: string;
 }
 
@@ -58,17 +47,18 @@ function makeContext(
   cleanups: Array<() => unknown>,
 ): ScenarioContext {
   const cache = new Map<Capability, unknown>();
-  const build: { [K in Capability]: () => SurfaceMap[K] } = {
+  const build = {
     api: () => makeApiSurface(target.baseUrl),
     notes: () => makeNotesSurface(target.baseUrl),
     auth: () => makeAuthSurface(target.baseUrl),
-  };
+  } satisfies { [K in Capability]: () => SurfaceMap[K] };
   return {
     target,
     runDir,
     need(capability) {
       if (!target.capabilities.has(capability)) throw new SkipSignal(capability);
       if (!cache.has(capability)) cache.set(capability, build[capability]());
+      // SAFETY: the preceding cache presence check establishes this capability's surface.
       return cache.get(capability) as SurfaceMap[typeof capability];
     },
     onCleanup(fn) {

@@ -1,6 +1,7 @@
 export function readLocal<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key);
+    // SAFETY: callers own the key and type pair; values are round-tripped by setStored below.
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     localStorage.removeItem(key);

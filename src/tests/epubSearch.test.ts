@@ -4,10 +4,6 @@
 // (assets/dorian.epub, public domain). epub.js runs under jsdom here; this
 // exercises the exact path used by the reader's ctrl+f — loading every spine
 // section, scanning its text, and mapping matches back to EPUB CFIs.
-//
-// This guards the bug where the per-section handle was fed `section.load()`'s
-// return value (the <html> element, whose `.body` is undefined) instead of
-// `section.document`, which silently yielded zero matches for every query.
 import { readFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import ePub, { type Book } from "epubjs";

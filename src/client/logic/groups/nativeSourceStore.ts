@@ -23,6 +23,7 @@ function fileToBase64(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => {
+      // SAFETY: readAsDataURL yields a string result on the load event.
       const result = reader.result as string;
       resolve(result.slice(result.indexOf(",") + 1));
     });
@@ -52,14 +53,17 @@ export async function putNativeSource(sourceId: string, file: File): Promise<voi
 export async function getNativeSource(sourceId: string): Promise<File | null> {
   let base64: string;
   try {
+    // SAFETY: Capacitor returns string data because no encoding is requested for this binary file.
     base64 = (await Filesystem.readFile({ path: blobPath(sourceId), directory: DIR }))
       .data as string;
   } catch {
     return null;
   }
+  // SAFETY: metadata is always written with UTF-8 encoding by this store.
   const raw = (
     await Filesystem.readFile({ path: metaPath(sourceId), directory: DIR, encoding: Encoding.UTF8 })
   ).data as string;
+  // SAFETY: only writeNativeSource creates this private metadata file using SourceMeta fields.
   const meta = JSON.parse(raw) as SourceMeta;
   const blob = await base64ToBlob(base64, meta.type);
   return new File([blob], meta.name, { type: meta.type });

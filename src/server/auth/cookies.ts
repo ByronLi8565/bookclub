@@ -5,18 +5,10 @@ import { SESSION_TTL_MS, signSession, verifySession } from "./session.ts";
 
 const SESSION_COOKIE = "bc_session";
 
-export function publicUser(user: User): {
-  id: string;
-  email: string;
-  name: string;
-  avatarImageId?: string;
-} {
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.displayName,
-    ...(user.avatarImageId ? { avatarImageId: user.avatarImageId } : {}),
-  };
+export function publicUser(user: User) {
+  return user.avatarImageId
+    ? { id: user.id, email: user.email, name: user.displayName, avatarImageId: user.avatarImageId }
+    : { id: user.id, email: user.email, name: user.displayName };
 }
 
 export async function mintSessionToken(env: Env, user: User): Promise<string> {

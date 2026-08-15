@@ -152,6 +152,7 @@ for (const book of books) {
       await (
         await highlightLocator(page)
       ).evaluate((element) => {
+        // SAFETY: the locator targets the reader's HTML container element.
         (element as HTMLElement).dataset.beforeLayoutChange = "true";
       });
     }
@@ -166,6 +167,7 @@ for (const book of books) {
         .poll(
           async () =>
             (await highlightLocator(page)).evaluate(
+              // SAFETY: the locator targets the reader's HTML container element.
               (element) => (element as HTMLElement).dataset.beforeLayoutChange ?? null,
             ),
           { timeout: 30_000 },

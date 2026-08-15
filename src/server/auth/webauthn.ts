@@ -1,5 +1,6 @@
 import type { AuthenticatorTransportFuture, WebAuthnCredential } from "@simplewebauthn/server";
-import { base64urlDecode, base64urlEncode } from "../../shared/base64url.ts";
+import * as Encoding from "effect/Encoding";
+import * as Result from "effect/Result";
 
 export const RP_NAME = "Bookclub";
 
@@ -34,7 +35,7 @@ export function toStoredCredential(
 ): StoredCredential {
   return {
     id: credential.id,
-    publicKey: base64urlEncode(credential.publicKey),
+    publicKey: Encoding.encodeBase64Url(credential.publicKey),
     counter: credential.counter,
     transports: credential.transports,
     label,
@@ -45,7 +46,7 @@ export function toStoredCredential(
 export function toWebAuthnCredential(stored: StoredCredential): WebAuthnCredential {
   return {
     id: stored.id,
-    publicKey: Uint8Array.from(base64urlDecode(stored.publicKey)),
+    publicKey: Uint8Array.from(Result.getOrThrow(Encoding.decodeBase64Url(stored.publicKey))),
     counter: stored.counter,
     transports: stored.transports,
   };

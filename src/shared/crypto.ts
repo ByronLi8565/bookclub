@@ -1,6 +1,8 @@
+import * as Encoding from "effect/Encoding";
+
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Encoding.encodeHex(new Uint8Array(digest));
 }
 
 export function constantTimeEqual(a: string, b: string): boolean {
@@ -15,12 +17,6 @@ export function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
   return diff === 0;
-}
-
-// A random lowercase-hex string of `byteLength` random bytes (so 2*byteLength chars).
-export function randomHexToken(byteLength: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // A random string of `length` characters drawn from `alphabet`.

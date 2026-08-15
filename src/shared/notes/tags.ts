@@ -9,9 +9,9 @@ export interface SemanticTagDefinition {
 // Semantic tags share the user-facing namespace so they remain composable with
 // ordinary tags. Reserved tags are changed by their owning workflow rather than
 // by the generic tag editor.
-export const SEMANTIC_TAGS: Record<string, SemanticTagDefinition> = {
-  highlight: { reserved: true, hidden: true },
-};
+export const SEMANTIC_TAGS = new Map<string, SemanticTagDefinition>([
+  ["highlight", { reserved: true, hidden: true }],
+]);
 
 export function normalizeTag(input: string): string | null {
   const normalized = input
@@ -41,12 +41,12 @@ export function normalizeTags(inputs: readonly string[]): string[] {
 }
 
 export function isReservedTag(tag: string): boolean {
-  const definition: SemanticTagDefinition | undefined = SEMANTIC_TAGS[tag];
+  const definition = SEMANTIC_TAGS.get(tag);
   return definition?.reserved ?? false;
 }
 
 export function isHiddenTag(tag: string): boolean {
-  const definition: SemanticTagDefinition | undefined = SEMANTIC_TAGS[tag];
+  const definition = SEMANTIC_TAGS.get(tag);
   return definition?.hidden ?? false;
 }
 

@@ -1,4 +1,5 @@
-import { base64urlDecode, base64urlEncode } from "../../shared/base64url.ts";
+import * as Encoding from "effect/Encoding";
+import * as Result from "effect/Result";
 import { constantTimeEqualBytes } from "../../shared/crypto.ts";
 
 // Password storage uses PBKDF2-HMAC-SHA256. Workers has no native bcrypt/scrypt,
@@ -39,8 +40,8 @@ export async function hashPassword(password: string): Promise<PasswordHash> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const bits = await derive(password, salt, PBKDF2_ITERATIONS);
   return {
-    hash: base64urlEncode(bits),
-    salt: base64urlEncode(salt),
+    hash: Encoding.encodeBase64Url(bits),
+    salt: Encoding.encodeBase64Url(salt),
     iterations: PBKDF2_ITERATIONS,
   };
 }
@@ -49,8 +50,8 @@ export async function verifyPassword(password: string, stored: PasswordHash): Pr
   let salt: Uint8Array<ArrayBuffer>;
   let expected: Uint8Array;
   try {
-    salt = Uint8Array.from(base64urlDecode(stored.salt));
-    expected = base64urlDecode(stored.hash);
+    salt = Uint8Array.from(Result.getOrThrow(Encoding.decodeBase64Url(stored.salt)));
+    expected = Result.getOrThrow(Encoding.decodeBase64Url(stored.hash));
   } catch {
     return false;
   }

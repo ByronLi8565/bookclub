@@ -1,4 +1,4 @@
-import { base64urlEncode } from "../../../src/shared/base64url.ts";
+import * as Encoding from "effect/Encoding";
 
 // A software WebAuthn authenticator: it plays the exact role a browser +
 // platform authenticator play during a passkey ceremony, so the e2e suite can
@@ -66,8 +66,8 @@ function rawSignatureToDer(raw: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer
 
 // --- helpers ---
 
-async function sha256(bytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
-  return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource));
+async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
 }
 
 function b64urlToBytes(b64url: string): Uint8Array {
@@ -93,7 +93,7 @@ export interface AttestationResponseJSON {
   rawId: string;
   type: "public-key";
   response: { clientDataJSON: string; attestationObject: string; transports: string[] };
-  clientExtensionResults: Record<string, unknown>;
+  clientExtensionResults: Record<string, never>;
 }
 
 export interface AssertionResponseJSON {
@@ -101,7 +101,7 @@ export interface AssertionResponseJSON {
   rawId: string;
   type: "public-key";
   response: { clientDataJSON: string; authenticatorData: string; signature: string };
-  clientExtensionResults: Record<string, unknown>;
+  clientExtensionResults: Record<string, never>;
 }
 
 export class SoftwareAuthenticator {
@@ -114,9 +114,9 @@ export class SoftwareAuthenticator {
   ) {}
 
   static async create(): Promise<SoftwareAuthenticator> {
-    const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    const keyPair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
       "sign",
-    ])) as CryptoKeyPair;
+    ]);
     const jwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
     const x = b64urlToBytes(jwk.x!);
     const y = b64urlToBytes(jwk.y!);
@@ -132,7 +132,7 @@ export class SoftwareAuthenticator {
   }
 
   get id(): string {
-    return base64urlEncode(this.credentialId);
+    return Encoding.encodeBase64Url(this.credentialId);
   }
 
   private clientDataJSON(
@@ -178,8 +178,8 @@ export class SoftwareAuthenticator {
       rawId: this.id,
       type: "public-key",
       response: {
-        clientDataJSON: base64urlEncode(clientDataJSON),
-        attestationObject: base64urlEncode(attestationObject),
+        clientDataJSON: Encoding.encodeBase64Url(clientDataJSON),
+        attestationObject: Encoding.encodeBase64Url(attestationObject),
         transports: ["internal"],
       },
       clientExtensionResults: {},
@@ -194,20 +194,16 @@ export class SoftwareAuthenticator {
     const clientDataHash = await sha256(clientDataJSON);
     const signed = concat([authData, clientDataHash]);
     const rawSig = new Uint8Array(
-      await crypto.subtle.sign(
-        { name: "ECDSA", hash: "SHA-256" },
-        this.keyPair.privateKey,
-        signed as BufferSource,
-      ),
+      await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, this.keyPair.privateKey, signed),
     );
     return {
       id: this.id,
       rawId: this.id,
       type: "public-key",
       response: {
-        clientDataJSON: base64urlEncode(clientDataJSON),
-        authenticatorData: base64urlEncode(authData),
-        signature: base64urlEncode(rawSignatureToDer(rawSig)),
+        clientDataJSON: Encoding.encodeBase64Url(clientDataJSON),
+        authenticatorData: Encoding.encodeBase64Url(authData),
+        signature: Encoding.encodeBase64Url(rawSignatureToDer(rawSig)),
       },
       clientExtensionResults: {},
     };

@@ -15,6 +15,7 @@ export interface InfoCard {
 
 export type InfoCardPage = "info" | "release";
 
+// SAFETY: Vite's eager raw glob returns each matched Markdown module as its source string.
 const rawInfoCards = import.meta.glob("../../../../info_cards/*.md", {
   query: "?raw",
   import: "default",

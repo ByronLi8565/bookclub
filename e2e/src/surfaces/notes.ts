@@ -5,14 +5,6 @@ import type { NoteState } from "../../../src/shared/notes/noteState.ts";
 import type { OnlinePeer } from "../../../src/server/state/NoteAgent.ts";
 import type { Identity } from "./api.ts";
 
-// The realtime surface: a black-box client that speaks the NoteAgent websocket
-// protocol directly (the same wire the `agents` React client uses — identity,
-// state broadcast, and `type:"rpc"` calls). It authenticates with the identity's
-// session cookie on the handshake, exactly like the browser does same-origin.
-// Scenarios use it to prove the collaborative guarantees (a note one member
-// writes reaches another live; presence reflects who is connected) end to end,
-// which no unit test of the reducer can cover.
-
 const DEFAULT_TIMEOUT = 15_000;
 
 export interface NotesSurface {
@@ -85,6 +77,7 @@ function openSession(wsBase: string, groupId: string, who: Identity): Promise<No
   ws.on("message", (data: Buffer | string) => {
     let msg: ServerMessage;
     try {
+      // SAFETY: NoteAgent sends JSON messages conforming to the shared ServerMessage protocol.
       msg = JSON.parse(data.toString()) as ServerMessage;
     } catch {
       return;
@@ -146,6 +139,7 @@ function openSession(wsBase: string, groupId: string, who: Identity): Promise<No
       pending.set(id, {
         resolve: (v) => {
           clearTimeout(timer);
+          // SAFETY: the predicate above narrows this awaited protocol message to T at runtime.
           resolve(v as T);
         },
         reject: (e) => {

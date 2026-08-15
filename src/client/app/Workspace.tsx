@@ -100,11 +100,8 @@ export function Workspace({
   const displayName = renamedDisplayName?.base === groupName ? renamedDisplayName.value : groupName;
   const memberProfile = useMemo<ClubProfile>(() => {
     const me = members.find((member) => member.id === viewer.userId);
-    return {
-      id: viewer.userId,
-      displayName: me?.name ?? "You",
-      ...(me?.avatarImageId ? { avatarImageId: me.avatarImageId } : {}),
-    };
+    const profile = { id: viewer.userId, displayName: me?.name ?? "You" };
+    return me?.avatarImageId ? { ...profile, avatarImageId: me.avatarImageId } : profile;
   }, [members, viewer.userId]);
   const session = useReaderNoteSession({
     groupId,
