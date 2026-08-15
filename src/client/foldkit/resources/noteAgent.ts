@@ -434,13 +434,15 @@ export const makeNoteAgentSubscriptions = <Model, Message>(config: {
 /** Commands enqueue through the live connection; an absent one is a Message, not a defect. */
 export const enqueueNoteOperation = (
   op: NoteOp,
-): Effect.Effect<NoteAgentMessage, never, NoteAgentService> =>
+): Effect.Effect<
+  typeof QueuedNoteOperation.Type | typeof DroppedNoteOperation.Type,
+  never,
+  NoteAgentService
+> =>
   NoteAgentResource.get.pipe(
     Effect.flatMap((connection) => connection.enqueue(op)),
-    Effect.as<NoteAgentMessage>(QueuedNoteOperation({ noteId: op.noteId })),
+    Effect.as(QueuedNoteOperation({ noteId: op.noteId })),
     Effect.catch((error) =>
-      Effect.succeed<NoteAgentMessage>(
-        DroppedNoteOperation({ noteId: op.noteId, reason: String(error) }),
-      ),
+      Effect.succeed(DroppedNoteOperation({ noteId: op.noteId, reason: String(error) })),
     ),
   );

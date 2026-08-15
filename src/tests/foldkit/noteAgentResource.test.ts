@@ -296,16 +296,29 @@ describe("NoteAgent managed resource", () => {
           });
           const fake = transport.connections[0];
           fake?.drop();
+          expect(yield* drainEvents(connection.events)).toContainEqual({
+            _tag: "ChangedNoteAgentStatus",
+            status: "offline",
+          });
           yield* connection.enqueue(op);
           yield* Effect.sleep("10 millis");
           expect(fake?.applied).toEqual([]);
           expect(connection.store.hasPending()).toBe(true);
+          expect(yield* drainEvents(connection.events)).toContainEqual(
+            expect.objectContaining({ _tag: "ChangedNotes", pendingCount: 1 }),
+          );
 
           fake?.completeHandshake();
           yield* Effect.promise(() =>
             vi.waitFor(() => expect(connection.store.hasPending()).toBe(false)),
           );
           expect(fake?.applied).toEqual([[op]]);
+          expect(yield* drainEvents(connection.events)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ _tag: "ChangedNoteAgentStatus", status: "online" }),
+              expect.objectContaining({ _tag: "ChangedNotes", pendingCount: 0 }),
+            ]),
+          );
         }),
       ),
     );

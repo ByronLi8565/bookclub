@@ -1,6 +1,6 @@
 # Effect HttpApi and Foldkit migration handoff
 
-Status: Phase 0 implemented; highlight test fixed; full browser rerun pending  
+Status: Server Phases 1-7 implemented; Foldkit/client migration remains in progress  
 Owner: next agent assigned to the migration  
 Last reviewed: 2026-08-15
 
@@ -104,28 +104,28 @@ generic Agents SDK and asset fallbacks. Do not add another dispatcher around it.
 
 ## Current implementation inventory
 
-There are 45 Hono routes:
+All 45 structured routes are declared in `src/shared/http/BookclubHttp.ts` and implemented by
+typed Effect handlers:
 
-| Contract group                           | Count | Current files                                                                |
-| ---------------------------------------- | ----: | ---------------------------------------------------------------------------- |
-| Public authentication and session        |     7 | `src/server/worker.ts`, `src/server/routes/authRoutes.ts`                    |
-| Protected account and profile            |    12 | `src/server/routes/authRoutes.ts`, `src/server/routes/userRoutes.ts`         |
-| Public avatar                            |     1 | `src/server/routes/userRoutes.ts`                                            |
-| Group Control Plane and Group Data Plane |    21 | `src/server/routes/groupRoutes.ts`, `src/server/workflows/groupWorkflows.ts` |
-| Administration                           |     4 | `src/server/worker.ts`, `src/server/backup.ts`                               |
+| Contract group                           | Count | Handler files                                                              |
+| ---------------------------------------- | ----: | -------------------------------------------------------------------------- |
+| Public authentication and session        |     7 | `src/server/http/authHandlers.ts`                                          |
+| Protected account and profile            |    12 | `src/server/http/accountHandlers.ts`, `src/server/http/authHandlers.ts`    |
+| Public avatar                            |     1 | `src/server/http/accountHandlers.ts`                                       |
+| Group Control Plane and Group Data Plane |    21 | `src/server/http/groupHandlers.ts`, `src/server/http/groupDataHandlers.ts` |
+| Administration                           |     4 | `src/server/http/adminHandlers.ts`, `src/server/backup.ts`                 |
 
-Non-HttpApi Worker paths:
+Non-HttpApi Worker paths are raw Effect `HttpRouter` handlers in `src/server/http/live.ts`:
 
-- `app.all("/agents/note-agent/:groupId", ...)` and its wildcard sibling gate the NoteAgent
+- `/agents/note-agent/:groupId/*` gates the NoteAgent
   WebSocket through current Group Control Plane membership.
 - The generic `routeAgentRequest` fallback belongs to the `agents` SDK.
 - The `ASSETS` fallback serves the SPA and forces missing hashed assets to return 404.
 - The scheduled handler runs periodic backups through `ExecutionContext.waitUntil`.
 
-The handoff begins from a dirty working copy. At the time this plan was written,
-`src/shared/types/errors.ts`, `src/server/http.ts`, and the group/user route modules contain an
-unfinished `WorkflowResult` / `Match.value` experiment. Phase 0 must remove that experiment; it is
-not migration scaffolding.
+Hono, legacy route modules, `src/server/http.ts`, and `src/server/workflows/` are deleted. The Worker
+`fetch` export delegates directly to `HttpRouter.toWebHandler`; scheduled backup runs one Effect at
+the platform entrypoint.
 
 The current client has 32 TSX files and 42 modules importing React. Its main migration seams are:
 
@@ -370,6 +370,16 @@ purpose:
 - `Vary` is appended, not set. Any response that already carries a `Vary` must keep its existing
   value alongside `Origin`.
 
+`src/server/http/nativeCors.ts` implements this and is covered by `src/tests/httpapi/nativeCors.test.ts`.
+Hono is gone, so this is now the single active CORS owner: `live.ts` applies it as
+`NativeCorsLayer` (a `global` `HttpRouter.middleware`), and `e2e/scenarios/http-protocol.test.ts`
+proves the preflight contract against a real booted worker.
+
+One coverage gap survives: undici refuses to construct a status-101 `Response`, so the genuine-101
+branch is proven only at middleware level and never through `toWebHandler`. A live-worker test
+against a real native-origin WebSocket upgrade still owes this — the HTTP preflight scenario does
+not cover it.
+
 ### Generated client adapter
 
 - Generate the client from `BookclubHttp` with `HttpApiClient.make`.
@@ -400,6 +410,10 @@ purpose:
   tree as one Submodel per component.
 - Use Mounts for DOM-bound libraries. Construct the handle inside `Effect.acquireRelease`, register
   cleanup immediately, and publish only domain events back into the Message loop.
+- `Mount.define` emits exactly one Message. Any Mount reporting ongoing state — location, page
+  rendered, selection, load failure — must use `Mount.defineStream` with `Stream.callback` and
+  `Queue.offerUnsafe`. A Mount built on `define` that publishes repeatedly silently delivers only
+  its first event.
 - Lexical uses the core `lexical` package, not `@lexical/react`. The editor state remains inside the
   editor; the Model carries the note draft/domain representation the application consumes.
 - epub.js and PDF.js retain their existing parsing, pagination, anchoring, search, and rendering
@@ -407,6 +421,12 @@ purpose:
   PDF document, page render tasks, canvases, and listeners.
 - NoteAgent uses `AgentClient` from `agents/client` as a Managed Resource keyed by the authenticated
   group and session mode. Register close as a scope finalizer before awaiting the identity handshake.
+- A Managed Resource can only push Messages through `onAcquired`, `onReleased`, and
+  `onAcquireError`. Ongoing callbacks — presence, connection state, note updates, rejected
+  operations — must flow through a resource-owned queue drained by a Subscription. Gate that
+  Subscription on the _connection identity_ (null until acquired, changing with the resource key),
+  never on a boolean derived from the requirements: a boolean gate starts the stream before
+  acquisition, never restarts, and silently loses every event.
 - IndexedDB and Capacitor Preferences are Effects invoked by Commands or provided services. Parse
   persisted unknown values once on read with the existing Schemas.
 - Foldkit owns routing after cutover. Preserve `/` and `/clubs/:groupRef`; do not change public URLs
@@ -420,6 +440,53 @@ purpose:
   user-meaningful browser scenarios against the separate Foldkit entry; do not create a second
   product-level scenario DSL for the new renderer.
 
+#### Runtime constraints proven while building the Phase 5/6 adapters
+
+These were established by working adapters and tests, not by reading documentation. They contradict
+some of the looser wording above and elsewhere in this plan; where they conflict, these win.
+
+- **Mount args are Schema-only and captured at insert.** There is no channel for callbacks, `File`
+  values, or Effect services — a Mount factory's requirement channel is `never`, so it cannot pull
+  from a provided service. Injectable collaborators (source-byte loaders, library constructors,
+  retry schedules) are closed over when the adapter is constructed. A Managed Resource's `acquire`
+  is likewise `Scope`-only.
+- **Changing what a Mount owns is a new element key, not changed args.** Source, layout, and zoom
+  identity belong in the view's element key. This is as load-bearing as the runtime container `id`,
+  and reader byte loading (`sourceId -> ArrayBuffer`) becomes an explicit environment dependency
+  rather than a `File` in the Model.
+- **Release is deterministic but not ordered before the next acquire.** Finalizers run on a forked
+  interrupt and the DOM layer creates the replacement before destroying the old node, so a previous
+  scope's release can land _after_ the next acquire. Any adapter holding a "current" reference needs
+  an identity guard in the release closure; state confined to each `acquire` closure avoids the
+  problem entirely and is preferred.
+- **Effect interruption does not cancel an in-flight library promise.** A Mount awaiting epub.js or
+  PDF.js must check a released flag and dispose of the handle when the promise finally resolves, or
+  a fast source switch leaks a document and its worker.
+- **`test:foldkit` runs Node plus jsdom, which cannot render.** epub.js never settles `display()`
+  (the srcdoc iframe never finishes loading and jsdom `Range` has no `getBoundingClientRect`), and
+  there is no canvas backend for PDF.js rasterization. Parsing, lifecycle, cancellation, teardown,
+  and DOM-free search are testable there; displayed content, real CFI/geometry reads, selection,
+  spread relayout, and pagination measurement are browser-only and stay in the Playwright gate. Do
+  not let Foldkit story tests be mistaken for coverage of rendering behavior.
+
+#### Rendering a Foldkit runtime under jsdom
+
+Three properties of `Runtime.embed` cost an afternoon to find because each one fails by rendering
+nothing at all — no exception, no crash report, an untouched container. Any test that renders a view
+must respect all three:
+
+- **The container must carry an `id`.** An id-less container is never replaced and nothing mounts.
+  `makeBookclubApplication` already sets `container.id = FOLDKIT_RUNTIME_ID`, so production is
+  unaffected, but a test that builds a bare `document.createElement("div")` renders nothing.
+- **`embed` replaces the container rather than filling it.** The rendered root lands in
+  `document.body` and the original container is left detached, so assertions must read the document.
+  Reading `container.innerHTML` always returns `""` and looks exactly like a render failure.
+- **`dispose()` tears the rendered tree back down.** Capture the DOM before disposing, or assert
+  before it runs. Disposing first also returns an empty document.
+
+`vi.waitFor` did not reliably let the stubbed animation frame run in these tests; awaiting a short
+`setTimeout` did. `src/tests/foldkit/notesView.test.ts` is the worked example.
+
 ## Route migration checklist
 
 The path is part of the compatibility contract. Check off an endpoint only after its declaration,
@@ -429,63 +496,63 @@ rename to `groupRef` in declarations and handlers. The URL does not change.
 
 ### Public authentication and session
 
-- [ ] `POST /auth/start`
-- [ ] `POST /auth/verify`
-- [ ] `POST /auth/signout`
-- [ ] `GET /auth/me`
-- [ ] `POST /auth/password`
-- [ ] `POST /auth/passkey/login/options`
-- [ ] `POST /auth/passkey/login/verify`
+- [x] `POST /auth/start`
+- [x] `POST /auth/verify`
+- [x] `POST /auth/signout`
+- [x] `GET /auth/me`
+- [x] `POST /auth/password`
+- [x] `POST /auth/passkey/login/options`
+- [x] `POST /auth/passkey/login/verify`
 
 ### Protected account and profile
 
-- [ ] `PUT /me/password`
-- [ ] `DELETE /me/password`
-- [ ] `POST /auth/passkey/register/options`
-- [ ] `POST /auth/passkey/register/verify`
-- [ ] `GET /me/passkeys`
-- [ ] `DELETE /me/passkeys/:id`
-- [ ] `GET /me/prefs`
-- [ ] `PUT /me/prefs`
-- [ ] `GET /me/reading-position`
-- [ ] `PUT /me/reading-position`
-- [ ] `PUT /me/avatar`
-- [ ] `PUT /me/clubs/:groupId/profile`
+- [x] `PUT /me/password`
+- [x] `DELETE /me/password`
+- [x] `POST /auth/passkey/register/options`
+- [x] `POST /auth/passkey/register/verify`
+- [x] `GET /me/passkeys`
+- [x] `DELETE /me/passkeys/:id`
+- [x] `GET /me/prefs`
+- [x] `PUT /me/prefs`
+- [x] `GET /me/reading-position`
+- [x] `PUT /me/reading-position`
+- [x] `PUT /me/avatar`
+- [x] `PUT /me/clubs/:groupId/profile`
 
 ### Public avatar
 
-- [ ] `GET /users/:userId/avatar/:imageId`
+- [x] `GET /users/:userId/avatar/:imageId`
 
 ### Group Control Plane and Group Data Plane
 
-- [ ] `GET /groups`
-- [ ] `POST /groups`
-- [ ] `GET /groups/:groupId`
-- [ ] `POST /groups/:groupId/invite-link`
-- [ ] `PUT /groups/:groupId/title`
-- [ ] `PUT /groups/:groupId/book/title`
-- [ ] `PUT /groups/:groupId/book/parsed-title`
-- [ ] `POST /groups/:groupId/invite`
-- [ ] `PUT /groups/:groupId/members/:memberId/role`
-- [ ] `POST /groups/:groupId/join`
-- [ ] `PUT /groups/:groupId/book`
-- [ ] `GET /groups/:groupId/book`
-- [ ] `DELETE /groups/:groupId/book/:sourceId`
-- [ ] `PUT /groups/:groupId/book/:sourceId/metadata`
-- [ ] `DELETE /groups/:groupId`
-- [ ] `POST /groups/:groupId/images`
-- [ ] `GET /groups/:groupId/images`
-- [ ] `DELETE /groups/:groupId/images/:imageId`
-- [ ] `GET /groups/:groupId/images/:imageId`
-- [ ] `GET /groups/:groupId/backup`
-- [ ] `PUT /groups/:groupId/backup`
+- [x] `GET /groups`
+- [x] `POST /groups`
+- [x] `GET /groups/:groupId`
+- [x] `POST /groups/:groupId/invite-link`
+- [x] `PUT /groups/:groupId/title`
+- [x] `PUT /groups/:groupId/book/title`
+- [x] `PUT /groups/:groupId/book/parsed-title`
+- [x] `POST /groups/:groupId/invite`
+- [x] `PUT /groups/:groupId/members/:memberId/role`
+- [x] `POST /groups/:groupId/join`
+- [x] `PUT /groups/:groupId/book`
+- [x] `GET /groups/:groupId/book`
+- [x] `DELETE /groups/:groupId/book/:sourceId`
+- [x] `PUT /groups/:groupId/book/:sourceId/metadata`
+- [x] `DELETE /groups/:groupId`
+- [x] `POST /groups/:groupId/images`
+- [x] `GET /groups/:groupId/images`
+- [x] `DELETE /groups/:groupId/images/:imageId`
+- [x] `GET /groups/:groupId/images/:imageId`
+- [x] `GET /groups/:groupId/backup`
+- [x] `PUT /groups/:groupId/backup`
 
 ### Administration
 
-- [ ] `POST /admin/backup`
-- [ ] `GET /admin/backups`
-- [ ] `POST /admin/prune`
-- [ ] `POST /admin/restore`
+- [x] `POST /admin/backup`
+- [x] `GET /admin/backups`
+- [x] `POST /admin/prune`
+- [x] `POST /admin/restore`
 
 ## Implementation phases
 
@@ -710,8 +777,21 @@ HttpApi.
 4. Port the note list, threads, tags, highlights, references, images, and compose/edit flows as
    Foldkit views and Submodels.
 5. Replace `@lexical/react` with one Lexical Mount. The Mount publishes draft/domain events and owns
-   editor registration, image nodes, selection listeners, and teardown.
-6. Add raw Effect router handlers for the authenticated NoteAgent paths and verify cookie plus query
+   editor registration, image nodes, selection listeners, and teardown. Two things `@lexical/react`
+   was silently providing must be owned explicitly: `ContentEditable` sets `contenteditable`,
+   `role`, and `spellcheck` (neither `createEditor` nor `setRootElement` does), and
+   `LexicalErrorBoundary` owned error display, so `onError` becomes a domain Message.
+6. Image upload cannot live in the Lexical Mount, because Mount args carry no callbacks or `File`
+   values. The Mount publishes a paste _fact_; a Command dispatched from `update` performs the
+   upload and applies the result. Paste handling, upload retry/discard, and unresolved-image gating
+   are therefore Phase 6 update/Command work, not Mount work.
+7. `NoteImageNode` is the largest editor-parity risk. It is a `DecoratorNode<ReactNode>` whose
+   resize, remove, and retry UI is React rendered inside `decorate()`, which is dead weight without
+   a framework renderer; decorator nodes must render through `createDOM`/`updateDOM` after cutover.
+   Markdown round-tripping and static image rendering port cleanly, but the interactive image UI has
+   no Foldkit equivalent yet. If it cannot be reproduced, that is the Lexical stop condition, not a
+   detail to defer silently.
+8. Add raw Effect router handlers for the authenticated NoteAgent paths and verify cookie plus query
    token gating before removing their Hono registrations. These handlers are outside the HttpApi
    contract and must keep their current `text/plain` bodies and statuses — `unauthenticated`/401,
    `forbidden`/403, `not found`/404 — rather than adopting the JSON error envelope.
@@ -737,6 +817,140 @@ the Effect router.
 
 Gate: admin/predeploy backup drills and all server suites pass with one Effect router, no Hono,
 legacy structured routes, settled-result plumbing, or Workflow abstraction.
+
+#### Server Phases 1-7 record — 2026-08-15
+
+- [x] Declared and implemented all 45 structured operations: auth 7, account/profile 13, groups 21,
+  and administration 4. The route checklist above is the server migration ledger; Foldkit callers
+  and client parity remain separate unfinished work.
+- [x] Installed request-scoped Cloudflare context plus authentication and administration
+  middleware. Expected failures use the nine shared status-tagged error classes.
+- [x] Replaced every Hono registration with typed HttpApi handlers or raw Effect router handlers;
+  deleted Hono, legacy route modules, `src/server/http.ts`, and `src/server/workflows/`.
+- [x] Kept raw escape hatches only where the wire requires them: raw uploads, R2/Agents streaming,
+  dynamic image/source content types, backup filename and headers, duplicate cookies, and WebSocket
+  pass-through. Their compatibility checks cover exact bytes, statuses, headers, native CORS, and
+  the JSON-vs-text error boundary.
+- [x] Preserved NoteAgent cookie/query-token authentication and its text 401/403/404 responses;
+  preserved generic Agents routing, SPA fallback, hashed-asset 404, no-assets development response,
+  and scheduled backup under `ExecutionContext.waitUntil`.
+- [x] Verified the 45-operation OpenAPI contract and found no environment secrets or Durable Object
+  state fields. The focused compatibility, contract, native-CORS, and Worker-seam suites pass 24/24.
+  `bun run build` passes; the Worker is 375.85 kB gzip and the React client remains 358.77 kB gzip.
+  The lockfile resolves one Effect version (`4.0.0-rc.108`), and no source fixture or Foldkit
+  DevTools marker appears in the Worker bundle. The Agents SDK still contributes its transitive
+  `mimetext.node` chunk under the configured `nodejs_compat` flag; this is existing SDK packaging,
+  not a Bookclub Node API import.
+
+#### Client slice-composition record — 2026-08-16
+
+- [x] Split the Foldkit application into concern-owning modules: `reader.ts` (Route, workspace,
+  reader Messages, EPUB/PDF Mounts, reader Commands, `updateReader`, `readerView`) and `notes.ts`
+  (`NotesModel`, note Messages, `EnqueueNoteOperation`, `updateNotes`). `application.ts` now owns
+  only session, account, groups, and routing, and delegates the rest.
+- [x] Dispatch by schema guard, not by tag string. `ReaderMessage` and `NotesMessage` are
+  `Schema.Union`s; `isReaderMessage`/`isNotesMessage` are the derived guards `update` branches on
+  before its own switch. `src/tests/foldkit/applicationSeams.test.ts` asserts the two unions share
+  no tag, because a tag claimed by both would be silently swallowed by whichever guard runs first.
+- [x] Rendered the Reader route. It was in the `Route` union but had no view branch, so the EPUB and
+  PDF Mounts were never mounted by the application — only by their own tests.
+- [x] Wired the NoteAgent Managed Resource and its event Subscription into `makeApplication`
+  (`managedResources` + `subscriptions`), so note Commands typecheck against `NoteAgentService`
+  rather than `never`.
+- [x] Added `NotesModel.connectionKey`, set from `ConnectedNoteAgent` and cleared on release or
+  connection failure. The Subscription gates on this. The first wiring gated on
+  `status !== "offline" && currentGroup !== null`, which is a boolean derived from the requirements
+  — the exact hazard the Managed Resource rule above names, since it starts the stream before the
+  queue it reads exists. The model had no field recording acquisition; now it does.
+
+- [x] Added `notesView`, rendered beside the reader on the Reader route, covering the authoritative
+  list, nested replies, deleted-note hiding, presence, pending and failed markers, the sync-failure
+  alert, and the new-versus-edit composer. `src/tests/foldkit/notesView.test.ts` renders it through a
+  real Foldkit runtime rather than asserting on the returned tree.
+
+Known gaps at this record: the reader view is a functional skeleton, not the React reader's chrome;
+notes rendering is covered but note *composition* still goes through the plain textarea rather than
+the Lexical Mount; and
+`getAgentByName` remains a hard-wired module import across six server files, so
+`src/tests/httpapi/workerSeam.test.ts` still substitutes the `agents` module behind a documented
+lint suppression rather than an injection point.
+
+#### Composer record — 2026-08-16
+
+- [x] Phase 6 item 5: note composition now runs through the Lexical Mount. `notesView` renders the
+  editor element instead of a textarea, and `ChangedNoteDraft`, `ExtractedNoteDraftTags`,
+  `ChangedNoteDraftSelection`, and `FailedNoteEditor` are members of `NotesMessage` folded by
+  `updateNotes`. `src/tests/foldkit/notesView.test.ts` asserts the mounted element carries
+  `contenteditable`/`role=textbox`, is seeded from the draft, and that no textarea remains.
+- [x] Added `NotesModel.composerGeneration`, and keyed the editor element on it. `OnMount` starts its
+  stream on snabbdom `insert` and interrupts it on `destroy`, so changing a Mount's *args* never
+  restarts it — only a new element does. Seeding the editor from `model.draft` therefore needs an
+  explicit re-seed signal: the generation is bumped by `StartedNoteEdit` and by `clearComposer`, and
+  by nothing the editor itself publishes. Keying on the draft would tear down the live editor on
+  every keystroke; keying on nothing would leave a stale body when an edit starts.
+- [x] Closed the reader-to-composer seam. `ReaderWorkspace.selection` was populated by the EPUB and
+  PDF Mounts but reached nothing. `notesView` now takes the live selection through its context and
+  offers "Quote this passage"; `AttachedNoteHighlight`/`DetachedNoteHighlight` fold it into
+  `draftHighlights`, which `addNoteOp` already carries into the submitted operation. Attachment is
+  deduplicated by anchor, not by id, because the reader mints a fresh highlight id for every
+  selection it publishes.
+
+#### Image paste record — 2026-08-17
+
+Phase 6 item 6 is done as specified. The Lexical Mount registers a `paste` listener on its root
+element and publishes `PastedNoteImage { groupRef, file }` — the paste *fact*, not the upload,
+because a Mount factory has no requirement channel and cannot reach a Command. `updateNotes` folds
+that message through the **same** case as the composer's file picker, so both dispatch one
+`UploadNoteImage` Command; on success the `[[image:…]]` block is appended to the draft and
+`composerGeneration` is bumped so the editor re-seeds and renders it.
+
+Two behaviors are load-bearing and covered: the listener calls `preventDefault` only when the
+clipboard actually carries an image, so ordinary text paste still reaches Lexical untouched; and the
+listener is part of the Mount's teardown array, so a released editor stops reporting pastes.
+`groupRef` is a Mount arg rather than parsed back out of `imageUrlBase`.
+
+jsdom has no `ClipboardEvent`, so `src/tests/foldkit/lexicalMount.test.ts` dispatches a plain
+cancelable `Event` with a defined `clipboardData` property. The Mount's own listener is typed
+against `Event` and narrows with a documented assertion for the same reason.
+
+#### Upload contract record — 2026-08-17
+
+All four raw-byte uploads — `uploadBook`, `uploadImage`, `restoreBackup`, and `uploadAvatar` — now
+declare a **multipart-stream payload** and are driven by the generated client. `apiFetch` no longer
+does anything for them that `bookclubClient` cannot, so Phase 8 item 5 can delete it outright.
+
+Two constraints ruled out the obvious design of a `Uint8Array` byte payload, and both were found by
+reading the runtime rather than the docs:
+
+- **The client would have to buffer.** `HttpApiClient.ts:1113` rejects any payload that is not an
+  actual `Uint8Array`, and the generated method has no body override. Turning a `File` into one
+  loads the whole file into memory — untenable for a 100 MB archive on a mobile webview, where the
+  previous `body: file` let the browser stream from disk.
+- **The server dispatches payload decoding on an exact content-type match.**
+  `HttpApiBuilder.ts:695-701` looks the request's normalized content-type up in a map and answers
+  **415 before the handler runs** on a miss; `internal/mediaType.ts` only lowercases and strips `;`
+  parameters, so there is no wildcard. A byte payload therefore imposes a closed media-type
+  allowlist. That is fatal for `uploadBook`, which deliberately sniffs the bytes
+  (`sniffSourceKind(bytes) ?? sourceKindFor(contentType)`) and treats the caller's content-type as
+  an untrusted fallback.
+
+Multipart dissolves both. The client passes `FormData`; `HttpApiClient.ts:421` detects it ahead of
+payload encoding and hands it to `fetch` untouched, so the browser still streams the file from disk.
+The request's own content-type is the single constant `multipart/form-data`, so the allowlist always
+matches, and the file's real media type rides in the part's headers where it belongs. The generated
+method stays fully typed: `HttpApiEndpoint.ts:507` types a multipart payload as `FormData` for the
+client and `HttpApiEndpoint.ts:114` types it as `Stream<Multipart.Part>` for the handler.
+
+Buffered multipart is **not** usable here: `HttpServerRequest`'s `multipart` getter routes through
+`Multipart.toPersisted`, which requires `FileSystem` and `Path` services a Worker cannot provide.
+`asMultipartStream` uses `Multipart.makeChannel`, a pure-JS Channel parser with no such dependency.
+Size limits are now declared on the contract (`src/shared/http/uploads.ts`) instead of being checked
+ad hoc per service.
+
+Wire change, deliberately accepted: these four routes take `multipart/form-data` rather than a raw
+body, so every caller sends a part named by `UPLOAD_FILE_FIELD` and must **not** set `Content-Type`
+itself — the browser has to generate the boundary. React, the Node e2e scenarios, and the Playwright
+suites were all moved over together, and the four upload scenarios pass against a booted worker.
 
 ### Phase 8 — cut over to Foldkit and delete React
 

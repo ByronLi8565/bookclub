@@ -14,6 +14,7 @@ import {
 interface EditorArgs {
   initialBody: string;
   validSeqs: readonly number[];
+  groupRef: string;
   imageUrlBase: string;
   extractHashtags: boolean;
 }
@@ -21,6 +22,7 @@ interface EditorArgs {
 const defaultArgs: EditorArgs = {
   initialBody: "",
   validSeqs: [],
+  groupRef: "g1",
   imageUrlBase: "/groups/g1/images",
   extractHashtags: false,
 };
@@ -43,6 +45,19 @@ const mountEditor = (element: Element, args: Partial<typeof defaultArgs> = {}) =
     drafts: () => messages.filter((message) => message._tag === "ChangedNoteDraft"),
     release: () => Effect.runPromise(Fiber.interrupt(fiber)),
   };
+};
+
+/**
+ * jsdom has no ClipboardEvent, so the paste is dispatched as a plain Event
+ * carrying the `clipboardData` shape the listener reads. Returns whether the
+ * default was prevented.
+ */
+const pasteInto = (element: Element, files: readonly File[]): (() => boolean) => {
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  const items = files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file }));
+  Object.defineProperty(event, "clipboardData", { value: { items } });
+  element.dispatchEvent(event);
+  return () => event.defaultPrevented;
 };
 
 const attachedEditor = (element: Element): LexicalEditor => {
@@ -150,6 +165,55 @@ describe("Lexical Mount", () => {
       setTimeout(resolve, 10);
     });
     expect(mounted.messages).toHaveLength(published);
+  });
+
+  it("reports a pasted image as a fact and keeps it out of the document", async () => {
+    const mounted = mountEditor(element, { groupRef: "club-alpha" });
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+    const file = new File([Uint8Array.from([1, 2, 3])], "shot.png", { type: "image/png" });
+
+    const prevented = pasteInto(element, [file]);
+
+    await vi.waitFor(() =>
+      expect(mounted.messages.filter((message) => message._tag === "PastedNoteImage")).toHaveLength(
+        1,
+      ),
+    );
+    const pasted = mounted.messages.find((message) => message._tag === "PastedNoteImage");
+    expect(pasted).toMatchObject({ groupRef: "club-alpha", file });
+    // Without this the editor also drops the raw clipboard payload into the note.
+    expect(prevented()).toBe(true);
+
+    await mounted.release();
+  });
+
+  it("ignores a paste that carries no image", async () => {
+    const mounted = mountEditor(element);
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+
+    const prevented = pasteInto(element, []);
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(mounted.messages.some((message) => message._tag === "PastedNoteImage")).toBe(false);
+    // Ordinary text paste must still reach Lexical.
+    expect(prevented()).toBe(false);
+
+    await mounted.release();
+  });
+
+  it("stops reporting pastes once the editor is released", async () => {
+    const mounted = mountEditor(element);
+    await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
+    await mounted.release();
+
+    pasteInto(element, [new File([Uint8Array.from([1])], "shot.png", { type: "image/png" })]);
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(mounted.messages.some((message) => message._tag === "PastedNoteImage")).toBe(false);
   });
 
   it("reports a failed initialization and still releases what it acquired", async () => {

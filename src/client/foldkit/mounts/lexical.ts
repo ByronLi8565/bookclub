@@ -13,6 +13,7 @@ import {
 import { $isQuoteNode, QuoteNode, registerRichText } from "@lexical/rich-text";
 import { Effect, Queue, Schema, Stream } from "effect";
 import { Mount } from "foldkit";
+import * as FoldkitFile from "foldkit/file";
 import { m } from "foldkit/message";
 import {
   $createParagraphNode,
@@ -63,15 +64,27 @@ export const ExtractedNoteDraftTags = m("ExtractedNoteDraftTags", {
 
 export const FailedNoteEditor = m("FailedNoteEditor", { message: Schema.String });
 
+/**
+ * The paste *fact*, not the upload. A Mount cannot perform the upload itself —
+ * its factory has no requirement channel and no way to reach a Command — so it
+ * reports the pasted file and `update` dispatches the upload.
+ */
+export const PastedNoteImage = m("PastedNoteImage", {
+  groupRef: Schema.String,
+  file: FoldkitFile.File,
+});
+
 export type NoteEditorMessage =
   | typeof ChangedNoteDraft.Type
   | typeof ChangedNoteDraftSelection.Type
   | typeof ExtractedNoteDraftTags.Type
-  | typeof FailedNoteEditor.Type;
+  | typeof FailedNoteEditor.Type
+  | typeof PastedNoteImage.Type;
 
 const NoteEditorArgs = {
   initialBody: Schema.String,
   validSeqs: Schema.Array(Schema.Number),
+  groupRef: Schema.String,
   imageUrlBase: Schema.String,
   extractHashtags: Schema.Boolean,
 };
@@ -270,6 +283,30 @@ const registerHashtagExtraction = (editor: LexicalEditor, publish: Publish): (()
     );
   });
 
+const pastedImage = (clipboard: DataTransfer | null): File | null => {
+  const items = [...(clipboard?.items ?? [])];
+  for (const item of items) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) return file;
+  }
+  return null;
+};
+
+const registerImagePaste = (element: Element, groupRef: string, publish: Publish): (() => void) => {
+  const onPaste = (event: Event): void => {
+    // SAFETY: this listener is registered only for "paste", which always
+    // dispatches a ClipboardEvent.
+    const file = pastedImage((event as ClipboardEvent).clipboardData);
+    if (!file) return;
+    // Lexical would otherwise drop the raw clipboard payload into the document.
+    event.preventDefault();
+    publish(PastedNoteImage({ groupRef, file }));
+  };
+  element.addEventListener("paste", onPaste);
+  return () => element.removeEventListener("paste", onPaste);
+};
+
 const EDITABLE_ATTRIBUTES: readonly (readonly [string, string])[] = [
   ["contenteditable", "true"],
   ["role", "textbox"],
@@ -317,6 +354,7 @@ const createNoteEditorHandle = (
     registerMarkdownShortcuts(editor, transformers),
     registerDraftPublisher(editor, transformers, publish),
     registerSelectionPublisher(editor, publish),
+    registerImagePaste(element, args.groupRef, publish),
     ...(args.extractHashtags ? [registerHashtagExtraction(editor, publish)] : []),
     () => editor.setRootElement(null),
     () => releaseEditableElement(element),
@@ -353,6 +391,7 @@ export const NoteDraftEditor = Mount.defineStream(
   ChangedNoteDraftSelection,
   ExtractedNoteDraftTags,
   FailedNoteEditor,
+  PastedNoteImage,
 )(
   (args) => (element) =>
     Stream.callback<NoteEditorMessage>((queue) =>
