@@ -103,6 +103,10 @@ export interface PdfMountEnvironment {
    *  reader is reopened. Mobile callers disable it: a backgrounded pdf.js
    *  worker can be reclaimed by the OS, and the next RPC to it never settles. */
   readonly cacheDocumentsAcrossMounts: boolean;
+  /** Snapshotting encodes the rendered page on every render to give the next
+   *  open an instant placeholder. Callers without a canvas backend, and mobile
+   *  callers paying that cost on every page turn, disable it. */
+  readonly captureSnapshots: boolean;
 }
 
 export const canvasRasterizer = ({
@@ -131,6 +135,7 @@ export const browserPdfMountEnvironment = (
   loadTextLayerBuilder: loadTextLayerBuilderCtor,
   devicePixelRatio: () => globalThis.devicePixelRatio || 1,
   cacheDocumentsAcrossMounts: true,
+  captureSnapshots: true,
   ...overrides,
 });
 
@@ -437,6 +442,7 @@ function publishSelection(session: Session): void {
 }
 
 function captureSnapshot(session: Session, total: number): void {
+  if (!session.environment.captureSnapshots) return;
   const pane = session.panes[0];
   // A zero-sized backing store means nothing was rasterized (no canvas backend).
   if (!pane || pane.page === null || pane.canvas.width === 0 || pane.canvas.height === 0) return;

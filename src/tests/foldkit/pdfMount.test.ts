@@ -91,6 +91,7 @@ const testEnvironment = (overrides: Partial<PdfMountEnvironment> = {}): PdfMount
   loadTextLayerBuilder: null,
   devicePixelRatio: () => 1,
   cacheDocumentsAcrossMounts: false,
+  captureSnapshots: false,
   ...overrides,
 });
 
