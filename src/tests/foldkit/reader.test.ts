@@ -2,8 +2,14 @@
 
 import { Option } from "effect";
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import {
   ChangedReaderLayout,
+  CommittedReaderSelection,
+  IdentifiedReaderSession,
+  RestoredReaderPosition,
+  RequestedPositionSync,
+  ShowedReaderSnapshot,
   MeasuredReaderPagination,
   SelectedReaderSource,
   ShowedReaderHighlights,
@@ -16,6 +22,7 @@ import {
   type ReaderWorkspace,
 } from "../../client/foldkit/reader.ts";
 import { PdfSpreadRendered } from "../../client/foldkit/mounts/pdf.ts";
+import { MovedEpub } from "../../client/foldkit/mounts/epub.ts";
 import { epubPageCount } from "../../client/ui/reader/engine/epubPagination.ts";
 
 /** The slice owns live library handles, so a test builds its own with a byte
@@ -181,5 +188,120 @@ describe("reader pagination", () => {
       total: 0,
       percentage: 0,
     });
+  });
+});
+
+describe("reader place", () => {
+  const recorded: unknown[] = [];
+  const synced: unknown[] = [];
+  const identified = makeReaderSlice({
+    loadSource: () => Promise.reject(new Error("not mounted")),
+    positions: {
+      restore: () => Effect.succeed({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 }),
+      record: (input) =>
+        Effect.sync(() => {
+          recorded.push(input);
+        }),
+      sync: (input) =>
+        Effect.sync(() => {
+          synced.push(input);
+        }),
+    },
+    snapshotFor: () => ({ dataUrl: "data:image/webp;base64,AA", width: 40, height: 60 }),
+  });
+  const run = (
+    reader: ReaderWorkspace,
+    message: ReaderMessage,
+  ): readonly [ReaderWorkspace, readonly { name: string }[]] =>
+    identified.update(reader, message) ?? [reader, []];
+
+  it("asks for the reader's place only once it knows who is reading", () => {
+    const [before, beforeCommands] = run(epubReader, RequestedPositionSync());
+    expect(before.userId).toBeNull();
+    expect(commandNames(beforeCommands)).toEqual([]);
+
+    const [known, commands] = run(
+      epubReader,
+      IdentifiedReaderSession({ userId: "reader-1", groupId: "group-1" }),
+    );
+    expect(known.userId).toBe("reader-1");
+    expect(commandNames(commands)).toEqual(["RestoreReaderPosition"]);
+
+    expect(commandNames(run(known, RequestedPositionSync())[1])).toEqual(["SyncReaderPosition"]);
+  });
+
+  it("re-seeds the Mount when a restored place arrives after the book opened", () => {
+    const [restored] = run(
+      epubReader,
+      RestoredReaderPosition({
+        sourceId: epubReader.sourceId,
+        position: { kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 },
+      }),
+    );
+    expect(restored.position).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 });
+    expect(restored.mountGeneration).toBe(epubReader.mountGeneration + 1);
+
+    // A place for a book the reader is no longer showing changes nothing.
+    const [other] = run(
+      restored,
+      RestoredReaderPosition({
+        sourceId: "another-source",
+        position: { kind: "epub", cfi: "epubcfi(/6/2)", percentage: 0.1 },
+      }),
+    );
+    expect(other.mountGeneration).toBe(restored.mountGeneration);
+  });
+
+  it("records every reported place, but only for an identified reader", () => {
+    const place = {
+      spineIndex: 1,
+      cfi: "epubcfi(/6/4)",
+      page: 2,
+      count: { page: 5, total: 100, percentage: 0.05 },
+      atStart: false,
+      atEnd: false,
+    };
+    expect(
+      commandNames(run(epubReader, MovedEpub({ sourceId: epubReader.sourceId, place }))[1]),
+    ).toEqual([]);
+
+    const [known] = run(
+      epubReader,
+      IdentifiedReaderSession({ userId: "reader-1", groupId: "group-1" }),
+    );
+    expect(commandNames(run(known, MovedEpub({ sourceId: known.sourceId, place }))[1])).toEqual([
+      "RecordReaderPosition",
+    ]);
+  });
+
+  it("shows the last rendered page while the next open is still loading", () => {
+    expect(commandNames(run(epubReader, SelectedReaderSource(epubReader))[1])).toEqual([
+      "LoadReaderSnapshot",
+    ]);
+    const [shown] = run(
+      epubReader,
+      ShowedReaderSnapshot({
+        sourceId: epubReader.sourceId,
+        snapshot: { dataUrl: "data:image/webp;base64,AA", width: 40, height: 60 },
+      }),
+    );
+    expect(shown.snapshot?.width).toBe(40);
+  });
+
+  it("hands a committed selection over and stops showing it", () => {
+    const selecting: ReaderWorkspace = {
+      ...epubReader,
+      selection: {
+        anchor: { kind: "epub-cfi", value: "epubcfi(/6/2)" },
+        quote: { type: "TextQuoteSelector", exact: "a passage", prefix: "", suffix: "" },
+        point: { x: 10, y: 20 },
+      },
+    };
+    const [committed, commands] = run(selecting, CommittedReaderSelection({ intent: "note" }));
+    expect(committed.selection).toBeNull();
+    // A committed selection is read in the notes pane, so that is where the
+    // phone layout lands.
+    expect(committed.pane).toBe("notes");
+    expect(commandNames(commands)).toEqual(["DismissReaderSelection"]);
   });
 });

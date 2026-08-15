@@ -120,6 +120,13 @@ function derivePdfQuote(range: Range): QuoteSelector {
   };
 }
 
+/** The quote a range stands for, with the surrounding context that lets a
+ *  highlight be found again after the text reflows. PDF text runs are
+ *  positioned rather than laid out, so they need their own derivation. */
+export function quoteForRange(range: Range, kind: HighlightAnchor["kind"]): QuoteSelector {
+  return kind === "pdf-text" ? derivePdfQuote(range) : deriveQuote(range);
+}
+
 export function captureHighlight(
   sourceId: string,
   anchor: HighlightAnchor,
@@ -129,7 +136,7 @@ export function captureHighlight(
     id: crypto.randomUUID(),
     sourceId,
     anchor,
-    quote: anchor.kind === "pdf-text" ? derivePdfQuote(range) : deriveQuote(range),
+    quote: quoteForRange(range, anchor.kind),
     createdAt: new Date().toISOString(),
   };
 }

@@ -158,24 +158,87 @@ for (const book of books) {
 
 test("Foldkit reader: the chrome keys step and toggle the reader toolbar", async ({ page }) => {
   await openBook(page, books[0].path, books[0].ready);
-  const shell = page.locator(".reader-shell");
-  const toolbar = page.locator(".reader-toolbar");
+  const shell = page.locator("section.reader");
+  const toolbar = page.locator(".reader-bar");
+
+  const app = page.locator(".app");
+
+  // The first step hides the surrounding app chrome, the second the reader's
+  // own bar — and both collapse through CSS rather than leaving the DOM.
+  await page.keyboard.press("Shift+ArrowUp");
+  await expect(app).toHaveClass(/app--chrome-hidden/u);
+  await expect(toolbar).toBeVisible();
 
   await page.keyboard.press("Shift+ArrowUp");
   await expect(shell).toHaveClass(/reader--chrome-hidden/u);
-  await expect(toolbar).toBeVisible();
-
-  await page.keyboard.press("Shift+ArrowUp");
-  await expect(toolbar).toHaveCount(0);
+  await expect(toolbar).toBeHidden();
 
   await page.keyboard.press("Shift+ArrowDown");
   await expect(toolbar).toBeVisible();
   await page.keyboard.press("Shift+ArrowDown");
-  await expect(shell).not.toHaveClass(/reader--chrome-hidden/u);
+  await expect(app).not.toHaveClass(/app--chrome-hidden/u);
 
   // `z` jumps both levels at once, rather than stepping.
   await page.keyboard.press("z");
-  await expect(toolbar).toHaveCount(0);
+  await expect(toolbar).toBeHidden();
   await page.keyboard.press("z");
   await expect(toolbar).toBeVisible();
+});
+
+for (const book of books) {
+  test(`Foldkit ${book.name}: the selection popup commits and dismisses`, async ({ page }) => {
+    await openBook(page, book.path, book.ready);
+    await expect.poll(() => pageCount(page), { timeout: 60_000 }).not.toBeNull();
+
+    if (book.name === "EPUB") await selectEpubText(await epubFrame(page));
+    else await selectPdfText(page);
+
+    // The popup hangs off the point the renderer reported for the selection.
+    const popup = page.locator(".selection-actions");
+    await expect(popup).toBeVisible({ timeout: 30_000 });
+    await expect(popup).not.toHaveCSS("left", "0px");
+    await expect(popup.getByTitle("Add a note on this selection")).toBeVisible();
+
+    await popup.getByTitle("Highlight this selection").click();
+    await expect(popup).toBeHidden();
+    await expect.poll(() => paintedHighlights(page), { timeout: 30_000 }).toBeGreaterThan(0);
+  });
+
+  test(`Foldkit ${book.name}: a press outside the popup lets the selection go`, async ({
+    page,
+  }) => {
+    await openBook(page, book.path, book.ready);
+    await expect.poll(() => pageCount(page), { timeout: 60_000 }).not.toBeNull();
+
+    if (book.name === "EPUB") await selectEpubText(await epubFrame(page));
+    else await selectPdfText(page);
+    await expect(page.locator(".selection-actions")).toBeVisible({ timeout: 30_000 });
+
+    await page.locator(".reader-bar").click({ position: { x: 2, y: 2 } });
+    await expect(page.locator(".selection-actions")).toBeHidden();
+  });
+}
+
+test("Foldkit reader: page-turn zones appear only where there is a page to turn to", async ({
+  page,
+}) => {
+  await openBook(page, books[0].path, books[0].ready);
+  await expect.poll(() => pageCount(page), { timeout: 60_000 }).not.toBeNull();
+
+  // The first page has nothing behind it.
+  await expect(page.getByTitle("Previous page")).toHaveCount(0);
+  await page.getByTitle("Next page").click();
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).toBeGreaterThan(1);
+  await expect(page.getByTitle("Previous page")).toBeVisible();
+});
+
+test("Foldkit reader: F fits the PDF text to the viewport", async ({ page }) => {
+  await openBook(page, books[0].path, books[0].ready);
+  await expect.poll(() => pageCount(page), { timeout: 60_000 }).not.toBeNull();
+  const zoom = () => page.locator(".font-size").textContent();
+  const before = await zoom();
+
+  await page.keyboard.press("f");
+
+  await expect.poll(zoom, { timeout: 30_000 }).not.toBe(before);
 });

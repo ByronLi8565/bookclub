@@ -4,7 +4,11 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { Model, Navigated, init, update, type Message } from "../../client/foldkit/application.ts";
 import { NotesMessage, isNotesMessage } from "../../client/foldkit/notes.ts";
-import { OpenedEpub } from "../../client/foldkit/mounts/epub.ts";
+import {
+  ClickedEpubHighlight,
+  OpenedEpub,
+  SelectedEpubText,
+} from "../../client/foldkit/mounts/epub.ts";
 import {
   ChangedNotes,
   ConnectedNoteAgent,
@@ -12,10 +16,13 @@ import {
   ReleasedNoteAgent,
 } from "../../client/foldkit/resources/noteAgent.ts";
 import {
+  CommittedReaderSelection,
+  JumpedToHighlight,
   ReaderMessage,
   SelectedReaderSource,
   isReaderMessage,
 } from "../../client/foldkit/reader.ts";
+import { HIGHLIGHT_TAG } from "../../shared/types/notes.ts";
 
 /**
  * `update` dispatches to the reader and notes slices by schema guard before its
@@ -167,5 +174,101 @@ describe("Foldkit application slice seams", () => {
 
     const [next] = update(initial, navigated);
     expect(next.route._tag).toBe("Home");
+  });
+
+  const openedReader = () => {
+    const [initial] = init();
+    return update(
+      initial,
+      SelectedReaderSource({ groupRef: "club-alpha", sourceId: "source-1", kind: "epub" }),
+    )[0];
+  };
+
+  const withSelection = () =>
+    update(
+      openedReader(),
+      SelectedEpubText({
+        sourceId: "source-1",
+        cfi: "epubcfi(/6/2)",
+        quote: {
+          type: "TextQuoteSelector",
+          exact: "a passage",
+          prefix: "before ",
+          suffix: " after",
+        },
+        point: { x: 12, y: 24 },
+      }),
+    )[0];
+
+  it("turns a committed highlight into a posted note carrying the passage", () => {
+    const [committed, commands] = update(
+      withSelection(),
+      CommittedReaderSelection({ intent: "highlight" }),
+    );
+
+    expect(committed.reader?.selection).toBeNull();
+    // The note is queued through the notes slice's own operation Command, and
+    // the highlight keeps the quote context the reader captured.
+    expect(commands.map((command) => command.name)).toContain("EnqueueNoteOperation");
+    expect(committed.notes.draftHighlights).toEqual([]);
+  });
+
+  it("carries a committed note selection into the composer as a quoted passage", () => {
+    const [composing] = update(withSelection(), CommittedReaderSelection({ intent: "note" }));
+
+    expect(composing.notes.draftHighlights).toHaveLength(1);
+    expect(composing.notes.draftHighlights[0]?.quote.exact).toBe("a passage");
+    expect(composing.notes.draftHighlights[0]?.quote.prefix).toBe("before ");
+    // The reader paints what the notes slice now holds.
+    expect(composing.reader?.highlights).toHaveLength(1);
+  });
+
+  it("focuses the note a clicked highlight belongs to", () => {
+    const opened = openedReader();
+    const highlight = {
+      id: "highlight-1",
+      sourceId: "source-1",
+      anchor: { kind: "epub-cfi" as const, value: "epubcfi(/6/2)" },
+      quote: { type: "TextQuoteSelector" as const, exact: "a passage", prefix: "", suffix: "" },
+      createdAt: "2026-08-17T00:00:00.000Z",
+    };
+    const withNote = {
+      ...opened,
+      notes: {
+        ...opened.notes,
+        notes: [
+          {
+            id: "note-1",
+            seq: 1,
+            sourceId: "source-1",
+            author: { id: "reader-1", name: "Reader" },
+            parent: null,
+            body: "a passage",
+            highlights: [highlight],
+            tags: [HIGHLIGHT_TAG],
+            createdAt: "2026-08-17T00:00:00.000Z",
+            editedAt: null,
+            deletedAt: null,
+            version: 1,
+          },
+        ],
+      },
+    };
+
+    const [focused] = update(
+      withNote,
+      ClickedEpubHighlight({ sourceId: "source-1", highlightId: "highlight-1" }),
+    );
+    expect(focused.notes.focusedNoteId).toBe("note-1");
+    expect(focused.reader?.activeHighlightId).toBe("highlight-1");
+  });
+
+  it("sends the reader back to the passage a note points at", () => {
+    const [jumped, commands] = update(
+      openedReader(),
+      JumpedToHighlight({ anchor: { kind: "epub-cfi", value: "epubcfi(/6/8)" } }),
+    );
+    expect(jumped.reader?.pane).toBe("reader");
+    expect(commands.map((command) => command.name)).toEqual(["GoToReaderAnchor"]);
   });
 });

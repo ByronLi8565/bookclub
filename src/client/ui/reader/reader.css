@@ -185,20 +185,6 @@
   opacity: var(--subtle-opacity);
 }
 
-/* The Foldkit reader owns its whole column: a toolbar of intrinsic height and
-   a surface that takes the rest, so epub.js and PDF.js have real height to
-   paginate into. */
-.reader-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: 100%;
-
-  & > .reader-surface {
-    flex: 1;
-  }
-}
-
 .reader-stage {
   flex: 1;
   min-height: 0;

@@ -47,40 +47,34 @@ Runtime.embed(
       openReader(SelectedReaderSource({ groupRef: "harness", sourceId: HARNESS_SOURCE_ID, kind })),
       [],
     ],
-    update: (model, message) => reader.update(model, message) ?? [model, []],
+    // The workspace turns a committed selection into a note; the harness has no
+    // notes, so it does the one part the reader can be checked against: the
+    // highlight the commit is supposed to produce.
+    update: (model, message) => {
+      const [committed, commands] = reader.update(model, message) ?? [model, []];
+      if (message._tag !== "CommittedReaderSelection" || model.selection === null) {
+        return [committed, commands];
+      }
+      const highlights = [
+        ...model.highlights,
+        { id: `harness-highlight-${model.highlights.length + 1}`, anchor: model.selection.anchor },
+      ];
+      const [painted, paintCommands] = reader.update(
+        committed,
+        ShowedReaderHighlights({ highlights }),
+      ) ?? [committed, []];
+      return [painted, [...commands, ...paintCommands]];
+    },
     subscriptions,
     view: (model, h) =>
       h.div(
         // The pane the swipe Subscription has chosen is surfaced for the
         // browser suite; the harness renders no notes pane of its own.
-        [h.Class("app"), h.DataAttribute("pane", model.pane)],
         [
-          reader.view(model, h),
-          h.div(
-            [h.Class("harness-controls")],
-            model.selection === null
-              ? []
-              : [
-                  h.button(
-                    [
-                      h.Title("Highlight this selection"),
-                      h.OnClick(
-                        ShowedReaderHighlights({
-                          highlights: [
-                            ...model.highlights,
-                            {
-                              id: `harness-highlight-${model.highlights.length + 1}`,
-                              anchor: model.selection.anchor,
-                            },
-                          ],
-                        }),
-                      ),
-                    ],
-                    ["Highlight this selection"],
-                  ),
-                ],
-          ),
+          h.Class(model.chromeLevel >= 1 ? "app app--chrome-hidden" : "app"),
+          h.DataAttribute("pane", model.pane),
         ],
+        [reader.view(model, h)],
       ),
     devTools: false,
     slow: false,

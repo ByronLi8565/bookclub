@@ -1,13 +1,19 @@
-import { Effect, Option, Queue, Schema, Stream } from "effect";
+import { Effect, Option, Queue, Schedule, Schema, Stream } from "effect";
 import { Command, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { r } from "foldkit/route";
-import { HighlightAnchor } from "../../shared/types/notes.ts";
+import { HighlightAnchor, QuoteSelector } from "../../shared/types/notes.ts";
 import { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import { SourceKind } from "../../shared/types/sources.ts";
 import { PdfPageLayout } from "../../shared/types/userPrefs.ts";
 import { getCachedSource } from "../logic/groups/sourceCache.ts";
+import { getRenderSnapshot } from "../ui/reader/engine/renderSnapshot.ts";
+import {
+  browserReaderPositions,
+  noReaderPositions,
+  type ReaderPositions,
+} from "./readerPositions.ts";
 import {
   ClearedEpubSelection,
   ClickedEpubHighlight,
@@ -41,6 +47,16 @@ export const ReaderSearchMatch = Schema.Struct({ anchor: HighlightAnchor, excerp
 export const ReaderHighlight = Schema.Struct({ id: Schema.String, anchor: HighlightAnchor });
 export type ReaderHighlight = typeof ReaderHighlight.Type;
 
+export const ReaderPoint = Schema.Struct({ x: Schema.Number, y: Schema.Number });
+
+/** A live text selection, with the viewport point its action popup hangs off. */
+export const ReaderSelection = Schema.Struct({
+  anchor: HighlightAnchor,
+  quote: QuoteSelector,
+  point: ReaderPoint,
+});
+export type ReaderSelection = typeof ReaderSelection.Type;
+
 /** Chrome hides in two steps, matching the reader's keyboard and swipe
  *  contract: first the surrounding app chrome, then the reader's own toolbar. */
 export const ChromeLevel = Schema.Literals([0, 1, 2]);
@@ -54,10 +70,23 @@ export const stepChrome = (level: ChromeLevel, direction: "hide" | "show"): Chro
   return next <= 0 ? 0 : next >= 2 ? 2 : 1;
 };
 
+/** A previously rendered page, kept so reopening a book shows something at
+ *  once instead of an empty frame. */
+export const ReaderSnapshotImage = Schema.Struct({
+  dataUrl: Schema.String,
+  width: Schema.Number,
+  height: Schema.Number,
+});
+export type ReaderSnapshotImage = typeof ReaderSnapshotImage.Type;
+
 export const ReaderWorkspace = Schema.Struct({
   groupRef: Schema.String,
   sourceId: Schema.String,
   kind: SourceKind,
+  /** Who is reading, and in which club. Null until the application says: a
+   *  reader with no identity keeps no place. */
+  userId: Schema.NullOr(Schema.String),
+  groupId: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   loading: Schema.Boolean,
   position: Schema.NullOr(SourceReadingPosition),
@@ -81,9 +110,13 @@ export const ReaderWorkspace = Schema.Struct({
   activeSearchMatch: Schema.Number,
   highlights: Schema.Array(ReaderHighlight),
   activeHighlightId: Schema.NullOr(Schema.String),
-  selection: Schema.NullOr(Schema.Struct({ anchor: HighlightAnchor, quote: Schema.String })),
+  selection: Schema.NullOr(ReaderSelection),
   chromeLevel: ChromeLevel,
   pane: ReaderPane,
+  snapshot: Schema.NullOr(ReaderSnapshotImage),
+  /** Bumped when a restored reading position has to re-seed the Mount, which
+   *  only a new element key can do. */
+  mountGeneration: Schema.Number,
   error: Schema.NullOr(Schema.String),
 });
 export type ReaderWorkspace = typeof ReaderWorkspace.Type;
@@ -122,6 +155,27 @@ export const SwitchedReaderPane = m("SwitchedReaderPane", { pane: ReaderPane });
 export const MeasuredReaderPagination = m("MeasuredReaderPagination", {
   place: Schema.NullOr(EpubPlace),
 });
+export const IdentifiedReaderSession = m("IdentifiedReaderSession", {
+  userId: Schema.String,
+  groupId: Schema.String,
+});
+export const RestoredReaderPosition = m("RestoredReaderPosition", {
+  sourceId: Schema.String,
+  position: Schema.NullOr(SourceReadingPosition),
+});
+export const RequestedPositionSync = m("RequestedPositionSync");
+export const ShowedReaderSnapshot = m("ShowedReaderSnapshot", {
+  sourceId: Schema.String,
+  snapshot: Schema.NullOr(ReaderSnapshotImage),
+});
+export const CommittedReaderSelection = m("CommittedReaderSelection", {
+  intent: Schema.Literals(["note", "highlight"]),
+});
+export const DismissedReaderSelection = m("DismissedReaderSelection");
+export const RequestedFitToText = m("RequestedFitToText");
+/** Show a passage the notes pane pointed at. */
+export const JumpedToHighlight = m("JumpedToHighlight", { anchor: HighlightAnchor });
+export const SetReaderZoom = m("SetReaderZoom", { percent: Schema.Number });
 export const FailedReaderCommand = m("FailedReaderCommand", { message: Schema.String });
 export const CompletedReaderAction = m("CompletedReaderAction");
 
@@ -143,6 +197,15 @@ export const ReaderMessage = Schema.Union([
   ToggledReaderChrome,
   SwitchedReaderPane,
   MeasuredReaderPagination,
+  IdentifiedReaderSession,
+  RestoredReaderPosition,
+  RequestedPositionSync,
+  ShowedReaderSnapshot,
+  CommittedReaderSelection,
+  DismissedReaderSelection,
+  RequestedFitToText,
+  JumpedToHighlight,
+  SetReaderZoom,
   FailedReaderCommand,
   CompletedReaderAction,
   OpenedEpub,
@@ -172,14 +235,30 @@ const loadCachedBytes = async (sourceId: string): Promise<ArrayBuffer> => {
  *  constructed rather than passed through the Model. */
 export interface ReaderEnvironment {
   loadSource: (sourceId: string) => Promise<ArrayBuffer>;
+  /** Where the reader's place is kept. A slice built without one opens every
+   *  book at the beginning and records nothing. */
+  positions?: ReaderPositions;
+  /** The last rendered page for a source, used as an opening placeholder. */
+  snapshotFor?: (sourceId: string) => ReaderSnapshotImage | null;
 }
 
-export const browserReaderEnvironment: ReaderEnvironment = { loadSource: loadCachedBytes };
+export const browserReaderEnvironment: ReaderEnvironment = {
+  loadSource: loadCachedBytes,
+  positions: browserReaderPositions,
+  snapshotFor: (sourceId) => {
+    const snapshot = getRenderSnapshot(sourceId);
+    return snapshot === null
+      ? null
+      : { dataUrl: snapshot.dataUrl, width: snapshot.width, height: snapshot.height };
+  },
+};
 
 export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorkspace => ({
   groupRef: input.groupRef,
   sourceId: input.sourceId,
   kind: input.kind,
+  userId: null,
+  groupId: null,
   title: null,
   loading: true,
   position: null,
@@ -201,6 +280,8 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   selection: null,
   chromeLevel: 0,
   pane: "reader",
+  snapshot: null,
+  mountGeneration: 0,
   error: null,
 });
 
@@ -261,6 +342,8 @@ export const readerKeyMessage = (
       return claim(TurnedReaderPage({ direction: "previous" }));
     case "d":
       return claim(ToggledReaderLayout());
+    case "f":
+      return claim(RequestedFitToText());
     case "z":
       return claim(ToggledReaderChrome());
     default:
@@ -358,6 +441,44 @@ export const makeReaderSubscriptions = <Model, Message>({
           ),
       },
     ),
+    readerSelectionDismissal: entry(
+      { selecting: Schema.Boolean },
+      {
+        modelToDependencies: (model) => ({ selecting: modelToReader(model)?.selection !== null }),
+        dependenciesToStream: ({ selecting }) =>
+          Stream.when(
+            Subscription.fromEventFilterMap<PointerEvent, Message>({
+              target: globalThis.document,
+              type: "pointerdown",
+              // A press inside the popup is the popup's own business; anywhere
+              // else lets the selection go, the way the React reader does.
+              toMessage: (event) =>
+                event.target instanceof Element && event.target.closest(".selection-actions")
+                  ? Option.none()
+                  : Option.some(toMessage(DismissedReaderSelection())),
+            }),
+            Effect.sync(() => selecting),
+          ),
+      },
+    ),
+    readerPositionSync: entry(
+      { syncing: Schema.Boolean },
+      {
+        modelToDependencies: (model) => {
+          const reader = modelToReader(model);
+          return { syncing: reader !== null && reader.userId !== null && reader.groupId !== null };
+        },
+        // The place is written locally on every move; this is the slower beat
+        // that pushes whatever the server has not seen.
+        dependenciesToStream: ({ syncing }) =>
+          Stream.when(
+            Stream.map(Stream.fromSchedule(Schedule.spaced("3 seconds")), () =>
+              toMessage(RequestedPositionSync()),
+            ),
+            Effect.sync(() => syncing),
+          ),
+      },
+    ),
     readerSwipe: entry(
       { open: Schema.Boolean, pane: ReaderPane },
       {
@@ -379,7 +500,11 @@ export const makeReaderSubscriptions = <Model, Message>({
  * act on whichever document is live, and the update and view built over them.
  * One slice per running application — the Mounts hold the live handles.
  */
-export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
+export const makeReaderSlice = ({
+  loadSource,
+  positions = noReaderPositions,
+  snapshotFor = () => null,
+}: ReaderEnvironment) => {
   const epubReaderMount = makeEpubMount({ loadSource });
   const pdfReaderMount = makePdfMount(browserPdfMountEnvironment(loadSource));
   const PdfReaderMount = pdfReaderMount.Mount;
@@ -426,6 +551,16 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
       ),
   });
 
+  const GoToReaderAnchor = Command.define("GoToReaderAnchor", {
+    args: { anchor: HighlightAnchor, kind: SourceKind },
+    messages: [CompletedReaderAction, FailedReaderCommand],
+    execute: ({ anchor, kind }) =>
+      (kind === "epub" ? epubReaderMount.goTo(anchor) : pdfReaderMount.goTo(anchor)).pipe(
+        Effect.as(CompletedReaderAction()),
+        Effect.catch((error) => Effect.succeed(failed(error))),
+      ),
+  });
+
   const ClearSearchHighlight = Command.define("ClearSearchHighlight", {
     args: { kind: SourceKind },
     messages: [CompletedReaderAction],
@@ -450,6 +585,66 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
           )
         : pdfReaderMount.syncHighlights(highlights)
       ).pipe(Effect.as(CompletedReaderAction())),
+  });
+
+  const RestoreReaderPosition = Command.define("RestoreReaderPosition", {
+    args: {
+      userId: Schema.String,
+      groupId: Schema.String,
+      sourceId: Schema.String,
+      kind: SourceKind,
+    },
+    messages: [RestoredReaderPosition],
+    execute: (input) =>
+      positions
+        .restore(input)
+        .pipe(
+          Effect.map((position) => RestoredReaderPosition({ sourceId: input.sourceId, position })),
+        ),
+  });
+
+  const RecordReaderPosition = Command.define("RecordReaderPosition", {
+    args: {
+      userId: Schema.String,
+      groupId: Schema.String,
+      sourceId: Schema.String,
+      position: SourceReadingPosition,
+    },
+    messages: [CompletedReaderAction],
+    execute: (input) => positions.record(input).pipe(Effect.as(CompletedReaderAction())),
+  });
+
+  const SyncReaderPosition = Command.define("SyncReaderPosition", {
+    args: { userId: Schema.String, groupId: Schema.String, sourceId: Schema.String },
+    messages: [CompletedReaderAction],
+    execute: (input) => positions.sync(input).pipe(Effect.as(CompletedReaderAction())),
+  });
+
+  const LoadReaderSnapshot = Command.define("LoadReaderSnapshot", {
+    args: { sourceId: Schema.String },
+    messages: [ShowedReaderSnapshot],
+    execute: ({ sourceId }) =>
+      Effect.sync(() => ShowedReaderSnapshot({ sourceId, snapshot: snapshotFor(sourceId) })),
+  });
+
+  const FitPdfToText = Command.define("FitPdfToText", {
+    args: {},
+    messages: [SetReaderZoom, CompletedReaderAction],
+    execute: () =>
+      pdfReaderMount.fitZoom.pipe(
+        Effect.map((percent) =>
+          percent === null ? CompletedReaderAction() : SetReaderZoom({ percent }),
+        ),
+      ),
+  });
+
+  const DismissReaderSelection = Command.define("DismissReaderSelection", {
+    args: { kind: SourceKind },
+    messages: [CompletedReaderAction],
+    execute: ({ kind }) =>
+      (kind === "epub" ? epubReaderMount.dismissSelection : pdfReaderMount.dismissSelection).pipe(
+        Effect.as(CompletedReaderAction()),
+      ),
   });
 
   const SetEpubFontSize = Command.define("SetEpubFontSize", {
@@ -496,10 +691,24 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
         : { kind: "epub", cfi: place.cfi, percentage: place.count.percentage },
   });
 
+  /** Recording is local and cheap, so every reported place is written; the
+   *  server only hears about it on the sync tick. */
+  const recordPosition = (reader: ReaderWorkspace) =>
+    reader.userId === null || reader.groupId === null || reader.position === null
+      ? []
+      : [
+          RecordReaderPosition({
+            userId: reader.userId,
+            groupId: reader.groupId,
+            sourceId: reader.sourceId,
+            position: reader.position,
+          }),
+        ];
+
   const updateReader = (reader: ReaderWorkspace, message: ReaderMessage): ReaderUpdate | null => {
     switch (message._tag) {
       case "SelectedReaderSource":
-        return [openReader(message), []];
+        return [openReader(message), [LoadReaderSnapshot({ sourceId: message.sourceId })]];
       case "ChangedReaderSearch":
         return [{ ...reader, searchQuery: message.query }, []];
       case "OpenedReaderSearch":
@@ -575,6 +784,68 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
         return [{ ...reader, chromeLevel: reader.chromeLevel === 0 ? 2 : 0 }, []];
       case "SwitchedReaderPane":
         return [{ ...reader, pane: message.pane }, []];
+      case "IdentifiedReaderSession":
+        return [
+          { ...reader, userId: message.userId, groupId: message.groupId },
+          [
+            RestoreReaderPosition({
+              userId: message.userId,
+              groupId: message.groupId,
+              sourceId: reader.sourceId,
+              kind: reader.kind,
+            }),
+          ],
+        ];
+      case "RestoredReaderPosition":
+        // A Mount is seeded at insert, so a place that arrives after the book
+        // opened only reaches the renderer through a new element key.
+        return message.sourceId !== reader.sourceId || message.position === null
+          ? [reader, []]
+          : [
+              {
+                ...reader,
+                position: message.position,
+                mountGeneration: reader.mountGeneration + 1,
+              },
+              [],
+            ];
+      case "RequestedPositionSync":
+        return reader.userId === null || reader.groupId === null
+          ? [reader, []]
+          : [
+              reader,
+              [
+                SyncReaderPosition({
+                  userId: reader.userId,
+                  groupId: reader.groupId,
+                  sourceId: reader.sourceId,
+                }),
+              ],
+            ];
+      case "ShowedReaderSnapshot":
+        return message.sourceId === reader.sourceId
+          ? [{ ...reader, snapshot: message.snapshot }, []]
+          : [reader, []];
+      case "CommittedReaderSelection":
+        // The selection becomes a note or a highlight in the notes slice; the
+        // reader's part is to let go of it and show the pane it landed in.
+        return reader.selection === null
+          ? [reader, []]
+          : [
+              { ...reader, selection: null, pane: "notes" },
+              [DismissReaderSelection({ kind: reader.kind })],
+            ];
+      case "DismissedReaderSelection":
+        return [{ ...reader, selection: null }, [DismissReaderSelection({ kind: reader.kind })]];
+      case "JumpedToHighlight":
+        return [
+          { ...reader, pane: "reader" },
+          [GoToReaderAnchor({ anchor: message.anchor, kind: reader.kind })],
+        ];
+      case "RequestedFitToText":
+        return reader.kind === "pdf" ? [reader, [FitPdfToText({})]] : null;
+      case "SetReaderZoom":
+        return [{ ...reader, zoomPercent: message.percent }, []];
       case "MeasuredReaderPagination":
         return message.place === null ? [reader, []] : [placed(reader, message.place), []];
       case "OpenedEpub": {
@@ -588,10 +859,11 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
           ],
         ];
       }
-      case "MovedEpub":
-        return message.sourceId === reader.sourceId
-          ? [placed(reader, message.place), []]
-          : [reader, []];
+      case "MovedEpub": {
+        if (message.sourceId !== reader.sourceId) return [reader, []];
+        const moved = placed(reader, message.place);
+        return [moved, recordPosition(moved)];
+      }
       case "SelectedEpubText":
         return message.sourceId === reader.sourceId
           ? [
@@ -600,6 +872,7 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
                 selection: {
                   anchor: { kind: "epub-cfi", value: message.cfi },
                   quote: message.quote,
+                  point: message.point,
                 },
               },
               [],
@@ -640,19 +913,20 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
               [PaintReaderHighlights({ highlights: reader.highlights, kind: reader.kind })],
             ]
           : [reader, []];
-      case "PdfPositionChanged":
-        return message.sourceId === reader.sourceId
-          ? [{ ...reader, position: message.position }, []]
-          : [reader, []];
+      case "PdfPositionChanged": {
+        if (message.sourceId !== reader.sourceId) return [reader, []];
+        const moved = { ...reader, position: message.position };
+        return [moved, recordPosition(moved)];
+      }
       case "PdfSelectionChanged":
         return message.sourceId === reader.sourceId
           ? [
               {
                 ...reader,
                 selection:
-                  message.anchor === null
+                  message.anchor === null || message.quote === null || message.point === null
                     ? null
-                    : { anchor: message.anchor, quote: "Selected PDF text" },
+                    : { anchor: message.anchor, quote: message.quote, point: message.point },
               },
               [],
             ]
@@ -722,16 +996,8 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
     );
 
     const toolbar = h.div(
-      [h.Class("reader-toolbar"), h.Role("toolbar"), h.AriaLabel("Reader controls")],
+      [h.Class("reader-bar"), h.Role("toolbar"), h.AriaLabel("Reader controls")],
       [
-        h.button(
-          [h.OnClick(TurnedReaderPage({ direction: "previous" })), h.Title("Previous page")],
-          ["Previous page"],
-        ),
-        h.button(
-          [h.OnClick(TurnedReaderPage({ direction: "next" })), h.Title("Next page")],
-          ["Next page"],
-        ),
         h.span(
           [h.Class("page-count"), h.Role("status")],
           [reader.totalPages === 0 ? "" : `${reader.page} / ${reader.totalPages}`],
@@ -776,36 +1042,104 @@ export const makeReaderSlice = ({ loadSource }: ReaderEnvironment) => {
           ],
         ),
         h.button([h.OnClick(OpenedReaderSearch()), h.Title("Search")], ["Search"]),
-        ...(reader.searchOpen ? [searchForm] : []),
       ],
     );
+
+    const surface = h.div(
+      [
+        // The Mount owns whatever the key identifies: a PDF layout or zoom
+        // change rebuilds the document, an EPUB relayouts in place, and a
+        // restored place re-seeds either through the generation counter.
+        h.Key(
+          reader.kind === "pdf"
+            ? `pdf:${reader.sourceId}:${reader.layout}:${reader.zoomPercent}:${reader.mountGeneration}`
+            : `epub:${reader.sourceId}:${reader.mountGeneration}`,
+        ),
+        h.OnMount(mount),
+        h.Class("reader-surface"),
+      ],
+      // A snapshot of the last render stands in until the book paints, so
+      // reopening a book is not an empty frame.
+      reader.loading && reader.snapshot !== null
+        ? [
+            h.div(
+              [h.Class("reader-snapshot"), h.AriaHidden(true)],
+              [
+                h.img([
+                  h.Src(reader.snapshot.dataUrl),
+                  h.Width(String(reader.snapshot.width)),
+                  h.Height(String(reader.snapshot.height)),
+                  h.Alt(""),
+                ]),
+              ],
+            ),
+          ]
+        : [],
+    );
+
+    const pageTurn = (direction: "previous" | "next") =>
+      h.button([
+        h.Type("button"),
+        h.Class(`reader-page-turn reader-page-turn--${direction === "next" ? "next" : "prev"}`),
+        h.OnClick(TurnedReaderPage({ direction })),
+        h.AriaLabel(direction === "next" ? "Next page" : "Previous page"),
+        h.Title(direction === "next" ? "Next page" : "Previous page"),
+      ]);
 
     return h.section(
       [
         h.AriaLabel("Reader"),
-        h.Class(reader.chromeLevel >= 1 ? "reader-shell reader--chrome-hidden" : "reader-shell"),
+        h.Class(reader.chromeLevel >= 2 ? "reader reader--chrome-hidden" : "reader"),
       ],
       [
-        h.h2([], [reader.title ?? "Reader"]),
-        // Chrome hides in two steps: the app chrome first, the reader's own
-        // toolbar second.
-        ...(reader.chromeLevel >= 2 ? [] : [toolbar]),
-        ...(reader.loading ? [h.p([h.Role("status")], ["Loading book"])] : []),
+        // Chrome hides in two steps, and both are CSS collapses rather than
+        // removals, so the bars animate out the way the React reader's do.
+        toolbar,
+        ...(reader.searchOpen ? [searchForm] : []),
         ...(reader.error === null ? [] : [h.p([h.Role("alert")], [reader.error])]),
         h.div(
+          [h.Class("reader-stage")],
           [
-            // The Mount owns whatever the key identifies; a PDF layout change
-            // rebuilds the document, while an EPUB relayouts in place.
-            h.Key(
-              reader.kind === "pdf"
-                ? `pdf:${reader.sourceId}:${reader.layout}:${reader.zoomPercent}`
-                : `epub:${reader.sourceId}`,
-            ),
-            h.OnMount(mount),
-            h.Class("reader-surface"),
+            surface,
+            ...(reader.loading || reader.atStart ? [] : [pageTurn("previous")]),
+            ...(reader.loading || reader.atEnd ? [] : [pageTurn("next")]),
           ],
-          [],
         ),
+        // The selection popup is placed at the point the renderer reported, in
+        // viewport coordinates, the same way the React reader places it.
+        ...(reader.selection === null
+          ? []
+          : [
+              h.div(
+                [
+                  h.Class("selection-actions"),
+                  h.Style({
+                    left: `${reader.selection.point.x}px`,
+                    top: `${reader.selection.point.y}px`,
+                  }),
+                ],
+                [
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("add-note label"),
+                      h.OnClick(CommittedReaderSelection({ intent: "highlight" })),
+                      h.Title("Highlight this selection"),
+                    ],
+                    ["Highlight"],
+                  ),
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("add-note label"),
+                      h.OnClick(CommittedReaderSelection({ intent: "note" })),
+                      h.Title("Add a note on this selection"),
+                    ],
+                    ["Add Note"],
+                  ),
+                ],
+              ),
+            ]),
       ],
     );
   };

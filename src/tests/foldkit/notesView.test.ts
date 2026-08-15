@@ -152,16 +152,16 @@ describe("Foldkit notes view", () => {
   it("offers to quote a live reader selection", async () => {
     const rendered = await render(
       { ...online, draftHighlights: [] },
-      { anchor: { kind: "epub-cfi", value: "epubcfi(/6/8)" }, quote: "a fresh passage" },
+      {
+        anchor: { kind: "epub-cfi", value: "epubcfi(/6/8)" },
+        quote: { type: "TextQuoteSelector", exact: "a fresh passage", prefix: "", suffix: "" },
+      },
     );
     expect(rendered.textContent).toContain("Quote this passage");
   });
 
   it("does not re-offer a selection the draft already quotes", async () => {
-    const rendered = await render(online, {
-      anchor: highlight.anchor,
-      quote: highlight.quote.exact,
-    });
+    const rendered = await render(online, { anchor: highlight.anchor, quote: highlight.quote });
     expect(rendered.textContent).not.toContain("Quote this passage");
   });
 

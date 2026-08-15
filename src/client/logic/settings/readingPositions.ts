@@ -136,43 +136,70 @@ function mergeServerReadingPosition(
   });
 }
 
-export const fetchServerReadingPosition = Effect.fn("ReadingPositions.fetch")(function* (
+/** How a caller reaches the server. The local record cache is the same for
+ *  every caller; only the transport differs, so a Foldkit Command can use the
+ *  generated client while the React path keeps its own request helper. */
+export interface ReadingPositionTransport<E> {
+  fetch: (groupId: string, sourceId: string) => Effect.Effect<StoredReadingPosition | null, E>;
+  push: (
+    groupId: string,
+    sourceId: string,
+    position: StoredReadingPosition,
+  ) => Effect.Effect<StoredReadingPosition | null, E>;
+}
+
+const requestTransport: ReadingPositionTransport<ApiRequestError> = {
+  fetch: (groupId, sourceId) =>
+    request(
+      "ReadingPositions.fetch",
+      `/me/reading-position?groupId=${encodeURIComponent(groupId)}&sourceId=${encodeURIComponent(sourceId)}`,
+    ).pipe(
+      Effect.flatMap((response) =>
+        decodeJson("ReadingPositions.decodeFetch", response, ReadingPositionResponse),
+      ),
+      Effect.map((body) => body.position),
+    ),
+  push: (groupId, sourceId, position) =>
+    request("ReadingPositions.sync", "/me/reading-position", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groupId, sourceId, position }),
+    }).pipe(
+      Effect.flatMap((response) =>
+        decodeJson("ReadingPositions.decodeSync", response, ReadingPositionResponse),
+      ),
+      Effect.map((body) => body.position),
+    ),
+};
+
+export const fetchReadingPositionWith = Effect.fn("ReadingPositions.fetchWith")(function* <E>(
+  transport: ReadingPositionTransport<E>,
   userId: string,
   groupId: string,
   sourceId: string,
-): Effect.fn.Return<StoredReadingPosition | null, ApiRequestError> {
-  const response = yield* request(
-    "ReadingPositions.fetch",
-    `/me/reading-position?groupId=${encodeURIComponent(groupId)}&sourceId=${encodeURIComponent(sourceId)}`,
-  );
-  const body = yield* decodeJson("ReadingPositions.decodeFetch", response, ReadingPositionResponse);
-  if (body.position) mergeServerReadingPosition(userId, body.position);
-  return body.position;
+): Effect.fn.Return<StoredReadingPosition | null, E> {
+  const position = yield* transport.fetch(groupId, sourceId);
+  if (position) mergeServerReadingPosition(userId, position);
+  return position;
 });
 
-export const syncReadingPosition = Effect.fn("ReadingPositions.sync")(function* (
+export const syncReadingPositionWith = Effect.fn("ReadingPositions.syncWith")(function* <E>(
+  transport: ReadingPositionTransport<E>,
   userId: string,
   groupId: string,
   sourceId: string,
   force = false,
-): Effect.fn.Return<boolean, ApiRequestError> {
+): Effect.fn.Return<boolean, E | ApiRequestError> {
   const key = positionKey(userId, groupId, sourceId);
   if (syncingKeys.has(key)) return false;
   const record = getRecord(userId, groupId, sourceId);
   if (!record || (!force && !needsReadingPositionSync(record))) return false;
   markSyncing(userId, groupId, sourceId, record);
   syncingKeys.add(key);
-  const result = yield* request("ReadingPositions.sync", "/me/reading-position", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ groupId, sourceId, position: record.position }),
-  }).pipe(
-    Effect.flatMap((response) =>
-      decodeJson("ReadingPositions.decodeSync", response, ReadingPositionResponse),
-    ),
-    Effect.flatMap((body) =>
-      body.position
-        ? Effect.succeed(body.position)
+  const result = yield* transport.push(groupId, sourceId, record.position).pipe(
+    Effect.flatMap((position) =>
+      position
+        ? Effect.succeed(position)
         : Effect.fail(
             new ApiRequestError({
               operation: "ReadingPositions.decodeSync",
@@ -188,3 +215,13 @@ export const syncReadingPosition = Effect.fn("ReadingPositions.sync")(function* 
   mergeServerReadingPosition(userId, result);
   return true;
 });
+
+export const fetchServerReadingPosition = (userId: string, groupId: string, sourceId: string) =>
+  fetchReadingPositionWith(requestTransport, userId, groupId, sourceId);
+
+export const syncReadingPosition = (
+  userId: string,
+  groupId: string,
+  sourceId: string,
+  force = false,
+) => syncReadingPositionWith(requestTransport, userId, groupId, sourceId, force);

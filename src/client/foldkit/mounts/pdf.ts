@@ -3,10 +3,20 @@ import { Mount } from "foldkit";
 import { m } from "foldkit/message";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { clamp } from "../../../shared/format.ts";
-import { HighlightAnchor, pdfAnchor, type PdfRect } from "../../../shared/types/notes.ts";
+import {
+  HighlightAnchor,
+  QuoteSelector,
+  pdfAnchor,
+  type PdfRect,
+} from "../../../shared/types/notes.ts";
 import { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { PdfPageLayout } from "../../../shared/types/userPrefs.ts";
-import { expandToWordBoundaries, popupPoint, scanText } from "../../logic/notes/highlights.ts";
+import {
+  expandToWordBoundaries,
+  popupPoint,
+  quoteForRange,
+  scanText,
+} from "../../logic/notes/highlights.ts";
 import {
   destroyPdf,
   loadPdf,
@@ -34,6 +44,9 @@ import { putRenderSnapshot } from "../../ui/reader/engine/renderSnapshot.ts";
 const MAX_RENDER_DPR = 2;
 const SPREAD_CROP_PAD_PX = 16;
 const PDF_RECT_Y_NUDGE_PX = 4;
+const TEXT_TOP_MARGIN_PX = 24;
+const MIN_ZOOM = 50;
+const MAX_ZOOM = 400;
 
 const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 
@@ -58,6 +71,7 @@ export const PdfDocumentLoadFailed = m("PdfDocumentLoadFailed", {
 export const PdfSelectionChanged = m("PdfSelectionChanged", {
   sourceId: Schema.String,
   anchor: Schema.NullOr(HighlightAnchor),
+  quote: Schema.NullOr(QuoteSelector),
   point: Schema.NullOr(Point),
 });
 export const PdfPositionChanged = m("PdfPositionChanged", {
@@ -329,6 +343,68 @@ function paintAnnotations(session: Session): void {
   if (session.searchAnchor) paint(session.searchAnchor, (pane) => pane.underline, "bc-search");
 }
 
+/** The zoom at which the current spread's *text* fills the viewport. Returns
+ *  null when nothing is open or the pages carry no text geometry to fit to (a
+ *  scan), in which case the reader leaves the zoom alone. */
+async function computeFitZoom(session: Session): Promise<number | null> {
+  const doc = session.document;
+  if (!doc || session.released) return null;
+  const left = session.page;
+  const pages = spreadPages(left, session.spread, doc.numPages);
+  const measured = await Promise.all(
+    pages.map(async (pageNum) => {
+      const page = await doc.getPage(pageNum);
+      return {
+        base: page.getViewport({ scale: 1 }),
+        bounds: textBounds(await geometryFor(session, pageNum)),
+      };
+    }),
+  );
+  const first = measured[0];
+  if (!first || session.released || session.page !== left) return null;
+
+  // With a spread each page is cropped to its own text, so the fit is against
+  // the combined text width; a single page is uncropped, so it fits its full
+  // width. Height fits the union of both pages' vertical extents, which is what
+  // the render actually crops to.
+  let combinedWidth = 0;
+  let unionMinY = Infinity;
+  let unionMaxY = -Infinity;
+  let maxBaseHeight = 0;
+  let anyText = false;
+  for (const { base, bounds } of measured) {
+    maxBaseHeight = Math.max(maxBaseHeight, base.height);
+    if (bounds === null) {
+      combinedWidth += base.width;
+      continue;
+    }
+    anyText = true;
+    combinedWidth += session.spread ? (bounds.maxX - bounds.minX) * base.width : base.width;
+    unionMinY = Math.min(unionMinY, bounds.minY);
+    unionMaxY = Math.max(unionMaxY, bounds.maxY);
+  }
+  if (!anyText) return null;
+
+  const gutter = pages.length > 1 ? SPREAD_GUTTER_PX : 0;
+  const pad = session.spread ? SPREAD_CROP_PAD_PX : 0;
+  const fit =
+    pages.length > 1
+      ? (session.scroller.clientWidth - gutter) / (2 * first.base.width)
+      : session.scroller.clientWidth / first.base.width;
+  const widthBudget =
+    session.scroller.clientWidth - gutter - 2 * TEXT_TOP_MARGIN_PX - pages.length * 2 * pad;
+  const widthScale = Math.max(1, widthBudget) / combinedWidth;
+  const heightScale =
+    Math.max(1, session.scroller.clientHeight - 2 * TEXT_TOP_MARGIN_PX - 2 * pad) /
+    ((unionMaxY - unionMinY) * maxBaseHeight);
+  // Floor rather than round: a zoom above the computed scale leaves a sliver of
+  // scroll range, so a fit would immediately be followed by a scroll.
+  return Math.min(
+    MAX_ZOOM,
+    Math.max(MIN_ZOOM, Math.floor((Math.min(widthScale, heightScale) / fit) * 100)),
+  );
+}
+
 function documentCacheKey(environment: PdfMountEnvironment, sourceId: string, bytes: number) {
   return environment.cacheDocumentsAcrossMounts ? `${sourceId}:${bytes}` : null;
 }
@@ -463,7 +539,9 @@ function publishSelection(session: Session): void {
   const selection = globalThis.getSelection?.();
   const clear = () => {
     for (const pane of session.panes) pane.selection.replaceChildren();
-    session.emit(PdfSelectionChanged({ sourceId: session.sourceId, anchor: null, point: null }));
+    session.emit(
+      PdfSelectionChanged({ sourceId: session.sourceId, anchor: null, quote: null, point: null }),
+    );
   };
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return clear();
   const raw = selection.getRangeAt(0);
@@ -487,7 +565,14 @@ function publishSelection(session: Session): void {
       );
     }),
   );
-  session.emit(PdfSelectionChanged({ sourceId: session.sourceId, anchor, point: popupPoint(box) }));
+  session.emit(
+    PdfSelectionChanged({
+      sourceId: session.sourceId,
+      anchor,
+      quote: quoteForRange(range, "pdf-text"),
+      point: popupPoint(box),
+    }),
+  );
 }
 
 function captureSnapshot(session: Session, total: number): void {
@@ -823,6 +908,14 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
           return pdfSearchMatches(session.geometry, query);
         });
       }),
+    /** The zoom that would make the current spread's text fill the viewport.
+     *  The reader applies it through the Model, because zoom is part of this
+     *  Mount's element key. */
+    fitZoom: Effect.suspend(() => {
+      const session = live;
+      if (session === null || session.released) return Effect.succeed(null);
+      return Effect.promise(() => computeFitZoom(session)).pipe(Effect.orElseSucceed(() => null));
+    }),
     dismissSelection: Effect.sync(() => {
       globalThis.getSelection?.()?.removeAllRanges();
     }),

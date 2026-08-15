@@ -6,9 +6,11 @@ import { m } from "foldkit/message";
 import {
   expandToWordBoundaries,
   popupPoint,
+  quoteForRange,
   type HighlightAnchor,
   type SourceReader,
 } from "../../logic/notes/highlights.ts";
+import { QuoteSelector } from "../../../shared/types/notes.ts";
 import {
   epubPageCount,
   measureEpubPagination,
@@ -52,7 +54,7 @@ export const MovedEpub = m("MovedEpub", { sourceId: Schema.String, place: EpubPl
 export const SelectedEpubText = m("SelectedEpubText", {
   sourceId: Schema.String,
   cfi: Schema.String,
-  quote: Schema.String,
+  quote: QuoteSelector,
   point: EpubPoint,
 });
 export const ClearedEpubSelection = m("ClearedEpubSelection", { sourceId: Schema.String });
@@ -75,7 +77,7 @@ export type EpubMountMessage =
 
 export interface EpubSelectionReading {
   cfi: string;
-  quote: string;
+  quote: QuoteSelector;
   point: EpubPoint;
 }
 
@@ -172,8 +174,8 @@ function readSelection(rendition: Rendition): EpubSelectionReading | null {
     const selection = content.window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) continue;
     const range = expandToWordBoundaries(selection.getRangeAt(0));
-    const quote = range.toString();
-    if (quote.trim() === "") continue;
+    if (range.toString().trim() === "") continue;
+    const quote = quoteForRange(range, "epub-cfi");
     const frame = content.window.frameElement?.getBoundingClientRect();
     return {
       cfi: content.cfiFromRange(range),

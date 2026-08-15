@@ -5,7 +5,15 @@ import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { UPLOAD_FILE_FIELD } from "../../shared/http/uploads.ts";
 import { DEFAULT_NOTE_IMAGE_WIDTH, noteImageBlock } from "../../shared/notes/images.ts";
-import { Highlight, Note, NoteOp, type HighlightAnchor } from "../../shared/types/notes.ts";
+import {
+  HIGHLIGHT_TAG,
+  Highlight,
+  Note,
+  NoteOp,
+  type HighlightAnchor,
+  type QuoteSelector,
+} from "../../shared/types/notes.ts";
+import { highlightMark } from "../logic/notes/format.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { addNoteOp, editNoteOp, removeNoteOp } from "../logic/notes/noteOps.ts";
 import {
@@ -58,6 +66,7 @@ export const NotesModel = Schema.Struct({
   draft: Schema.String,
   draftTags: Schema.Array(Schema.String),
   draftHighlights: Schema.Array(Highlight),
+  focusedNoteId: Schema.NullOr(Schema.String),
   draftImageIds: Schema.Array(Schema.String),
   draftFormat: DraftFormat,
   uploadingImage: Schema.Boolean,
@@ -87,6 +96,10 @@ export const ChangedNoteComposer = m("ChangedNoteComposer", {
 });
 export const CancelledNoteComposer = m("CancelledNoteComposer");
 export const AttachedNoteHighlight = m("AttachedNoteHighlight", { highlight: Highlight });
+/** A note the reader pointed at, by the highlight the reader was showing. */
+export const FocusedNoteHighlight = m("FocusedNoteHighlight", {
+  highlightId: Schema.NullOr(Schema.String),
+});
 export const DetachedNoteHighlight = m("DetachedNoteHighlight", { highlightId: Schema.String });
 export const SubmittedNoteOperation = m("SubmittedNoteOperation", { op: NoteOp });
 export const SelectedNoteImage = m("SelectedNoteImage", {
@@ -102,6 +115,7 @@ export const NotesMessage = Schema.Union([
   ChangedNoteComposer,
   CancelledNoteComposer,
   AttachedNoteHighlight,
+  FocusedNoteHighlight,
   DetachedNoteHighlight,
   SubmittedNoteOperation,
   SelectedNoteImage,
@@ -165,6 +179,7 @@ export const initialNotesModel = (): NotesModel => ({
   draft: "",
   draftTags: [],
   draftHighlights: [],
+  focusedNoteId: null,
   draftImageIds: [],
   draftFormat: { collapsed: true, bold: false, italic: false, highlight: false },
   uploadingImage: false,
@@ -267,6 +282,17 @@ export const updateNotes = (
       )
         ? [model, []]
         : [{ ...model, draftHighlights: [...model.draftHighlights, message.highlight] }, []];
+    case "FocusedNoteHighlight": {
+      // The reader points at a highlight; the note that carries it is the one
+      // the list should be showing.
+      const focused =
+        message.highlightId === null
+          ? null
+          : (model.notes.find((note) =>
+              note.highlights.some((highlight) => highlight.id === message.highlightId),
+            )?.id ?? null);
+      return [{ ...model, focusedNoteId: focused }, []];
+    }
     case "DetachedNoteHighlight":
       return [
         {
@@ -340,26 +366,36 @@ const noteThread = (notes: readonly Note[], parent: string | null): readonly Not
 
 export interface ReaderSelection {
   readonly anchor: HighlightAnchor;
-  readonly quote: string;
+  readonly quote: QuoteSelector;
 }
 
-export interface NotesViewContext {
+export interface NotesViewContext<Message = never> {
   readonly sourceId: string;
   readonly groupRef: string;
   readonly selection: ReaderSelection | null;
+  /** What "show me this passage" means to the caller. Notes know which anchor a
+   *  note stands on; only the workspace knows what reading it looks like. */
+  readonly jumpToHighlight?: (anchor: HighlightAnchor) => Message;
 }
 
-const selectionHighlight = (sourceId: string, selection: ReaderSelection): Highlight => ({
+/** The reader hands over the anchor and the quote context; the note it becomes
+ *  is the notes slice's to name. */
+export const selectionHighlight = (sourceId: string, selection: ReaderSelection): Highlight => ({
   id: crypto.randomUUID(),
   sourceId,
   anchor: selection.anchor,
-  quote: { type: "TextQuoteSelector", exact: selection.quote, prefix: "", suffix: "" },
+  quote: selection.quote,
   createdAt: new Date().toISOString(),
 });
 
+/** A highlight committed on its own is a note whose body is the marked quote,
+ *  tagged so the reader can tell it from a written note. */
+export const highlightNoteOp = (sourceId: string, highlight: Highlight): NoteOp =>
+  addNoteOp(sourceId, highlightMark(highlight.quote.exact), [highlight], [HIGHLIGHT_TAG]);
+
 export const notesView = <Message>(
   model: NotesModel,
-  { sourceId, groupRef, selection }: NotesViewContext,
+  { sourceId, groupRef, selection, jumpToHighlight }: NotesViewContext<Message>,
   h: HtmlBuilder<Message | NotesMessage>,
 ): Html => {
   const roots = noteThread(model.notes, null);
@@ -375,9 +411,26 @@ export const notesView = <Message>(
 
   const noteItem = (note: Note): Html =>
     h.li(
-      [h.Key(note.id)],
+      [
+        h.Key(note.id),
+        ...(model.focusedNoteId === note.id
+          ? [h.Class("note is-focused"), h.AriaCurrent("true")]
+          : [h.Class("note")]),
+      ],
       [
         h.p([], [note.body]),
+        ...(jumpToHighlight === undefined || note.highlights.length === 0
+          ? []
+          : [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.OnClick(jumpToHighlight(note.highlights[0]!.anchor)),
+                  h.Title("Show this passage in the book"),
+                ],
+                ["Show passage"],
+              ),
+            ]),
         h.p([h.Class("note-byline")], [note.author.name]),
         ...(model.pendingNoteIds.includes(note.id)
           ? [h.span([h.Role("status")], ["Sending"])]

@@ -57,10 +57,10 @@ test("Foldkit reader: swiping switches pane and steps the chrome", async ({ page
   const surface = page.locator(".reader-surface");
 
   await swipe(surface, "up");
-  await expect(page.locator(".reader-shell")).toHaveClass(/reader--chrome-hidden/u);
+  await expect(app).toHaveClass(/app--chrome-hidden/u);
 
   await swipe(surface, "down");
-  await expect(page.locator(".reader-shell")).not.toHaveClass(/reader--chrome-hidden/u);
+  await expect(app).not.toHaveClass(/app--chrome-hidden/u);
 
   await swipe(surface, "left");
   await expect(app).toHaveAttribute("data-pane", "notes");

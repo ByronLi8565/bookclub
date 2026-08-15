@@ -153,7 +153,7 @@ function describeMessage(message: EpubMountMessage): string {
     case "MovedEpub":
       return `MovedEpub:${message.sourceId}:${message.place.cfi ?? "nowhere"}`;
     case "SelectedEpubText":
-      return `SelectedEpubText:${message.sourceId}:${message.quote}`;
+      return `SelectedEpubText:${message.sourceId}:${message.quote.exact}`;
     case "ClearedEpubSelection":
       return `ClearedEpubSelection:${message.sourceId}`;
     case "ClickedEpubHighlight":
@@ -270,7 +270,13 @@ describe("EPUB Foldkit Mount", () => {
     const handle = startReader(adapter, "a");
     await vi.waitFor(() => expect(log()).toContain("OpenedEpub:a"));
 
-    fake.latest().select({ cfi: "epubcfi(/6/8!/4/2/6)", quote: "yellow", point: { x: 4, y: 8 } });
+    fake
+      .latest()
+      .select({
+        cfi: "epubcfi(/6/8!/4/2/6)",
+        quote: { type: "TextQuoteSelector", exact: "yellow", prefix: "", suffix: "" },
+        point: { x: 4, y: 8 },
+      });
     await vi.waitFor(() => expect(log()).toContain("SelectedEpubText:a:yellow"), { timeout: 3000 });
 
     fake.latest().select(null);
@@ -335,7 +341,11 @@ describe("EPUB Foldkit Mount", () => {
 
     const before = log();
     session.moved();
-    session.select({ cfi: "epubcfi(/6/2)", quote: "late", point: { x: 0, y: 0 } });
+    session.select({
+      cfi: "epubcfi(/6/2)",
+      quote: { type: "TextQuoteSelector", exact: "late", prefix: "", suffix: "" },
+      point: { x: 0, y: 0 },
+    });
     await new Promise((resolve) => {
       setTimeout(resolve, 400);
     });

@@ -1,5 +1,6 @@
 import { Effect, Option, Schema } from "effect";
 import { Command, Runtime, Subscription } from "foldkit";
+import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { r } from "foldkit/route";
 import { ts } from "foldkit/schema";
@@ -20,24 +21,34 @@ import {
 import { registerPasskey } from "../logic/auth/authClient.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import {
+  AttachedNoteHighlight,
+  FocusedNoteHighlight,
   NotesModel,
+  SubmittedNoteOperation,
+  highlightNoteOp,
   initialNotesModel,
   isNotesMessage,
   notesHighlights,
   notesView,
+  selectionHighlight,
   updateNotes,
   type NotesMessage,
 } from "./notes.ts";
 import {
+  CommittedReaderSelection,
+  IdentifiedReaderSession,
+  JumpedToHighlight,
   ReaderRoute,
   ReaderWorkspace,
   ShowedReaderHighlights,
+  SwitchedReaderPane,
   browserReaderEnvironment,
   isReaderMessage,
   makeReaderSlice,
   makeReaderSubscriptions,
   openReader,
   type ReaderMessage,
+  type ReaderSelection,
 } from "./reader.ts";
 
 // One slice per application: the Mounts inside it own the live book handles.
@@ -73,6 +84,16 @@ export const ReadyAccount = ts("ReadyAccount", { user: SessionUser });
 export const Account = Schema.Union([UnavailableAccount, ReadyAccount]);
 export type Account = typeof Account.Type;
 
+/** Which workspace layout the viewport asks for. The reader and notes sit side
+ *  by side on a wide screen and page past each other on a phone. */
+export const Viewport = Schema.Literals(["wide", "narrow"]);
+export type Viewport = typeof Viewport.Type;
+
+export const MOBILE_VIEWPORT_QUERY = "(max-width: 720px)";
+
+export const currentViewport = (): Viewport =>
+  globalThis.matchMedia?.(MOBILE_VIEWPORT_QUERY).matches ? "narrow" : "wide";
+
 export const ErrorToast = Schema.Struct({ message: Schema.String });
 export type ErrorToast = typeof ErrorToast.Type;
 
@@ -91,6 +112,7 @@ export const Model = Schema.Struct({
   accountPasskeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
   reader: Schema.NullOr(ReaderWorkspace),
+  viewport: Viewport,
   notes: NotesModel,
   errorToast: Schema.NullOr(ErrorToast),
 });
@@ -99,6 +121,7 @@ export type Model = typeof Model.Type;
 export const LoadedSession = m("LoadedSession", { user: SessionUser });
 export const FailedSession = m("FailedSession", { message: Schema.String });
 export const DismissedErrorToast = m("DismissedErrorToast");
+export const ResizedViewport = m("ResizedViewport", { viewport: Viewport });
 export const Navigated = m("Navigated", { route: Route });
 export const ChangedLogin = m("ChangedLogin", { email: Schema.String, password: Schema.String });
 export const SubmittedPasswordLogin = m("SubmittedPasswordLogin");
@@ -155,6 +178,7 @@ export type Message =
   | typeof LoadedSession.Type
   | typeof FailedSession.Type
   | typeof DismissedErrorToast.Type
+  | typeof ResizedViewport.Type
   | typeof Navigated.Type
   | typeof ChangedLogin.Type
   | typeof SubmittedPasswordLogin.Type
@@ -368,25 +392,13 @@ export const init = (): readonly [Model, []] => [
     hasPassword: false,
     reader: null,
     notes: initialNotesModel(),
+    viewport: currentViewport(),
     errorToast: null,
   },
   [],
 ];
 
 type Update = readonly [Model, readonly Command.Command<Message, never, NoteAgentService>[]];
-
-const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
-  if (message._tag === "SelectedReaderSource") {
-    const { groupRef, sourceId, kind } = message;
-    return [
-      { ...model, route: Reader({ groupRef, sourceId, kind }), reader: openReader(message) },
-      [],
-    ];
-  }
-  if (model.reader === null) return [model, []];
-  const next = updateReader(model.reader, message);
-  return next === null ? [model, []] : [{ ...model, reader: next[0] }, next[1]];
-};
 
 const sameHighlights = (a: readonly { id: string }[], b: readonly { id: string }[]): boolean =>
   a.length === b.length && a.every((left, index) => left.id === b[index]?.id);
@@ -408,7 +420,85 @@ const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
     : [{ ...withNotes, reader: painted[0] }, [...commands, ...painted[1]]];
 };
 
-export const update = (model: Model, message: Message): Update => {
+/** A committed selection is a reader fact that becomes a note: a highlight is
+ *  posted on the spot, while a note carries the passage into the composer. */
+const commitSelection = (
+  model: Model,
+  selection: ReaderSelection,
+  sourceId: string,
+  intent: "note" | "highlight",
+): Update => {
+  const highlight = selectionHighlight(sourceId, selection);
+  return updateNotesSlice(
+    model,
+    intent === "highlight"
+      ? SubmittedNoteOperation({ op: highlightNoteOp(sourceId, highlight) })
+      : AttachedNoteHighlight({ highlight }),
+  );
+};
+
+const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
+  if (message._tag === "SelectedReaderSource") {
+    const { groupRef, sourceId, kind } = message;
+    const [reader, commands] = updateReader(openReader(message), message) ?? [
+      openReader(message),
+      [],
+    ];
+    return [{ ...model, route: Reader({ groupRef, sourceId, kind }), reader }, commands];
+  }
+  if (model.reader === null) return [model, []];
+  const selection = model.reader.selection;
+  const sourceId = model.reader.sourceId;
+  const next = updateReader(model.reader, message);
+  if (next === null) return [model, []];
+  const withReader: Model = { ...model, reader: next[0] };
+  // A click on a painted highlight is the reader pointing at a note.
+  if (message._tag === "ClickedEpubHighlight") {
+    const [focused, focusCommands] = updateNotesSlice(
+      withReader,
+      FocusedNoteHighlight({ highlightId: message.highlightId }),
+    );
+    return [focused, [...next[1], ...focusCommands]];
+  }
+  if (message._tag !== "CommittedReaderSelection" || selection === null) {
+    return [withReader, next[1]];
+  }
+  const [committed, noteCommands] = commitSelection(
+    withReader,
+    selection,
+    sourceId,
+    message.intent,
+  );
+  return [committed, [...next[1], ...noteCommands]];
+};
+
+/**
+ * The reader keeps a reading place only for a signed-in member of a loaded
+ * club, and both facts can land after the book is already open. Reconciling
+ * after every Message is what lets the reader stay a slice that is told who is
+ * reading rather than one that reaches into the session.
+ */
+const reconcileReaderIdentity = ([model, commands]: Update): Update => {
+  const { reader, currentGroup, session } = model;
+  if (reader === null || currentGroup === null || session._tag !== "AuthenticatedSession") {
+    return [model, commands];
+  }
+  if (reader.userId === session.user.id && reader.groupId === currentGroup.groupId) {
+    return [model, commands];
+  }
+  const identified = updateReader(
+    reader,
+    IdentifiedReaderSession({ userId: session.user.id, groupId: currentGroup.groupId }),
+  );
+  return identified === null
+    ? [model, commands]
+    : [{ ...model, reader: identified[0] }, [...commands, ...identified[1]]];
+};
+
+export const update = (model: Model, message: Message): Update =>
+  reconcileReaderIdentity(updateSlices(model, message));
+
+const updateSlices = (model: Model, message: Message): Update => {
   if (isReaderMessage(message)) return updateReaderSlice(model, message);
   if (isNotesMessage(message)) return updateNotesSlice(model, message);
   switch (message._tag) {
@@ -433,6 +523,8 @@ export const update = (model: Model, message: Message): Update => {
       ];
     case "DismissedErrorToast":
       return [{ ...model, errorToast: null }, []];
+    case "ResizedViewport":
+      return [{ ...model, viewport: message.viewport }, []];
     case "Navigated":
       return [
         { ...model, route: message.route },
@@ -572,10 +664,133 @@ const readerSubscriptions = makeReaderSubscriptions<Model, Message>({
   toMessage: (message) => message,
 });
 
+/** The workspace layout follows the same breakpoint the React workspace uses;
+ *  a media-query listener is the browser fact, the Model holds the answer. */
+const viewportSubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  viewport: entry(
+    {},
+    {
+      modelToDependencies: () => ({}),
+      dependenciesToStream: () =>
+        Subscription.fromEvent<MediaQueryListEvent, Message>({
+          target: () => globalThis.matchMedia(MOBILE_VIEWPORT_QUERY),
+          type: "change",
+          toMessage: (event) => ResizedViewport({ viewport: event.matches ? "narrow" : "wide" }),
+        }),
+    },
+  ),
+}));
+
 const subscriptions = Subscription.aggregate<Model, Message, NoteAgentService>()(
   noteAgentSubscriptions,
   readerSubscriptions,
+  viewportSubscriptions,
 );
+
+/**
+ * Reader and notes, laid out the way the viewport asks for: side by side on a
+ * wide screen, and as two pages of a swipeable track on a phone, where the
+ * reader's `pane` decides which one is showing.
+ */
+const workspaceView = (
+  model: Model,
+  reader: ReaderWorkspace,
+  groupRef: string,
+  h: HtmlBuilder<Message>,
+): Html => {
+  const narrow = model.viewport === "narrow";
+  const notes = notesView(
+    model.notes,
+    {
+      sourceId: reader.sourceId,
+      groupRef,
+      selection: reader.selection,
+      jumpToHighlight: (anchor) => JumpedToHighlight({ anchor }),
+    },
+    h,
+  );
+  const track = h.div(
+    [
+      h.Class(narrow ? "workspace-layout-track pager-track" : "workspace-layout-track"),
+      ...(narrow && reader.pane === "notes" ? [h.Style({ transform: "translateX(-100%)" })] : []),
+    ],
+    [
+      h.div(
+        [h.Key("reader"), h.Class(narrow ? "pager-page" : "split-pane")],
+        [readerView(reader, h)],
+      ),
+      h.div(
+        [h.Key("notes"), h.Class(narrow ? "pager-page" : "split-pane split-pane--grow")],
+        [notes],
+      ),
+    ],
+  );
+  const chromeHidden = reader.chromeLevel >= 1;
+  if (!narrow) {
+    return h.div(
+      [
+        h.Class(
+          chromeHidden ? "workspace-layout split app--chrome-hidden" : "workspace-layout split",
+        ),
+      ],
+      [track],
+    );
+  }
+  return h.div(
+    [
+      h.Class(
+        chromeHidden ? "workspace-layout pager app--chrome-hidden" : "workspace-layout pager",
+      ),
+    ],
+    [
+      track,
+      h.div(
+        [h.Class("pager-tabs")],
+        reader.selection === null
+          ? [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.AriaPressed(String(reader.pane === "reader")),
+                  h.OnClick(SwitchedReaderPane({ pane: "reader" })),
+                  h.Title("Show reader"),
+                ],
+                ["Reader"],
+              ),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.AriaPressed(String(reader.pane === "notes")),
+                  h.OnClick(SwitchedReaderPane({ pane: "notes" })),
+                  h.Title("Show notes"),
+                ],
+                ["Notes"],
+              ),
+            ]
+          : [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("pager-add-note"),
+                  h.OnClick(CommittedReaderSelection({ intent: "note" })),
+                  h.Title("Add a note on this selection"),
+                ],
+                ["Add Note"],
+              ),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("pager-add-note pager-highlight"),
+                  h.OnClick(CommittedReaderSelection({ intent: "highlight" })),
+                  h.Title("Highlight this selection"),
+                ],
+                ["Highlight"],
+              ),
+            ],
+      ),
+    ],
+  );
+};
 
 export const makeBookclubApplication = (container: HTMLElement) => {
   container.id = FOLDKIT_RUNTIME_ID;
@@ -664,22 +879,8 @@ export const makeBookclubApplication = (container: HTMLElement) => {
               )
             : model.route._tag === "Reader"
               ? model.reader === null
-                ? h.p([h.Role("status")], ["Loading book"])
-                : h.div(
-                    [h.Class("reader-layout")],
-                    [
-                      readerView(model.reader, h),
-                      notesView(
-                        model.notes,
-                        {
-                          sourceId: model.reader.sourceId,
-                          groupRef: model.route.groupRef,
-                          selection: model.reader.selection,
-                        },
-                        h,
-                      ),
-                    ],
-                  )
+                ? h.p([h.Class("reader-empty label")], ["Open a book to begin."])
+                : workspaceView(model, model.reader, model.route.groupRef, h)
               : model.route._tag === "Group"
                 ? h.section(
                     [h.AriaLabel("Club")],
