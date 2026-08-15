@@ -13,12 +13,22 @@ export default defineConfig({
   projects: [
     {
       name: "Mobile Safari",
-      testMatch: ["**/pdfMobile.pw.ts", "**/visual.pw.ts"],
+      testMatch: [
+        "**/pdfMobile.pw.ts",
+        "**/readerGestures.pw.ts",
+        "**/foldkitReaderGestures.pw.ts",
+        "**/visual.pw.ts",
+      ],
       use: { ...devices["iPhone 14"] },
     },
     {
       name: "Desktop Safari",
-      testMatch: ["**/readerActions.pw.ts", "e2e/browser/**/*.pw.ts"],
+      testMatch: [
+        "**/readerActions.pw.ts",
+        "**/readerKeyboard.pw.ts",
+        "**/foldkitReader.pw.ts",
+        "e2e/browser/**/*.pw.ts",
+      ],
       use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
     },
   ],
