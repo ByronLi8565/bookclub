@@ -2,10 +2,10 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { apiFetch } from "./api.ts";
 
-export class ApiRequestError extends Schema.TaggedErrorClass<ApiRequestError>()(
-  "Api.RequestError",
-  { operation: Schema.String, cause: Schema.Defect() },
-) {}
+export class ApiRequestError extends Schema.TaggedError<ApiRequestError>()("Api.RequestError", {
+  operation: Schema.String,
+  cause: Schema.Defect(),
+}) {}
 
 export const request = Effect.fn("Api.request")(function* (
   operation: string,

@@ -8,10 +8,10 @@ const DB_VERSION = 2;
 export const BOOKS_STORE = "books";
 export const NOTES_STORE = "notes";
 
-export class PersistError extends Schema.TaggedErrorClass<PersistError>()(
-  "IndexedDb.PersistError",
-  { operation: Schema.String, cause: Schema.Defect() },
-) {}
+export class PersistError extends Schema.TaggedError<PersistError>()("IndexedDb.PersistError", {
+  operation: Schema.String,
+  cause: Schema.Defect(),
+}) {}
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 

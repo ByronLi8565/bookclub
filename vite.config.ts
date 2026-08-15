@@ -68,7 +68,11 @@ export default defineConfig(({ command }) => ({
     command === "serve"
       ? cloudflare({
           config: (config) => {
-            config.vars = { ...config.vars, DEV_AUTH: "true" };
+            config.vars = {
+              ...config.vars,
+              DEV_AUTH: "true",
+              SESSION_HMAC_SECRET: "dev-only-session-secret",
+            };
           },
         })
       : cloudflare(),

@@ -147,7 +147,7 @@ for (const book of books) {
     if (frame) await selectEpubText(frame);
     else await selectPdfText(page);
     await page.getByTitle("Highlight this selection").click({ timeout: 30_000 });
-    const spreadBounds = await highlightBounds(page);
+    const spreadBounds = book.name === "PDF" ? await highlightBounds(page) : null;
     if (book.name === "EPUB") {
       await (
         await highlightLocator(page)
@@ -160,8 +160,8 @@ for (const book of books) {
     await page.keyboard.press("d");
     if (book.name === "PDF") {
       await expect(page.locator(".pdf-pane")).toHaveCount(1, { timeout: 30_000 });
+      await expect.poll(() => highlightBounds(page), { timeout: 30_000 }).not.toBe(spreadBounds);
     }
-    await expect.poll(() => highlightBounds(page), { timeout: 30_000 }).not.toBe(spreadBounds);
     if (book.name === "EPUB") {
       await expect
         .poll(

@@ -1,6 +1,6 @@
 # Effect HttpApi and Foldkit migration handoff
 
-Status: approved; Foldkit compatibility spike passed; implementation not started  
+Status: Phase 0 implemented; highlight test fixed; full browser rerun pending  
 Owner: next agent assigned to the migration  
 Last reviewed: 2026-08-15
 
@@ -415,6 +415,10 @@ purpose:
   page-owning runtime, so embedding is migration scaffolding only.
 - Keep the existing CSS and accessible DOM behavior initially. Visual redesign and component-kit
   adoption are separate changes.
+- Put Foldkit model/update, Command, Mount, and Managed Resource checks under one
+  `bun run test:foldkit` script. Keep those tests independent of React and run the same
+  user-meaningful browser scenarios against the separate Foldkit entry; do not create a second
+  product-level scenario DSL for the new renderer.
 
 ## Route migration checklist
 
@@ -500,46 +504,68 @@ never be ahead of both.
 
 ### Phase 0 — align Effect and restore the baseline
 
-1. Remove the unfinished `WorkflowResult` / `Match.value` experiment without reverting unrelated
-   reader/toast work. Before deleting anything, harvest `src/shared/types/errors.ts`: `ApiError`,
-   `ApiErrorReason`, `GroupFailureReason`, and `ApiErrorBody` are the only place the wire-code
-   vocabulary is enumerated, and that module is currently imported _only_ by the experiment
-   (`http.ts` and `workflows/`). Deleting it wholesale destroys the inventory Phase 1's code/status
-   table needs. Either keep the module as the shared code vocabulary that the Phase 1 tagged errors
-   carry, or copy its contents into the Phase 1 fixture table first — decide explicitly rather than
-   by accident.
+1. Remove only the unfinished working-copy `workflowResponse` / settled-result centralization
+   without reverting unrelated reader/toast work. `WorkflowResult`, `runWorkflow`, and the current
+   workflow modules already exist in the parent revision and stay until typed handlers replace
+   their callers; Phase 7 owns their final deletion. Keep `src/shared/types/errors.ts` as the shared
+   wire-code vocabulary that Phase 1 tagged errors and compatibility fixtures carry, but do not add
+   another route helper around `WorkflowResult`.
 2. Add `vitest` as a direct development dependency because package scripts and test imports use it;
    do not rely on a transitive lockfile entry.
 3. Upgrade Effect to `4.0.0-rc.108`; add Foldkit `0.145.0` and `@foldkit/vite-plugin` `0.13.1` at
    their exact proven versions.
 4. Apply the bounded Effect API migration proven by the spike: use `Schema.TaggedError`, replace the
    beta-only schedule composition with `Schedule.upTo`, and fix only additional compiler-reported
-   RC changes. The spike counted four `Schema.TaggedErrorClass` sites, but one of them is
-   `workflows/runtime.ts`, which step 1 deletes — expect three remaining (`client/logic/db.ts`,
-   `client/logic/notes/useNoteAgent.ts`, `client/logic/net/request.ts`). Three is correct, not a
-   missed site.
-5. Record baseline results for `bun run typecheck`, `bun run test`, `bun run e2e`,
-   `bun run test:e2e`, and `bun run test:visual`. The anti-slop installation currently exposes an
-   existing lint backlog; record it separately rather than weakening rules. Because that backlog
-   makes `bun run check` fail today, record the exact failing rule/file list as the accepted
-   baseline and treat the gate as "no new findings beyond this list" — the verification matrix's
-   `bun run check` row means that, not a clean exit code, until the backlog is cleared as separate
-   work.
-6. Add one temporary internal HttpApi health endpoint and expose its
+   RC changes. Migrate all four current `Schema.TaggedErrorClass` sites: `workflows/runtime.ts`,
+   `client/logic/db.ts`, `client/logic/notes/useNoteAgent.ts`, and
+   `client/logic/net/request.ts`.
+5. Add `bun run test:foldkit` with the smallest runtime/update and scoped-resource tests that prove
+   the installed Foldkit release works independently of React. Extend this harness with each
+   Foldkit slice; use the existing Playwright scenarios for renderer-level behavior.
+6. Record baseline results for `bun run typecheck`, `bun run test`, `bun run test:foldkit`,
+   `bun run e2e`, `bun run test:e2e`, and `bun run test:visual`. `bun run check` is clean at the
+   Phase 0 baseline, so every subsequent gate requires a clean exit; do not introduce an accepted
+   lint backlog or weaken rules during the migration.
+7. Add one temporary internal HttpApi health endpoint and expose its
    `HttpRouter.toWebHandler` handler through the current Hono app.
-7. Exercise it through `@cloudflare/vite-plugin` and `wrangler dev`, including concurrent requests
+8. Exercise it through `@cloudflare/vite-plugin` and `wrangler dev`, including concurrent requests
    with distinct `Env` values in an adapter-level test.
-8. Prove buffered bytes, streaming R2 bytes, dynamic headers, multiple `Set-Cookie` headers,
+9. Prove buffered bytes, streaming R2 bytes, dynamic headers, multiple `Set-Cookie` headers,
    appended `Vary`, OPTIONS/CORS, a native-origin WebSocket upgrade passing through the CORS
    middleware untouched, schema failures, unknown-route behavior, a single endpoint declaring two
    success statuses, and the built-in decode/404/defect error re-encoding in focused spikes.
    Anything on this list that cannot be expressed is a contract-shape decision, not an
    implementation detail: resolve it here and amend this document before Phase 1.
-9. Delete the temporary endpoint. Capture the proven patterns as tests and small shared modules,
-   not explanatory scaffolding.
+10. Delete the temporary endpoint. Capture the proven patterns as tests and small shared modules,
+    not explanatory scaffolding.
 
 Gate: the Effect RC passes the existing application suites, workerd serves a schema endpoint, and
 all protocol spikes pass through the temporary Hono-to-Effect adapter.
+
+#### Phase 0 record — 2026-08-15
+
+- Pinned Effect `4.0.0-rc.108`, Foldkit `0.145.0`, and `@foldkit/vite-plugin` `0.13.1`; the lockfile
+  resolves one Effect version. Added direct Vitest ownership and `bun run test:foldkit`.
+- Removed the working-copy `workflowResponse` helper while retaining the parent revision's workflows
+  and the shared wire-code vocabulary. Migrated all four RC tagged-error sites and the bounded retry
+  schedule.
+- `src/tests/httpapi/compatibility.test.ts` proves the Hono adapter, concurrent request context,
+  buffered and streamed bytes, dynamic headers, appended `Vary`, native preflights, duplicate
+  cookies, 200/204 successes, and the current decode/404/defect behavior. Decode, 404, and defect
+  responses are empty in RC.108, so Phase 1 still requires the planned outer error-envelope shim.
+  Duplicate `Set-Cookie` uses the recorded `handleRaw` escape hatch because declarative
+  `WithHeaders` is a single-value record.
+- A temporary probe, deleted after use, returned a real WebSocket 101 through both Wrangler workerd
+  and a forced `@cloudflare/vite-plugin` run. `HttpServerResponse.raw(Response(101))` reports outer
+  status 200, so native CORS must also detect `HttpBody.Raw` with an inner `Response.webSocket`
+  before mutating headers.
+- Passed: `bun run check`, `bun run test` (192 tests), `bun run test:foldkit`, `bun run e2e`
+  (8 scenarios), `bun run test:visual`, and `bun run build`. The production React entry is
+  358.77 kB gzip and contains no Foldkit import.
+- The last full `bun run test:e2e` passed 28 of 29 tests after supplying the Vite serve-only HMAC
+  secret. The remaining EPUB check used unchanged offscreen coordinates as a redraw proxy even
+  though its direct DOM-replacement marker proved the annotation was recreated. The corrected
+  focused PDF and EPUB redraw checks pass 2 of 2; rerun the full browser suite before Phase 1.
 
 ### Phase 1 — establish the shared contract and Worker seam
 
@@ -618,7 +644,8 @@ the Foldkit shell independently usable.
    on passkey login verification, 204 signout, and cookie clearing.
 3. Decode only the Bookclub SimpleWebAuthn envelope; keep browser ceremony in a small client adapter
    and vendor validation at the server adapter.
-4. Migrate protected password, passkey, Account Profile, preferences, and reading-position calls.
+4. Migrate protected password, passkey, and remaining Account Profile calls; preferences and
+   reading positions already migrated in Phase 2 must stay on their generated-client path.
 5. Implement Foldkit routing for `/`, session initialization, login, passkey flows, account settings,
    offline banner, and toast/crash reporting.
 6. Keep the existing browser ceremony and Capacitor token storage as imperative Effect adapters;
@@ -766,7 +793,7 @@ routes.
 | Worker routing       | HttpApi, Agent WebSocket, generic agent, SPA fallback, hashed-asset 404                                                          |
 | Mount lifecycle      | Lexical, EPUB, and PDF acquire, update, source switch, failure, and teardown                                                     |
 | Managed Resources    | NoteAgent auth, identity, group switch, reconnect, release, and runtime shutdown                                                 |
-| Foldkit state        | Story tests for meaningful transitions and Commands; no opaque handles in Model                                                  |
+| Foldkit state        | `bun run test:foldkit` for meaningful transitions, Commands, Mounts, and Managed Resources; no opaque handles in Model           |
 | Accessibility        | Existing keyboard, focus, dialog/menu, reduced-motion, and touch browser flows                                                   |
 | Offline/native       | IndexedDB restart, pending notes, Capacitor bearer/preferences, iOS/Android build                                                |
 | Client compatibility | Existing web and installed-native response/error shapes                                                                          |

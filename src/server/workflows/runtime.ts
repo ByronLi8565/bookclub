@@ -15,7 +15,7 @@ export interface WorkflowFailure {
   reason?: ApiErrorReason;
 }
 
-export class WorkflowFailureError extends Schema.TaggedErrorClass<WorkflowFailureError>()(
+export class WorkflowFailureError extends Schema.TaggedError<WorkflowFailureError>()(
   "Workflow.Failure",
   {
     status: Schema.Number,

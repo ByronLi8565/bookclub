@@ -40,15 +40,13 @@ export interface NoteSync {
   rebindHighlight: (noteId: string, highlightId: string, anchor: HighlightAnchor) => boolean;
 }
 
-class FlushError extends Schema.TaggedErrorClass<FlushError>()("NoteSync.FlushError", {
+class FlushError extends Schema.TaggedError<FlushError>()("NoteSync.FlushError", {
   cause: Schema.Defect(),
 }) {}
 
 const retrySchedule = Schedule.exponential("300 millis").pipe(
   Schedule.jittered,
-  // beta.83 does not yet expose Schedule.upTo; intersect with a counter to
-  // bound the exponential schedule to four retries.
-  Schedule.both(Schedule.recurs(4)),
+  Schedule.upTo({ times: 4 }),
 );
 
 export function useNoteAgent(
