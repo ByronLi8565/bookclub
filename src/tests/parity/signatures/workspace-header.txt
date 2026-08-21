@@ -1,0 +1,13 @@
+header.topbar
+  a.topbar-home[aria-label=back to your clubs href=/]
+    "‹"
+  h1[title=Double-click to rename the club]
+    "Club Alpha"
+  button.presence-indicator[type=button aria-label=2 people online — show group title=Show group]
+    span.presence-count
+      "2"
+    span.presence-dot[aria-hidden]
+  button.icon-button.settings-button[type=button aria-label=settings title=Settings]
+    img[aria-hidden alt src=svg%3e]
+  button.workspace-info-button[type=button aria-label=open info title=About & release log]
+    "i"

@@ -1,0 +1,27 @@
+div.modal-backdrop[role=presentation]
+  dialog.modal[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "account settings"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.modal-body.settings-body
+        section.settings-item.settings-item--stacked
+          div.settings-item-text
+            h2.settings-item-head
+              "Passkeys"
+            p.settings-item-desc
+              "Sign in with Face ID, Touch ID, or a security key."
+          p.settings-item-desc
+            "This browser doesn't support passkeys."
+        section.settings-item.settings-item--stacked
+          div.settings-item-text
+            h2.settings-item-head
+              "Password"
+            p.settings-item-desc
+              "Set an optional password to sign in without an email code."
+          form.account-password-form
+            input[type=password aria-label=New password placeholder=password]
+            button.settings-action[type=submit title=Set password disabled]
+              "set password"

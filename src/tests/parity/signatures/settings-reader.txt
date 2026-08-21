@@ -1,0 +1,39 @@
+div.modal-backdrop[role=presentation]
+  dialog.modal[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "settings"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.modal-body.settings-body
+        section.settings-item.settings-user-profile
+          div.settings-user-avatar[aria-label=Profile picture]
+            span
+              "R"
+          div.settings-item-text
+            h2.settings-item-head
+              "Profile picture"
+            p.settings-item-desc
+          div.settings-item-control
+            input[type=file accept=image/jpeg,image/png,image/webp,image/gif]
+            button.settings-action[type=button]
+              "Choose photo"
+        section.settings-item.settings-item--stacked
+          div.settings-item-text
+            h2.settings-item-head
+              "Nickname"
+            p.settings-item-desc
+              "Per-club name"
+          form.settings-text-submit-form
+            input[aria-label=Display name]
+            button.settings-action.settings-text-submit-button[type=submit aria-label=Save display name title=Save display name (Enter) disabled]
+              span[aria-hidden]
+                "↵"
+      div.pager-tabs.settings-tabs
+        button[type=button aria-pressed title=User settings]
+          "User"
+        button[type=button aria-pressed=false title=General settings]
+          "General"
+        button[type=button aria-pressed=false title=PDF settings]
+          "PDF"

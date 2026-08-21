@@ -1,0 +1,15 @@
+div.modal-backdrop[role=presentation]
+  dialog.modal[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "sign in"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.modal-body
+        form
+          p.modal-note
+            "Enter the code we sent to reader@example.com."
+          input[type=text aria-label=Verification code placeholder=6-digit code]
+          button.primary[type=submit title=Verify code disabled]
+            "verify"

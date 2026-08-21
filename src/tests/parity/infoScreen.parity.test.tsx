@@ -31,6 +31,6 @@ describe("info screen parity", () => {
       model: initialInfoModel(),
       view: (model, h) => infoView(model, { onClose: Close }, h),
     });
-    expectParity(react, foldkit);
+    expectParity("info-screen", react, foldkit);
   });
 });

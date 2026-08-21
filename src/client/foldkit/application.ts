@@ -1,8 +1,7 @@
 import { Duration, Effect, Option, Schema, Stream } from "effect";
-import { Command, Runtime, Subscription } from "foldkit";
+import { Command, Navigation, Runtime, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
-import { r } from "foldkit/route";
 import { ts } from "foldkit/schema";
 import {
   GroupRoleSchema,
@@ -21,6 +20,8 @@ import {
 } from "./resources/noteAgent.ts";
 import { passkeyLogin, passkeysSupported, registerPasskey } from "../logic/auth/authClient.ts";
 import { loginErrorMessage } from "../logic/auth/authMessages.ts";
+import type { Url } from "foldkit/url";
+import { AppRoute, Club, Home, hrefFor, routeOf } from "./routes.ts";
 import { clubNameErrorMessage } from "../logic/groups/groupMessages.ts";
 import { setSessionToken } from "../logic/net/api.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
@@ -122,11 +123,11 @@ export const FOLDKIT_RUNTIME_ID = "bookclub-foldkit";
 
 /** React routes `/` and `/clubs/:groupRef` and nothing else: signing in and the
  *  account live in overlays over whichever page is showing, and a club with a
- *  book open *is* the workspace rather than a page of its own. */
-export const Home = r("Home");
-export const Club = r("Club", { groupRef: Schema.String });
-export const Route = Schema.Union([Home, Club]);
-export type Route = typeof Route.Type;
+ *  book open *is* the workspace rather than a page of its own. The table itself
+ *  is in `routes.ts`, which owns parsing and link building too. */
+export { Club, Home, hrefFor } from "./routes.ts";
+export const Route = AppRoute;
+export type Route = AppRoute;
 
 const SessionUser = Schema.Struct({
   id: Schema.String,
@@ -238,6 +239,9 @@ export const Model = Schema.Struct({
   membership: Schema.NullOr(Membership),
   members: Schema.Array(RosterEntry),
   joinGroupRef: Schema.String,
+  /** The token an invite link arrived with, held until the club reports whether
+   *  this reader is already a member. */
+  pendingInvite: Schema.NullOr(Schema.String),
   inviteToken: Schema.String,
   accountPasskeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
@@ -300,6 +304,10 @@ export const LoadedGroups = m("LoadedGroups", { groups: Schema.Array(GroupSummar
 export const StartedCreatingClub = m("StartedCreatingClub");
 export const CancelledCreatingClub = m("CancelledCreatingClub");
 export const FailedCreateGroup = m("FailedCreateGroup", { error: Schema.String });
+export const JoinedGroup = m("JoinedGroup", { group: GroupSummary });
+export const FailedJoin = m("FailedJoin");
+export const LeftForExternalUrl = m("LeftForExternalUrl", { href: Schema.String });
+export const LeftTheApp = m("LeftTheApp");
 export const ChangedNewGroupName = m("ChangedNewGroupName", { name: Schema.String });
 export const SubmittedNewGroup = m("SubmittedNewGroup");
 export const CreatedGroup = m("CreatedGroup", { group: GroupSummary });
@@ -402,6 +410,10 @@ export type Message =
   | typeof StartedCreatingClub.Type
   | typeof CancelledCreatingClub.Type
   | typeof FailedCreateGroup.Type
+  | typeof JoinedGroup.Type
+  | typeof FailedJoin.Type
+  | typeof LeftForExternalUrl.Type
+  | typeof LeftTheApp.Type
   | typeof ChangedNewGroupName.Type
   | typeof SubmittedNewGroup.Type
   | typeof CreatedGroup.Type
@@ -573,6 +585,33 @@ export const RememberSelectedSource = Command.define("RememberSelectedSource", {
     }),
 });
 
+/** A link that leaves the app is a full page load, which only the runtime can
+ *  perform — an `update` cannot touch the browser itself. */
+/** Navigation the reader did not click: landing on a club just created, or on
+ *  the clubs card after signing out. The Model and the address bar move
+ *  together or the back button lies. */
+export const PushUrl = Command.define("PushUrl", {
+  args: { href: Schema.String },
+  messages: [LeftTheApp],
+  execute: ({ href }) => Navigation.pushUrl(href).pipe(Effect.as(LeftTheApp())),
+});
+
+/** The same, without a history entry: used to drop a spent `?invite=` token so
+ *  the back button cannot re-offer it. */
+export const ReplaceUrl = Command.define("ReplaceUrl", {
+  args: { href: Schema.String },
+  messages: [LeftTheApp],
+  execute: ({ href }) => Navigation.replaceUrl(href).pipe(Effect.as(LeftTheApp())),
+});
+
+export const LoadExternalUrl = Command.define("LoadExternalUrl", {
+  args: { href: Schema.String },
+  // The page is being replaced, so this arrives only if the browser refused the
+  // navigation; a Command has to name a Message either way.
+  messages: [LeftTheApp],
+  execute: ({ href }) => Navigation.load(href).pipe(Effect.as(LeftTheApp())),
+});
+
 export const CreateGroup = Command.define("CreateGroup", {
   args: { displayName: Schema.String },
   messages: [CreatedGroup, FailedCreateGroup],
@@ -692,12 +731,12 @@ export const LoadInvite = Command.define("LoadInvite", {
 
 export const JoinGroup = Command.define("JoinGroup", {
   args: { groupRef: Schema.String, token: Schema.String },
-  messages: [CreatedGroup, FailedClientCommand],
+  messages: [JoinedGroup, FailedJoin],
   execute: ({ groupRef, token }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.join({ params: { groupRef }, payload: { token } })),
-      Effect.map(({ group }) => CreatedGroup({ group })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.map(({ group }) => JoinedGroup({ group })),
+      Effect.catch(() => Effect.succeed(FailedJoin())),
     ),
 });
 
@@ -763,6 +802,12 @@ const DESKTOP_READER_SHARE = 62;
 const MIN_SPLIT_SHARE = 25;
 const MAX_SPLIT_SHARE = 80;
 
+/** The first paint of whatever URL the browser opened on. */
+export const initFromUrl = (url: Url): Update => {
+  const [model] = init();
+  return navigateTo(model, routeOf(url));
+};
+
 export const init = (): readonly [Model, []] => [
   {
     route: Home(),
@@ -784,6 +829,7 @@ export const init = (): readonly [Model, []] => [
     membership: null,
     members: [],
     joinGroupRef: "",
+    pendingInvite: null,
     inviteToken: "",
     accountPasskeys: [],
     hasPassword: false,
@@ -860,6 +906,25 @@ const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
   return painted === null
     ? [withNotes, commands]
     : [{ ...withNotes, reader: painted[0] }, [...commands, ...painted[1]]];
+};
+
+/**
+ * Arriving at a route, however the reader got there: a link click, a redirect
+ * after creating a club, or the first paint of a URL typed into the bar.
+ * Leaving a club puts its book away, the way React unmounts the workspace when
+ * the route changes.
+ */
+const navigateTo = (model: Model, route: Route): Update => {
+  if (route._tag === "Home") {
+    return [{ ...model, route, reader: null, currentGroup: null, pendingInvite: null }, []];
+  }
+  const { groupRef, invite } = route;
+  return [
+    // The token is held rather than acted on: only the club's own answer says
+    // whether this reader still needs it.
+    { ...model, route, pendingInvite: invite ?? null },
+    [LoadGroup({ groupRef })],
+  ];
 };
 
 /** A committed selection is a reader fact that becomes a note: a highlight is
@@ -1158,14 +1223,7 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "ResizedViewport":
       return [{ ...model, viewport: message.viewport }, []];
     case "Navigated":
-      return [
-        // Leaving a club puts its book away, the way React unmounts the
-        // workspace when the route changes.
-        message.route._tag === "Home"
-          ? { ...model, route: message.route, reader: null, currentGroup: null }
-          : { ...model, route: message.route },
-        message.route._tag === "Club" ? [LoadGroup({ groupRef: message.route.groupRef })] : [],
-      ];
+      return navigateTo(model, message.route);
     case "ChangedLoginEmail":
       return [{ ...model, loginEmail: message.email }, []];
     case "ChangedLoginPassword":
@@ -1234,11 +1292,32 @@ const updateSlices = (model: Model, message: Message): Update => {
           currentGroup: message.group,
           route: Club({ groupRef: groupUrlName(message.group) }),
         },
-        [],
+        [PushUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })],
       ];
+    case "JoinedGroup": {
+      const groupRef = groupUrlName(message.group);
+      return [
+        { ...model, route: Club({ groupRef }), currentGroup: message.group },
+        [
+          // The token is spent; leaving it in the address bar would let the back
+          // button and a copied link try to redeem it again.
+          ReplaceUrl({ href: hrefFor(Club({ groupRef })) }),
+          LoadGroup({ groupRef }),
+        ],
+      ];
+    }
     case "LoadedGroup": {
+      // An invite link is only spent once the club says this reader is not
+      // already in it, which is the order React redeems in too.
+      if (!message.membership.isMember && model.pendingInvite !== null) {
+        return [
+          { ...model, pendingInvite: null },
+          [JoinGroup({ groupRef: groupUrlName(message.group), token: model.pendingInvite })],
+        ];
+      }
       const loaded = {
         ...model,
+        pendingInvite: null,
         currentGroup: message.group,
         membership: message.membership,
         members: message.members,
@@ -1342,7 +1421,7 @@ const updateSlices = (model: Model, message: Message): Update => {
           account: UnavailableAccount(),
           groups: [],
         },
-        [],
+        [PushUrl({ href: hrefFor(Home()) })],
       ];
     case "DeletedGroup":
       return [
@@ -1354,7 +1433,7 @@ const updateSlices = (model: Model, message: Message): Update => {
           members: [],
           membership: null,
         },
-        [],
+        [PushUrl({ href: hrefFor(Home()) })],
       ];
     case "RequestedSignOut":
       return [model, [SignOut()]];
@@ -1374,6 +1453,12 @@ const updateSlices = (model: Model, message: Message): Update => {
       return [model, [SetMemberRole(message)]];
     case "RequestedDeleteGroup":
       return [model, [DeleteGroup(message)]];
+    case "LeftForExternalUrl":
+      return [model, [LoadExternalUrl({ href: message.href })]];
+    case "LeftTheApp":
+      return [model, []];
+    case "FailedJoin":
+      return withToast(model, errorToast("Invite failed", "That invite link isn't valid."));
     case "FailedClientCommand":
       return withToast(model, errorToast("Something went wrong", message.message));
     case "CompletedPasskeyRegistration":
@@ -1839,13 +1924,8 @@ export const workspaceHeaderView = (
   h.header(
     [h.Class("topbar")],
     [
-      h.button(
-        [
-          h.Type("button"),
-          h.Class("topbar-home"),
-          h.AriaLabel("back to your clubs"),
-          h.OnClick(Navigated({ route: Home() })),
-        ],
+      h.a(
+        [h.Class("topbar-home"), h.Href(hrefFor(Home())), h.AriaLabel("back to your clubs")],
         ["\u2039"],
       ),
       renamableTitle(model, "club", displayName, h),
@@ -1967,13 +2047,8 @@ const loginCorner = (model: Model, h: HtmlBuilder<Message>): Html =>
   );
 
 const backToClubs = (h: HtmlBuilder<Message>): Html =>
-  h.button(
-    [
-      h.Type("button"),
-      h.Class("home-back"),
-      h.AriaLabel("back to your clubs"),
-      h.OnClick(Navigated({ route: Home() })),
-    ],
+  h.a(
+    [h.Class("home-back"), h.Href(hrefFor(Home())), h.AriaLabel("back to your clubs")],
     ["\u2039"],
   );
 
@@ -1988,12 +2063,8 @@ const clubList = (model: Model, h: HtmlBuilder<Message>): Html =>
             h.li(
               [h.Key(group.groupId)],
               [
-                h.button(
-                  [
-                    h.Type("button"),
-                    h.Class("login-link plain-button"),
-                    h.OnClick(Navigated({ route: Club({ groupRef: groupUrlName(group) }) })),
-                  ],
+                h.a(
+                  [h.Href(hrefFor(Club({ groupRef: groupUrlName(group) })))],
                   [group.displayName],
                 ),
                 h.button(
@@ -2365,13 +2436,8 @@ const workspaceLoadingView = (model: Model, h: HtmlBuilder<Message>): Html =>
       h.header(
         [h.Class("topbar")],
         [
-          h.button(
-            [
-              h.Type("button"),
-              h.Class("topbar-home"),
-              h.AriaLabel("back to your clubs"),
-              h.OnClick(Navigated({ route: Home() })),
-            ],
+          h.a(
+            [h.Class("topbar-home"), h.Href(hrefFor(Home())), h.AriaLabel("back to your clubs")],
             ["\u2039"],
           ),
           h.span(
@@ -2535,12 +2601,20 @@ export const shellView = (model: Model, h: HtmlBuilder<Message>): Html =>
     ],
   );
 
+/** A link to somewhere in the app becomes a route change; anything else leaves.
+ *  The runtime intercepts the click, so every `<a href>` in the views routes. */
+export const onUrlRequest = (request: Navigation.UrlRequest): Message =>
+  request._tag === "Internal"
+    ? Navigated({ route: routeOf(request.url) })
+    : LeftForExternalUrl({ href: request.href });
+
 export const makeBookclubApplication = (container: HTMLElement) => {
   container.id = FOLDKIT_RUNTIME_ID;
   return Runtime.makeApplication<Model, Message, never, NoteAgentService>({
     Model,
     container,
-    init,
+    routing: { onUrlRequest, onUrlChange: (url) => Navigated({ route: routeOf(url) }) },
+    init: initFromUrl,
     update,
     managedResources: noteAgentResources,
     subscriptions,

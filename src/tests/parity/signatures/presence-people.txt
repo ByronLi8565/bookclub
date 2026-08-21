@@ -1,0 +1,64 @@
+div.modal-backdrop[role=presentation]
+  dialog.modal.modal--invite[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "group"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.group-modal-body.modal-body
+        form
+          input[type=email aria-label=Invitee email placeholder=invite by email]
+          button.primary[type=submit title=Send invite disabled]
+            "send invite"
+        div.invite-people
+          p.invite-people-head.label
+            "1 of 2 online"
+          ul.invite-people-list
+            li
+              span.invite-avatar
+                "R"
+                span.presence-pip.presence-pip--on
+              span.invite-person-text
+                span.invite-person-name.truncate
+                  "Reader Two"
+                span.invite-person-email.truncate
+                  "two@example.com"
+              div.invite-person-role-control
+                div.book-menu.invite-person-role-dropdown.settings-dropdown
+                  button.invite-person-role.label.settings-action.settings-dropdown-trigger[type=button aria-label=Change role for Reader Two aria-expanded=false title=Change role for Reader Two]
+                    span
+                      "member"
+                    span.book-menu-arrow[aria-hidden]
+                      "▾"
+            li.person--offline
+              span.invite-avatar
+                "R"
+                span.presence-pip.presence-pip--off
+              span.invite-person-text
+                span.invite-person-name.truncate
+                  "Reader One"
+                span.invite-person-email.truncate
+                  "one@example.com"
+              span.invite-person-role.label
+                "owner"
+        div.invite-share
+          p.modal-note
+            "Invite with link:"
+          div.invite-link
+            input[type=text aria-label=invite link readonly]
+            button.icon-button.invite-icon[type=button aria-label=copy link title=Copy link disabled]
+              svg[aria-hidden]
+                rect
+                path
+            button.icon-button.invite-icon[type=button aria-label=regenerate link title=Regenerate link]
+              svg[aria-hidden]
+                path
+                path
+      div.pager-tabs.settings-tabs
+        button[type=button aria-pressed title=People and invitations]
+          "People"
+        button[type=button aria-pressed=false title=Book club library]
+          "Books"
+        button[type=button aria-pressed=false title=Book club images]
+          "Images"

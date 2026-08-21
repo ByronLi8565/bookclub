@@ -1,0 +1,42 @@
+div.modal-backdrop[role=presentation]
+  dialog.modal.modal--invite[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "group"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.group-modal-body.modal-body
+        div.group-books
+          div.group-backup-controls
+            div.settings-backup-actions
+              button.settings-action[type=button]
+                "Backup notes"
+              input[type=file accept=.bookclub,application/vnd.bookclub.backup+zip]
+              button.settings-action[type=button]
+                "Restore notes"
+          p.group-books-summary.label
+            "1 book · 1.0 KB total"
+          ul.group-books-list
+            li
+              div.group-book-row
+                div.group-book-info
+                  strong.group-book-name
+                    "The Book"
+                  span.group-book-author
+                    "An Author"
+                  span.group-book-stats
+                    "1,000 words · 1.0 KB"
+                div.group-book-actions
+                  button.group-book-icon[type=button aria-label=Edit book metadata aria-expanded=false title=Book tools]
+                    img[aria-hidden alt src=svg%3e]
+                  div.group-book-delete
+                    button.group-book-icon[type=button aria-label=Delete The Book aria-expanded=false title=Delete book]
+                      img[aria-hidden alt src=svg%3e]
+      div.pager-tabs.settings-tabs
+        button[type=button aria-pressed=false title=People and invitations]
+          "People"
+        button[type=button aria-pressed title=Book club library]
+          "Books"
+        button[type=button aria-pressed=false title=Book club images]
+          "Images"

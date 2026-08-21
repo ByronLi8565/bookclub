@@ -1,0 +1,27 @@
+div.home
+  div.home-card
+    div.home-top-buttons
+      button.home-settings-button.icon-button[type=button aria-label=settings title=Settings]
+        img[aria-hidden alt src=svg%3e]
+      button.home-info-button[type=button aria-label=open info title=About & release log]
+        "i"
+    div.home-corner.home-corner--login
+      div.login.login--authed
+        span.login-email
+          "one@example.com"
+        button.login-link.plain-button[type=button title=Sign out]
+          "sign out"
+    div.home-main
+      h1.home-title
+        "Bookclub"
+      button.home-action[type=button title=Create a new bookclub]
+        "create a new bookclub"
+      div.home-clubs
+        ul.home-club-list
+          li
+            a[href=/clubs/club-alpha-public-1]
+              "Club Alpha"
+            button.login-link.plain-button[type=button title=Invite people]
+              "invite"
+    div.home-corner.home-corner--credit
+      "a project by Byron Li"

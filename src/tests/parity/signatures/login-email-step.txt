@@ -1,0 +1,16 @@
+div.modal-backdrop[role=presentation]
+  dialog.modal[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "sign in"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.modal-body
+        form
+          input[type=email aria-label=Email address placeholder=you@example.com]
+          input[type=password aria-label=Password (optional) placeholder=password (optional)]
+          button.primary[type=submit title=Send a sign-in code disabled]
+            "send code"
+          button.login-passkey.plain-button[type=button title=Sign in with a passkey disabled]
+            "use a passkey"

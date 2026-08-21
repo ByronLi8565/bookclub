@@ -1,0 +1,16 @@
+div.home
+  div.home-card
+    div.home-top-buttons
+      button.home-info-button[type=button aria-label=open info title=About & release log]
+        "i"
+    div.home-corner.home-corner--login
+      button.login-signin[type=button title=Sign in]
+        "sign in"
+    div.home-main
+      h1.home-title
+        "Bookclub"
+      div.home-clubs
+        span.home-existing-label
+          "sign in to see your clubs"
+    div.home-corner.home-corner--credit
+      "a project by Byron Li"

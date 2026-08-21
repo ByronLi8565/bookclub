@@ -1,0 +1,16 @@
+aside.note-panel
+  div.note-panel-toolbar
+    h2.label
+      "Notes"
+    div.note-filter-bar
+      div.note-scope[aria-label=Notes scope]
+        button.active[type=button]
+          "This book"
+        button[type=button]
+          "All books"
+      div.note-filter-terms
+        div.note-filter-entry
+          input[aria-label=Filter notes placeholder=Filter]
+  p.empty
+    "Select text to add a note."
+  ul

@@ -10,6 +10,8 @@ import {
   FailedSession,
   FOLDKIT_RUNTIME_ID,
   ChangedLoginEmail,
+  LeftTheApp,
+  PushUrl,
   ChangedNewGroupName,
   CreateGroup,
   CreatedGroup,
@@ -93,9 +95,14 @@ describe("Foldkit Bookclub boundary", () => {
       Story.model((model) => expect(model.inviteToken).toBe("invite-token")),
       Story.message(RequestedDeleteGroup({ groupRef: "club-ref", groupId })),
       Story.Command.resolve(DeleteGroup, DeletedGroup({ groupId })),
+      // The address bar moves with the Model, or the back button lies about
+      // where the reader has been.
+      Story.Command.expectExact(PushUrl({ href: "/" })),
+      Story.Command.resolve(PushUrl, LeftTheApp()),
       Story.model((model) => expect(model.route._tag).toBe("Home")),
       Story.message(RequestedSignOut()),
       Story.Command.resolve(SignOut, SignedOut()),
+      Story.Command.resolve(PushUrl, LeftTheApp()),
       Story.model((model) => expect(model.session._tag).toBe("AnonymousSession")),
     );
   });
@@ -204,6 +211,8 @@ describe("Foldkit Bookclub boundary", () => {
       // clubs, so the pending flag is what closes the form to it.
       Story.model((model) => expect(model.newGroupPending).toBe(true)),
       Story.Command.resolve(CreateGroup, CreatedGroup({ group })),
+      Story.Command.expectExact(PushUrl({ href: "/clubs/new-club-public-1" })),
+      Story.Command.resolve(PushUrl, LeftTheApp()),
       Story.model((model) => {
         expect(model.creatingClub).toBe(false);
         expect(model.newGroupName).toBe("");

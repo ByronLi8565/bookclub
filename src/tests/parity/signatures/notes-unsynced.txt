@@ -1,0 +1,66 @@
+aside.note-panel
+  div.note-panel-toolbar
+    h2.label
+      "Notes"
+    div.note-filter-bar
+      div.note-scope[aria-label=Notes scope]
+        button.active[type=button]
+          "This book"
+        button[type=button]
+          "All books"
+      div.note-filter-terms
+        div.note-filter-entry
+          input[aria-label=Filter notes placeholder=Filter]
+  ul
+    li.note-thread
+      div.note-row
+        span.note-avatar[title=Reader One]
+          span[aria-hidden]
+            "R"
+        div.note-row-body
+          div.note-result
+            div.note
+              div.note-header
+                div.note-head
+                  span.note-seq
+                    "1"
+                  button.quote.truncate[type=button title=Jump to highlight]
+                    "Reader One posted Aug 14, 7:00 PM"
+                  span.note-sync.note-sync--pending[title=Not yet synced — will send when you reconnect]
+                    "• syncing"
+                  button.reply[type=button aria-label=reply title=Reply]
+                    "↩"
+                  button.edit[type=button aria-label=edit title=Edit]
+                    img[aria-hidden alt src=svg%3e]
+                  div.delete-wrap
+                    button.delete[type=button aria-label=delete aria-expanded=false title=Delete]
+                      "✕"
+              div.note-card-tags
+                div.note-tags
+                  span.note-tag
+                    button[type=button title=Filter by theme]
+                      "theme"
+              div.note-body
+                p
+                  "the first note"
+      div.replies
+        div.note-row
+          span.note-avatar[title=Reader Two]
+            span[aria-hidden]
+              "R"
+          div.note-row-body
+            div.note-result
+              div.note
+                div.note-header
+                  div.note-head
+                    span.note-seq
+                      "2"
+                    button.quote.truncate[type=button title=Jump to highlight]
+                      "Reader Two replied Aug 14, 7:01 PM"
+                    span.note-sync.note-sync--failed[title=This change couldn't sync and was skipped]
+                      "⚠ unsynced"
+                    button.reply[type=button aria-label=reply title=Reply]
+                      "↩"
+                div.note-body
+                  p
+                    "a reply"

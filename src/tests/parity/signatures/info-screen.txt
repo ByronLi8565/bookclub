@@ -1,0 +1,113 @@
+div.modal-backdrop[role=presentation]
+  dialog.home-info-panel.modal[aria-labelledby=modal-title open]
+    div.modal-inner[role=presentation]
+      div.modal-head
+        strong
+          "INFO"
+        button[type=button aria-label=close title=Close]
+          "✕"
+      div.home-info-cards.modal-body.note-panel
+        ul
+          li[title=Guide: Hotkeys]
+            div.note
+              div.note-header
+                div.note-head
+                  span.note-seq
+                    "1"
+                  div.quote.truncate
+                    "Guide: Hotkeys"
+              div.note-body
+                p
+                  mark.note-mark
+                    "select text"
+                  "add highlight/note"
+                p
+                  kbd.note-key
+                    "S"
+                  "switch book"
+                p
+                  kbd.note-key
+                    "Shift"
+                  "+"
+                  kbd.note-key
+                    "←"
+                  "notes view only"
+                p
+                  kbd.note-key
+                    "Shift"
+                  "+"
+                  kbd.note-key
+                    "→"
+                  "reader view only"
+                p
+                  kbd.note-key
+                    "Shift"
+                  "+"
+                  kbd.note-key
+                    "↓"
+                  "split reader/notes"
+                p
+                  kbd.note-key
+                    "←"
+                  "previous page"
+                p
+                  kbd.note-key
+                    "→"
+                  "next page"
+                p
+                  kbd.note-key
+                    "F"
+                  "fit PDF text to screen"
+                p
+                  kbd.note-key
+                    "D"
+                  "toggle single/two-page layout"
+                p
+                  kbd.note-key
+                    "Z"
+                  "hide/show top bar"
+                p
+                  kbd.note-key
+                    "⌘ F"
+                  "search"
+                p
+                  kbd.note-key
+                    "⌘ S"
+                  "sync reading position"
+          li[title=Guide: Notecard Formatting]
+            div.note
+              div.note-header
+                div.note-head
+                  span.note-seq
+                    "2"
+                  div.quote.truncate
+                    "Guide: Notecard Formatting"
+              div.note-body
+                p
+                  strong
+                    "bold"
+                  code.note-code
+                    "**text**"
+                p
+                  em
+                    "italic"
+                  code.note-code
+                    "*text*"
+                p
+                  mark.note-mark
+                    "highlight"
+                  code.note-code
+                    "==text=="
+                blockquote
+                  "quote"
+                  code.note-code
+                    ">text"
+                p
+                  "references:"
+                  code.note-code
+                    "[[n]]"
+      div.pager-tabs.settings-tabs
+        button[type=button aria-pressed]
+          "INFO"
+        button[type=button aria-pressed=false]
+          "RELEASE LOG"

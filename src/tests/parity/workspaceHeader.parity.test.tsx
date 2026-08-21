@@ -18,20 +18,6 @@ import {
 
 const noop = (): void => {};
 
-/**
- * The one place the two headers are allowed to differ: React's "back to your
- * clubs" is an anchor because it navigates by URL, and Foldkit's is a button
- * because its route still lives in the Model. Everything else about the control
- * — its class, its label — is compared as written.
- */
-const routingDeviation = (line: string): string =>
-  /\b(?:a|button)\.topbar-home\b/u.test(line)
-    ? line
-        .replace(/\b(?:a|button)\.topbar-home\b/u, "backToClubs")
-        .replace(/type=button ?/u, "")
-        .replace(/ ?href=\//u, "")
-    : line;
-
 describe("workspace header parity", () => {
   beforeEach(() => {
     enableReactActEnvironment();
@@ -62,6 +48,6 @@ describe("workspace header parity", () => {
       view: (current, h) => workspaceHeaderView(current, "Club Alpha", h),
     });
 
-    expectParity(react, foldkit, { rewrite: routingDeviation });
+    expectParity("workspace-header", react, foldkit);
   });
 });

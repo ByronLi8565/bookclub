@@ -109,13 +109,14 @@ describe("presence modal parity", () => {
   });
 
   it("renders the people page the way React does", async () => {
-    expectParity(await renderReact(reactPresence()), await foldkitPresence({}));
+    expectParity("presence-people", await renderReact(reactPresence()), await foldkitPresence({}));
   });
 
   it("renders the books page the way React does", async () => {
     const react = await renderReact(reactPresence(), (container) => clickTab(container, "Books"));
     const [initial] = init();
     expectParity(
+      "presence-books",
       react,
       await foldkitPresence({ presence: { ...initial.presence, page: "books" } }),
     );

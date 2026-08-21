@@ -57,7 +57,7 @@ describe("settings modal parity", () => {
         onClose={() => {}}
       />,
     );
-    expectParity(react, await foldkitSettings({}, true, true));
+    expectParity("settings-reader", react, await foldkitSettings({}, true, true));
   });
 
   it("renders account settings the way React does", async () => {
@@ -83,6 +83,6 @@ describe("settings modal parity", () => {
           h,
         ),
     });
-    expectParity(react, foldkit);
+    expectParity("settings-account", react, foldkit);
   });
 });

@@ -49,7 +49,7 @@ describe("login modal parity", () => {
 
   it("renders the email step the way React does", async () => {
     const react = await renderReact(<LoginModal session={session} onClose={() => {}} />);
-    expectParity(react, await foldkitLogin({}));
+    expectParity("login-email-step", react, await foldkitLogin({}));
   });
 
   it("renders a typed email and password the way React does", async () => {
@@ -60,7 +60,11 @@ describe("login modal parity", () => {
         type(container.querySelector('input[type="password"]'), "hunter2");
       },
     );
-    expectParity(react, await foldkitLogin({ loginEmail: EMAIL, loginPassword: "hunter2" }));
+    expectParity(
+      "login-typed",
+      react,
+      await foldkitLogin({ loginEmail: EMAIL, loginPassword: "hunter2" }),
+    );
   });
 
   it("renders the code step the way React does", async () => {
@@ -72,7 +76,11 @@ describe("login modal parity", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       },
     );
-    expectParity(react, await foldkitLogin({ loginEmail: EMAIL, loginStep: "code" }));
+    expectParity(
+      "login-code-step",
+      react,
+      await foldkitLogin({ loginEmail: EMAIL, loginStep: "code" }),
+    );
   });
 
   it("renders the wrong-password error the way React does", async () => {
@@ -86,6 +94,7 @@ describe("login modal parity", () => {
       },
     );
     expectParity(
+      "login-wrong-password",
       react,
       await foldkitLogin({
         loginEmail: EMAIL,

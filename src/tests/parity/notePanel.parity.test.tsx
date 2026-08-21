@@ -135,7 +135,7 @@ describe("note panel parity", () => {
       status: "online",
       notes,
     });
-    expectParity(react, foldkit);
+    expectParity("notes-thread", react, foldkit);
   });
 
   it("marks a note that has not synced the way React does", async () => {
@@ -150,13 +150,13 @@ describe("note panel parity", () => {
       pendingNoteIds: [...pending],
       failedNoteIds: [...failed],
     });
-    expectParity(react, foldkit);
+    expectParity("notes-unsynced", react, foldkit);
   });
 
   it("renders the loading panel the way React does", async () => {
     const react = await renderReact(reactPanel({ notes: [], loading: true }));
     const foldkit = await foldkitPanel({ ...initialNotesModel(), ready: false, status: "offline" });
-    expectParity(react, foldkit);
+    expectParity("notes-loading", react, foldkit);
   });
 
   it("opens the composer on a quoted passage the way React does", async () => {
@@ -172,7 +172,7 @@ describe("note panel parity", () => {
       draft: `${blockquote(highlight.quote.exact)}\n\n`,
       draftHighlights: [highlight],
     });
-    expectParity(react, foldkit);
+    expectParity("notes-composing", react, foldkit);
   });
 
   it("renders an empty panel the way React does", async () => {
@@ -183,6 +183,6 @@ describe("note panel parity", () => {
       status: "online",
       notes: [],
     });
-    expectParity(react, foldkit);
+    expectParity("notes-empty", react, foldkit);
   });
 });

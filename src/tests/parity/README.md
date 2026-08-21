@@ -29,10 +29,16 @@ composition rather than the module alone. That is what ships.
 
 ## Deviations
 
-A difference that is deliberate is written down at the call site, as a
-`rewrite` that normalises both sides, with a comment saying why. There is one
-today: React navigates by URL and so uses `<a href>`, where Foldkit's route
-still lives in the Model and so uses `<button>`. When URL routing lands at
-cutover, those rewrites should be deleted and the tests should still pass.
+There are **none**. Every surface matches React exactly. A difference that is
+deliberate would be written down at the call site as a `rewrite` that normalises
+both sides, with a comment saying why; anything not written down that way is a
+bug in one of the two clients.
 
-Anything not written down that way is a bug in one of the two clients.
+## Surviving React
+
+Each comparison is named, and `RECORD_PARITY=1 bun run test src/tests/parity`
+writes React's side of it to `signatures/<name>.txt`. Those files are what the
+Foldkit client is held to once React is deleted — `expectRecordedParity` checks
+the same trees against the same expectations, without needing React to render
+them. Re-record only while both clients exist; after cutover a change to a
+signature file is a change to the interface and should be reviewed as one.
