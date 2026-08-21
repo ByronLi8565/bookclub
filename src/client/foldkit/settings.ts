@@ -11,16 +11,20 @@ import { formatBytes } from "../../shared/format.ts";
 import { groupUrlName } from "../../shared/groupUrls.ts";
 import { UPLOAD_FILE_FIELD } from "../../shared/http/uploads.ts";
 import { ClubProfile, MAX_DISPLAY_NAME_LENGTH } from "../../shared/types/profiles.ts";
+import { decode } from "../../shared/schema.ts";
 import {
   DEFAULT_USER_PREFS,
   PdfPageLayout,
   ReadingPositionOpenPolicy,
   SmartArrows,
   UserPrefs,
+  UserPrefsPatch,
+  mergeUserPrefs,
 } from "../../shared/types/userPrefs.ts";
 import { previewGroupBackup, saveGroupBackup } from "../logic/groups/backupAccess.ts";
 import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
 import { isNative } from "../logic/net/api.ts";
+import { readVersionedLocal, writeLocal } from "../logic/storage.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { modalTabsView, modalView } from "./modal.ts";
 
@@ -84,9 +88,29 @@ export const SettingsModel = Schema.Struct({
 });
 export type SettingsModel = typeof SettingsModel.Type;
 
+const PREFS_KEY = "bookclub.userPrefs:v1";
+const LEGACY_PREFS_KEY = "bookclub.userPrefs";
+
+/**
+ * Preferences are local-first, as React's were, and under the same key — so a
+ * reader's settings survive the cutover, apply on the first paint instead of
+ * flipping when `/me/prefs` answers, and still apply with no connection at all.
+ * The server copy is what makes them follow the reader between devices.
+ */
+export const cachedUserPrefs = (): UserPrefs =>
+  mergeUserPrefs(
+    decode(UserPrefsPatch, readVersionedLocal<unknown>(PREFS_KEY, LEGACY_PREFS_KEY)) ??
+      DEFAULT_USER_PREFS,
+  );
+
+const rememberUserPrefs = (prefs: UserPrefs): Effect.Effect<void> =>
+  Effect.sync(() => {
+    writeLocal(PREFS_KEY, prefs);
+  });
+
 export const initialSettingsModel = (): SettingsModel => ({
   category: null,
-  prefs: DEFAULT_USER_PREFS,
+  prefs: cachedUserPrefs(),
   openDropdown: null,
   displayName: null,
   savingName: false,
@@ -185,6 +209,7 @@ export const LoadUserPrefs = Command.define("LoadUserPrefs", {
   messages: [LoadedUserPrefs, CompletedSettingsAction],
   execute: bookclubClient.pipe(
     Effect.flatMap((client) => client.accounts.prefs({})),
+    Effect.tap(({ prefs }) => rememberUserPrefs(prefs)),
     Effect.map(({ prefs }) => LoadedUserPrefs({ prefs })),
     // React keeps whatever it already had when the round trip fails, silently.
     Effect.catch(() => Effect.succeed(CompletedSettingsAction())),
@@ -198,7 +223,10 @@ export const SaveUserPrefs = Command.define("SaveUserPrefs", {
   messages: [CompletedSettingsAction],
   interrupt: true,
   execute: ({ prefs }) =>
-    bookclubClient.pipe(
+    // The local copy is written first and unconditionally: a toggle has to hold
+    // even when the round trip that shares it does not.
+    rememberUserPrefs(prefs).pipe(
+      Effect.andThen(bookclubClient),
       Effect.flatMap((client) => client.accounts.setPrefs({ payload: { prefs } })),
       Effect.as(CompletedSettingsAction()),
       Effect.catch(() => Effect.succeed(CompletedSettingsAction())),

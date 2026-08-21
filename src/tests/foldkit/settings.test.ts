@@ -5,11 +5,13 @@ import { Runtime } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { Story } from "foldkit/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_USER_PREFS } from "../../shared/types/userPrefs.ts";
 import {
   ArmedBackupDownloadMessage,
   AVATAR_INPUT_ID,
   BACKUP_INPUT_ID,
   CancelledBackupRestore,
+  cachedUserPrefs,
   ChangedDisplayName,
   ChoseAvatarPhoto,
   ChoseOpeningPosition,
@@ -568,5 +570,25 @@ describe("settings category choice", () => {
       Story.message(ChoseSettingsCategory({ category: "pdf" })),
       Story.model((model) => expect(model.category).toBe("pdf")),
     );
+  });
+});
+
+describe("preferences outlive the round trip that shares them", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("starts from the reader's own settings rather than the defaults", () => {
+    // React wrote this key, so a reader who set a preference before the cutover
+    // still has it afterwards — and has it on the first paint, with no
+    // connection, instead of watching the page flip when /me/prefs answers.
+    localStorage.setItem(
+      "bookclub.userPrefs:v1",
+      JSON.stringify({ reader: { pdfPageLayout: "single" } }),
+    );
+    expect(cachedUserPrefs().reader.pdfPageLayout).toBe("single");
+    expect(initialSettingsModel().prefs.reader.pdfPageLayout).toBe("single");
+  });
+
+  it("falls back to the defaults when nothing was stored", () => {
+    expect(cachedUserPrefs()).toEqual(DEFAULT_USER_PREFS);
   });
 });
