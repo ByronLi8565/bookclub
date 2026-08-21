@@ -338,13 +338,31 @@ export const acquireNoteAgent = (
 
     yield* store.hydrate();
 
-    yield* Effect.tryPromise({
-      try: () => live.ready,
-      catch: (cause) => new NoteAgentConnectionError({ groupId, cause }),
-    });
+    /**
+     * Acquisition ends at the notes this device already holds, not at the
+     * handshake. A reader with no connection has their notes on disk, and
+     * waiting for a socket that will never open left them looking at a loading
+     * pane instead — the one thing the offline banner promises they can do.
+     *
+     * The handshake is still awaited, on a fiber of its own: it is what carries
+     * the socket's own rejection, and dropping it on the floor would surface as
+     * an unhandled rejection. Either way the status is republished, because
+     * "connecting" and "offline" read differently to a reader.
+     */
+    yield* Effect.forkScoped(
+      Effect.tryPromise({
+        try: () => live.ready,
+        catch: (cause) => new NoteAgentConnectionError({ groupId, cause }),
+      }).pipe(
+        Effect.catch(() => Effect.void),
+        Effect.andThen(Effect.sync(publishStatus)),
+      ),
+    );
 
+    // Status only, on both paths. A socket coming up already asks for a flush
+    // through `onSocketState`; asking again here would send every parked
+    // operation a second time, and retry each failure twice over.
     publishStatus();
-    requestFlushUnsafe();
 
     return {
       groupId,

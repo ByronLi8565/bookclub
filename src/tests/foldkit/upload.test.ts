@@ -48,7 +48,6 @@ const book: InspectedBook = {
       selectableText: true,
       textAnchors: true,
       rectAnchors: true,
-      quoteRebind: true,
       pageNavigation: false,
     },
     issues: [],
@@ -268,14 +267,14 @@ describe("the Foldkit upload modal", () => {
     expect(tree.querySelector(".upload-drop-label")?.textContent).toBe(book.fileName);
     expect(tree.querySelector(".upload-info > .upload-info-head")?.textContent).toBe("upload info");
     const rows = tree.querySelectorAll(".upload-info-table .upload-info-row");
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(8);
     expect(rows[0]?.querySelector("dt")?.textContent).toBe("Title");
     expect(rows[0]?.querySelector("dd span")?.getAttribute("title")).toBe(
       "Double-click to edit title",
     );
     expect(rows[2]?.textContent).toContain("1,234");
     expect(rows[3]?.textContent).toContain("1.0 KB");
-    expect(tree.querySelectorAll(".upload-info-table .upload-status--ok")).toHaveLength(4);
+    expect(tree.querySelectorAll(".upload-info-table .upload-status--ok")).toHaveLength(3);
     expect(tree.querySelectorAll(".upload-info-table .upload-status--error")).toHaveLength(1);
     expect(tree.querySelector<HTMLButtonElement>(".upload-actions .upload-submit")?.disabled).toBe(
       false,

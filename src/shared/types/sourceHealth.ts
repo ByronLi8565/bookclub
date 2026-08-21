@@ -4,7 +4,6 @@ export interface SourceCapabilities {
   selectableText: boolean;
   textAnchors: boolean;
   rectAnchors: boolean;
-  quoteRebind: boolean;
   pageNavigation: boolean;
 }
 

@@ -12,7 +12,6 @@ const EPUB_CAPABILITIES: SourceCapabilities = {
   selectableText: true,
   textAnchors: true,
   rectAnchors: false,
-  quoteRebind: true,
   pageNavigation: true,
 };
 

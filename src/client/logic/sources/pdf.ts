@@ -26,7 +26,6 @@ const TEXT_CAPABILITIES: SourceCapabilities = {
   selectableText: true,
   textAnchors: true,
   rectAnchors: true,
-  quoteRebind: true,
   pageNavigation: true,
 };
 

@@ -128,8 +128,11 @@ const makeTransport = (
 };
 
 describe("NoteAgent managed resource", () => {
-  it("acquires a connection, hydrates the store, and awaits the identity handshake", async () => {
-    const transport = makeTransport();
+  it("acquires on the notes already stored, without waiting for a handshake", async () => {
+    // The offline case: the socket never completes its handshake, and the panel
+    // still opens on the notes this device is holding. Waiting here is what left
+    // a reader with no connection staring at a loading pane.
+    const transport = makeTransport({ hangHandshake: true });
     const persistence = memoryPersistence();
 
     const observed = await Effect.runPromise(
@@ -139,35 +142,43 @@ describe("NoteAgent managed resource", () => {
             connect: transport.connect,
             persistence,
           });
-          return {
+          const atAcquire = {
             groupId: connection.groupId,
             agentName: connection.agentName,
             status: connection.status(),
             ready: connection.store.getView().ready,
           };
+
+          transport.connections[0]?.completeHandshake();
+          yield* Effect.promise(() => vi.waitFor(() => expect(connection.status()).toBe("online")));
+          return { atAcquire, agentName: connection.agentName };
         }),
       ),
     );
 
-    expect(observed).toEqual({
+    expect(observed.atAcquire).toEqual({
       groupId: "club-alpha",
-      // The server stamps the instance name; the resource does not assume it.
-      agentName: "stamped-club-alpha",
-      status: "online",
+      // The server stamps the instance name during the handshake, so until then
+      // the resource answers with the group it was asked for.
+      agentName: "club-alpha",
+      status: "syncing",
       ready: true,
     });
+    expect(observed.agentName).toBe("stamped-club-alpha");
     expect(transport.connections).toHaveLength(1);
     expect(transport.connections[0]?.options.sessionMode).toBe("web");
   });
 
-  it("registers close before the handshake, so a hanging handshake still releases", async () => {
+  it("closes a socket whose handshake never completes, when the scope goes", async () => {
     const transport = makeTransport({ hangHandshake: true });
+    // `Effect.never` holds the scope open past acquisition, which now finishes
+    // without the handshake; the socket must still be closed on the way out.
     const fiber = Effect.runFork(
       Effect.scoped(
         acquireNoteAgent(requirementsFor("club-alpha"), {
           connect: transport.connect,
           persistence: memoryPersistence(),
-        }),
+        }).pipe(Effect.andThen(Effect.never)),
       ),
     );
 
@@ -295,6 +306,11 @@ describe("NoteAgent managed resource", () => {
             persistence: memoryPersistence(),
           });
           const fake = transport.connections[0];
+          // Acquisition no longer waits for the socket, so the drop has to.
+          yield* Effect.promise(() =>
+            vi.waitFor(() => expect(connection.socket.state()).toBe("open")),
+          );
+          yield* drainEvents(connection.events);
           fake?.drop();
           expect(yield* drainEvents(connection.events)).toContainEqual({
             _tag: "ChangedNoteAgentStatus",
@@ -449,6 +465,20 @@ describe("NoteAgent managed resource inside a Foldkit runtime", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(transport.connections[1]?.closeCount()).toBe(1));
+  });
+
+  it("puts stored notes in the Model when the handshake never lands", async () => {
+    // The whole offline chain: no socket ever opens, the resource still resolves,
+    // and the notes view reaches the Model — which is what lets the panel render
+    // instead of sitting on its loading state.
+    const transport = makeTransport({ hangHandshake: true });
+    const handle = startRuntime(transport);
+
+    await vi.waitFor(() => expect(log()).toContain("ConnectedNoteAgent"));
+    await vi.waitFor(() => expect(log()).toContain("ChangedNotes"));
+    expect(transport.connections[0]?.closeCount()).toBe(0);
+
+    handle.dispose();
   });
 
   it("survives the release when the Model still believes the connection is live", async () => {

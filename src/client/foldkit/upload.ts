@@ -30,7 +30,6 @@ const BookCapabilities = Schema.Struct({
   selectableText: Schema.Boolean,
   textAnchors: Schema.Boolean,
   rectAnchors: Schema.Boolean,
-  quoteRebind: Schema.Boolean,
   pageNavigation: Schema.Boolean,
 });
 
@@ -380,7 +379,6 @@ const CAPABILITY_ROWS: readonly {
   { key: "selectableText", label: "Selectable text" },
   { key: "textAnchors", label: "Text anchors" },
   { key: "rectAnchors", label: "Position anchors" },
-  { key: "quoteRebind", label: "Quote rebind" },
   { key: "pageNavigation", label: "Page navigation" },
 ];
 
