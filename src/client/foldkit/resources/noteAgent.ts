@@ -419,6 +419,13 @@ export const makeNoteAgentSubscriptions = <Model, Message>(config: {
                   Effect.map((connection) =>
                     Stream.fromQueue(connection.events).pipe(
                       Stream.map((event) => config.toMessage(noteAgentEventToMessage(event))),
+                      // Leaving a club shuts this queue down from the resource's
+                      // finalizer, which reaches the reader here as an
+                      // interruption before the Model has dropped the connection
+                      // key. That is the ordinary end of the stream, not a
+                      // failure — left to propagate it crashes the application
+                      // on the way back to the clubs card.
+                      Stream.catchCause(() => noMessages),
                     ),
                   ),
                   // A model that claims a connection before acquisition

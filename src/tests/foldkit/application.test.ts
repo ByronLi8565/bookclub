@@ -7,12 +7,12 @@ import {
   DismissedToast,
   DismissToastLater,
   errorToast,
-  FailedSession,
+  FailedGroups,
   FOLDKIT_RUNTIME_ID,
   ChangedLoginEmail,
-  FailedClientCommand,
   LeftTheApp,
   LoadGroup,
+  MissingGroup,
   PushUrl,
   ChangedNewGroupName,
   CreateGroup,
@@ -69,10 +69,12 @@ describe("Foldkit Bookclub boundary", () => {
         expect(model.account._tag).toBe("ReadyAccount");
         expect(Schema.decodeUnknownSync(Model)(JSON.parse(JSON.stringify(model)))).toEqual(model);
       }),
-      Story.message(FailedSession({ message: "offline" })),
+      // A club list that cannot be refreshed with nothing behind it is the one
+      // load failure worth a sentence; the rest are ordinary states.
+      Story.message(FailedGroups()),
       Story.model((model) => {
         expect(model.toasts).toHaveLength(1);
-        expect(model.toasts[0]?.message).toBe("offline");
+        expect(model.toasts[0]?.message).toBe("You appear to be offline. Try again later.");
         expect(model.toasts[0]?.type).toBe("error");
       }),
       // Raising a toast schedules its own removal, the way React's store times
@@ -220,8 +222,7 @@ describe("Foldkit Bookclub boundary", () => {
       Story.message(Navigated({ route: Club({ groupRef: "new-club-public-1" }) })),
       // Loading the club itself is another story's subject; this one ends at
       // the route the push produced.
-      Story.Command.resolve(LoadGroup, FailedClientCommand({ message: "not in this test" })),
-      Story.Command.resolve(DismissToastLater, DismissedToast({ id: "not-this-one" })),
+      Story.Command.resolve(LoadGroup, MissingGroup()),
       Story.model((model) => {
         expect(model.creatingClub).toBe(false);
         expect(model.newGroupName).toBe("");

@@ -331,6 +331,10 @@ const drainEvents = (events: Queue.Dequeue<NoteAgentEvent>): Effect.Effect<NoteA
 const Model = Schema.Struct({
   groupId: Schema.NullOr(Schema.String),
   connected: Schema.Boolean,
+  /** The connection the Model believes is live, cleared only by `ReleasedNoteAgent`
+   *  — the same lag the app's notes slice has, and the window the release has to
+   *  survive. */
+  connectionKey: Schema.NullOr(Schema.String),
   peers: Schema.Array(Schema.String),
   log: Schema.Array(Schema.String),
 });
@@ -345,10 +349,10 @@ const update = (model: Model, message: Message): readonly [Model, []] => {
     case "SwitchedGroup":
       return [{ ...model, groupId: message.groupId, connected: false, peers: [], log }, []];
     case "ConnectedNoteAgent":
-      return [{ ...model, connected: true, log }, []];
+      return [{ ...model, connected: true, connectionKey: message.groupId, log }, []];
     case "ReleasedNoteAgent":
     case "FailedNoteAgentConnection":
-      return [{ ...model, connected: false, peers: [], log }, []];
+      return [{ ...model, connected: false, connectionKey: null, peers: [], log }, []];
     case "ChangedNoteAgentPresence":
       return [{ ...model, peers: message.peers.map((peer) => peer.name), log }, []];
     default:
@@ -381,7 +385,7 @@ describe("NoteAgent managed resource inside a Foldkit runtime", () => {
       persistence: memoryPersistence(),
     });
     const subscriptions = makeNoteAgentSubscriptions<Model, Message>({
-      modelToConnectionKey: (model) => (model.connected ? model.groupId : null),
+      modelToConnectionKey: (model) => model.connectionKey,
       toMessage: (message) => message,
     });
 
@@ -389,7 +393,11 @@ describe("NoteAgent managed resource inside a Foldkit runtime", () => {
       Runtime.makeElement({
         Model,
         container,
-        init: () => [{ groupId: "club-alpha", connected: false, peers: [], log: [] }, []] as const,
+        init: () =>
+          [
+            { groupId: "club-alpha", connected: false, connectionKey: null, peers: [], log: [] },
+            [],
+          ] as const,
         update,
         view: (model, h) =>
           h.main(
@@ -441,6 +449,25 @@ describe("NoteAgent managed resource inside a Foldkit runtime", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(transport.connections[1]?.closeCount()).toBe(1));
+  });
+
+  it("survives the release when the Model still believes the connection is live", async () => {
+    // Leaving a club drops the resource's requirements at once while the Model
+    // holds the connection key until `ReleasedNoteAgent` lands. The finalizer
+    // shuts the event queue down inside that window, and an interruption
+    // reaching the subscription there took the whole application down with it.
+    const transport = makeTransport();
+    const handle = startRuntime(transport);
+
+    await vi.waitFor(() => expect(log()).toContain("ConnectedNoteAgent"));
+    button("leave")?.click();
+
+    await vi.waitFor(() => expect(log()).toContain("ReleasedNoteAgent"));
+    expect(document.body.textContent).not.toContain("Application Crash");
+    // Still the application's own view, still taking messages.
+    expect(button("switch")).toBeDefined();
+
+    handle.dispose();
   });
 
   it("releases the connection when the model leaves the group and on runtime shutdown", async () => {

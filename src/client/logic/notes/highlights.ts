@@ -147,25 +147,7 @@ export interface SearchMatch {
 }
 
 export interface SourceReader {
-  locateHighlight(highlight: Highlight): Effect.Effect<HighlightAnchor | null>;
-
   search(query: string): Effect.Effect<SearchMatch[]>;
-}
-
-export function searchQuote(doc: Document, quote: QuoteSelector): Range | null {
-  const root = doc.body;
-  if (!root) return null;
-  const text = root.textContent ?? "";
-
-  const contextual = quote.prefix + quote.exact + quote.suffix;
-  let start = text.indexOf(contextual);
-  if (start >= 0) {
-    start += quote.prefix.length;
-  } else {
-    start = text.indexOf(quote.exact);
-    if (start < 0) return null;
-  }
-  return rangeFromOffsets(root, start, start + quote.exact.length);
 }
 
 function rangeFromOffsets(root: Node, start: number, end: number): Range | null {

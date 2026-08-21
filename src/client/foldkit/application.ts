@@ -24,7 +24,17 @@ import { Url } from "foldkit";
 import { AppRoute, Club, Home, hrefFor, routeOf } from "./routes.ts";
 import { clubNameErrorMessage } from "../logic/groups/groupMessages.ts";
 import { setSessionToken } from "../logic/net/api.ts";
+import { apiFailure } from "../logic/net/failure.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
+import {
+  cachedGroupView,
+  cachedGroups,
+  cachedSessionUser,
+  forgetSessionUser,
+  rememberGroupView,
+  rememberGroups,
+  rememberSessionUser,
+} from "./offlineCache.ts";
 import { loadingView } from "./loading.ts";
 import { escapeKeyStream, modalView, pressOutsideModalStream } from "./modal.ts";
 import settingsIcon from "@assets/settings.svg";
@@ -238,6 +248,9 @@ export const Model = Schema.Struct({
   currentGroup: Schema.NullOr(GroupSummary),
   membership: Schema.NullOr(Membership),
   members: Schema.Array(RosterEntry),
+  /** Why the club on screen could not be opened, when it could not be. Held on
+   *  the Model rather than raised as a toast because each answer is a page. */
+  clubError: Schema.NullOr(Schema.Literals(["notfound", "offline"])),
   joinGroupRef: Schema.String,
   /** The token an invite link arrived with, held until the club reports whether
    *  this reader is already a member. */
@@ -270,7 +283,9 @@ export const Model = Schema.Struct({
 export type Model = typeof Model.Type;
 
 export const LoadedSession = m("LoadedSession", { user: SessionUser });
-export const FailedSession = m("FailedSession", { message: Schema.String });
+/** The sign-in check finished and nobody is signed in. Silent on purpose: an
+ *  anonymous visitor is an ordinary state, not a failure to report. */
+export const NoSession = m("NoSession");
 export const SpawnedToast = m("SpawnedToast", { toast: Toast });
 export const OpenedOverlay = m("OpenedOverlay", { overlay: Overlay });
 export const ClosedOverlay = m("ClosedOverlay");
@@ -301,6 +316,9 @@ export const SentLoginCode = m("SentLoginCode");
 export const FailedLogin = m("FailedLogin", { error: Schema.String });
 export const DismissedLogin = m("DismissedLogin");
 export const LoadedGroups = m("LoadedGroups", { groups: Schema.Array(GroupSummary) });
+/** The club list could not be refreshed. Whatever is already on screen — the
+ *  copy this device cached — stays there. */
+export const FailedGroups = m("FailedGroups");
 export const StartedCreatingClub = m("StartedCreatingClub");
 export const CancelledCreatingClub = m("CancelledCreatingClub");
 export const FailedCreateGroup = m("FailedCreateGroup", { error: Schema.String });
@@ -317,6 +335,12 @@ export const LoadedGroup = m("LoadedGroup", {
   membership: Membership,
   members: Schema.Array(RosterEntry),
 });
+/** The server answered that there is no such club. Authoritative, so it is a
+ *  page and not a toast. */
+export const MissingGroup = m("MissingGroup");
+/** The server never answered. If this device has read the club before it opens
+ *  from that copy; otherwise the reader is told they are offline. */
+export const UnreachableGroup = m("UnreachableGroup", { groupRef: Schema.String });
 export const LoadedAccountSecurity = m("LoadedAccountSecurity", {
   passkeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
@@ -377,7 +401,7 @@ export const RequestedPasskeyRegistration = m("RequestedPasskeyRegistration", {
 });
 export type Message =
   | typeof LoadedSession.Type
-  | typeof FailedSession.Type
+  | typeof NoSession.Type
   | typeof SpawnedToast.Type
   | typeof OpenedOverlay.Type
   | typeof ClosedOverlay.Type
@@ -408,6 +432,7 @@ export type Message =
   | typeof FailedLogin.Type
   | typeof DismissedLogin.Type
   | typeof LoadedGroups.Type
+  | typeof FailedGroups.Type
   | typeof StartedCreatingClub.Type
   | typeof CancelledCreatingClub.Type
   | typeof FailedCreateGroup.Type
@@ -420,6 +445,8 @@ export type Message =
   | typeof SubmittedNewGroup.Type
   | typeof CreatedGroup.Type
   | typeof LoadedGroup.Type
+  | typeof MissingGroup.Type
+  | typeof UnreachableGroup.Type
   | typeof LoadedAccountSecurity.Type
   | typeof LoadedInvite.Type
   | typeof ChangedInviteToken.Type
@@ -451,12 +478,46 @@ export type Message =
   | ReaderMessage
   | NotesMessage;
 
+/**
+ * Who is signed in, according to the server. Nothing else in the app asks, so
+ * without this the cookie a returning reader still holds is never presented and
+ * they are shown the signed-out page.
+ *
+ * A server that answers is believed, including when it says nobody. Only a
+ * server that never answered falls back to the identity this device cached,
+ * which is what keeps a reader signed in with no connection.
+ */
+export const LoadSession = Command.define("LoadSession", {
+  messages: [LoadedSession, NoSession],
+  execute: bookclubClient.pipe(
+    Effect.flatMap((client) => client.auth.me({})),
+    Effect.map(({ user }) => {
+      rememberSessionUser(user);
+      return LoadedSession({ user });
+    }),
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        if (apiFailure(error) !== "unreachable") {
+          forgetSessionUser();
+          return NoSession();
+        }
+        const cached = cachedSessionUser();
+        return cached === null ? NoSession() : LoadedSession({ user: cached });
+      }),
+    ),
+  ),
+});
+
 export const LoadGroups = Command.define("LoadGroups", {
-  messages: [LoadedGroups, FailedClientCommand],
+  messages: [LoadedGroups, FailedGroups],
   execute: bookclubClient.pipe(
     Effect.flatMap((client) => client.groups.list({})),
-    Effect.map(({ groups }) => LoadedGroups({ groups })),
-    Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+    Effect.map(({ groups }) => {
+      const user = cachedSessionUser();
+      if (user !== null) rememberGroups(user.id, groups);
+      return LoadedGroups({ groups });
+    }),
+    Effect.catch(() => Effect.succeed(FailedGroups())),
   ),
 });
 
@@ -471,6 +532,7 @@ const loginErrorCode = (error: unknown): string =>
  *  a session is only signed in once the token is stored. */
 const rememberSession = (session: { user: SessionUser; token?: string }) =>
   Effect.promise(() => setSessionToken(session.token ?? null)).pipe(
+    Effect.tap(() => Effect.sync(() => rememberSessionUser(session.user))),
     Effect.as(LoadedSession({ user: session.user })),
   );
 
@@ -625,14 +687,31 @@ export const CreateGroup = Command.define("CreateGroup", {
     ),
 });
 
+/**
+ * A club, from the server when it answers and from this device's copy when it
+ * does not. The cache key comes from the cached identity rather than the Model
+ * because a cold start on a club URL loads the club and the session at once —
+ * the identity that can be relied on here is the one already written down.
+ */
 export const LoadGroup = Command.define("LoadGroup", {
   args: { groupRef: Schema.String },
-  messages: [LoadedGroup, FailedClientCommand],
+  messages: [LoadedGroup, MissingGroup, UnreachableGroup],
   execute: ({ groupRef }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.get({ params: { groupRef } })),
-      Effect.map(({ group, membership, members }) => LoadedGroup({ group, membership, members })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.map(({ group, membership, members }) => {
+        const user = cachedSessionUser();
+        if (user !== null) rememberGroupView(user.id, groupRef, { group, membership, members });
+        return LoadedGroup({ group, membership, members });
+      }),
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          if (apiFailure(error) === "notfound") return MissingGroup();
+          const user = cachedSessionUser();
+          const view = user === null ? null : cachedGroupView(user.id, groupRef);
+          return view === null ? UnreachableGroup({ groupRef }) : LoadedGroup(view);
+        }),
+      ),
     ),
 });
 
@@ -701,6 +780,7 @@ export const RemoveAccountPasskey = Command.define("RemoveAccountPasskey", {
 export const SignOut = Command.define("SignOut", {
   messages: [SignedOut, FailedClientCommand],
   execute: bookclubClient.pipe(
+    Effect.tap(() => Effect.sync(forgetSessionUser)),
     Effect.flatMap((client) => client.auth.signout({})),
     Effect.as(SignedOut()),
     Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
@@ -804,10 +884,15 @@ const DESKTOP_READER_SHARE = 62;
 const MIN_SPLIT_SHARE = 25;
 const MAX_SPLIT_SHARE = 80;
 
-/** The first paint of whatever URL the browser opened on. */
+/**
+ * The first paint of whatever URL the browser opened on. Asking who is signed
+ * in is part of starting up: the session cookie is only worth anything if
+ * something presents it.
+ */
 export const initFromUrl = (url: Url.Url): Update => {
   const [model] = init();
-  return navigateTo(model, routeOf(url));
+  const [routed, commands] = navigateTo(model, routeOf(url));
+  return [routed, [LoadSession(), ...commands]];
 };
 
 export const init = (): readonly [Model, []] => [
@@ -830,6 +915,7 @@ export const init = (): readonly [Model, []] => [
     currentGroup: null,
     membership: null,
     members: [],
+    clubError: null,
     joinGroupRef: "",
     pendingInvite: null,
     inviteToken: "",
@@ -918,13 +1004,16 @@ const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
  */
 const navigateTo = (model: Model, route: Route): Update => {
   if (route._tag === "Home") {
-    return [{ ...model, route, reader: null, currentGroup: null, pendingInvite: null }, []];
+    return [
+      { ...model, route, reader: null, currentGroup: null, pendingInvite: null, clubError: null },
+      [],
+    ];
   }
   const { groupRef, invite } = route;
   return [
     // The token is held rather than acted on: only the club's own answer says
     // whether this reader still needs it.
-    { ...model, route, pendingInvite: invite ?? null },
+    { ...model, route, pendingInvite: invite ?? null, clubError: null },
     [LoadGroup({ groupRef })],
   ];
 };
@@ -1123,6 +1212,9 @@ const updateSlices = (model: Model, message: Message): Update => {
           ...model,
           session: AuthenticatedSession({ user: message.user }),
           account: ReadyAccount({ user: message.user }),
+          // The clubs this device already knows about paint now rather than
+          // when the network answers, and remain the answer if it never does.
+          groups: model.groups.length === 0 ? cachedGroups(message.user.id) : model.groups,
           // The login modal stays up long enough to say it worked; the page
           // behind it was already where the reader wanted to be.
           loginStep: signingIn ? "done" : model.loginStep,
@@ -1134,11 +1226,13 @@ const updateSlices = (model: Model, message: Message): Update => {
         signingIn ? [LoadGroups(), CloseLoginAfterSuccess()] : [LoadGroups()],
       ];
     }
-    case "FailedSession":
-      return withToast(
-        { ...model, session: AnonymousSession(), account: UnavailableAccount() },
-        errorToast("Sign-in check failed", message.message),
-      );
+    case "NoSession":
+      // Nobody is signed in, so nobody's clubs belong on screen — a session
+      // that expired must not leave the last reader's list behind.
+      return [
+        { ...model, session: AnonymousSession(), account: UnavailableAccount(), groups: [] },
+        [],
+      ];
     case "SpawnedToast":
       return withToast(model, message.toast);
     case "DismissedToast":
@@ -1220,8 +1314,19 @@ const updateSlices = (model: Model, message: Message): Update => {
         },
         [],
       ];
-    case "ChangedOnline":
-      return [{ ...model, online: message.online }, []];
+    case "ChangedOnline": {
+      const online = { ...model, online: message.online };
+      // Coming back is the moment everything held from cache is stale. React
+      // refetched on reconnect; without it the app stays in whatever failed
+      // state it landed in until the reader thinks to reload.
+      if (!message.online) return [online, []];
+      return [
+        online,
+        model.route._tag === "Club"
+          ? [LoadSession(), LoadGroup({ groupRef: model.route.groupRef })]
+          : [LoadSession()],
+      ];
+    }
     case "ResizedViewport":
       return [{ ...model, viewport: message.viewport }, []];
     case "Navigated":
@@ -1261,6 +1366,15 @@ const updateSlices = (model: Model, message: Message): Update => {
       return [{ ...model, overlay: NoOverlay(), ...blankLogin }, []];
     case "LoadedGroups":
       return [{ ...model, groups: message.groups }, []];
+    case "FailedGroups":
+      // The cached list is already on screen and is the best answer available,
+      // so a refusal is only worth saying when there is nothing behind it.
+      return model.groups.length > 0
+        ? [model, []]
+        : withToast(
+            model,
+            errorToast("Couldn't load your clubs", "You appear to be offline. Try again later."),
+          );
     case "ChangedNewGroupName":
       return [{ ...model, newGroupName: message.name }, []];
     case "StartedCreatingClub":
@@ -1315,6 +1429,7 @@ const updateSlices = (model: Model, message: Message): Update => {
       const loaded = {
         ...model,
         pendingInvite: null,
+        clubError: null,
         currentGroup: message.group,
         membership: message.membership,
         members: message.members,
@@ -1323,6 +1438,10 @@ const updateSlices = (model: Model, message: Message): Update => {
       // was last reading before deciding what the page shows.
       return [loaded, [RestoreSelectedSource({ groupId: message.group.groupId })]];
     }
+    case "MissingGroup":
+      return [{ ...model, clubError: "notfound", currentGroup: null, reader: null }, []];
+    case "UnreachableGroup":
+      return [{ ...model, clubError: "offline", currentGroup: null, reader: null }, []];
     case "RestoredSelectedSource": {
       const group = model.currentGroup;
       if (group === null) return [model, []];
@@ -2505,6 +2624,18 @@ const clubPageView = (model: Model, groupRef: string, h: HtmlBuilder<Message>): 
         ),
       ],
       [loginModalView(model, h)],
+    );
+  }
+  // A club that cannot be opened says so. Without these the page spins forever
+  // behind a toast, which is what a reader sees as the app being broken.
+  if (model.clubError === "notfound") {
+    return clubMessageView(h, "No such club", `"${groupRef}" doesn't exist.`);
+  }
+  if (model.clubError === "offline") {
+    return clubMessageView(
+      h,
+      "You're offline",
+      "Can't reach the server, and this club isn't cached on this device yet. Reconnect and try again.",
     );
   }
   const group = model.currentGroup;

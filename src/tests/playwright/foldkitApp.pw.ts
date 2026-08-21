@@ -45,6 +45,9 @@ async function seedClub(request: APIRequestContext): Promise<string> {
 
 test("a reader signs in, picks a club, and opens its book", async ({ page, request }) => {
   const email = await seedClub(request);
+  // Seeding runs through the page's own cookie jar, so the journey has to start
+  // by putting the reader back outside the door it just walked through.
+  await page.context().clearCookies();
 
   await page.goto("/");
 
@@ -156,6 +159,10 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
 
   await page.goBack();
   await expect(page.locator(".home-card")).toBeVisible();
+  // A reload is where the session cookie has to carry the reader: the app has to
+  // ask who is signed in, or a returning reader is shown the signed-out page
+  // with a perfectly good cookie in hand.
+  await expect(page.locator(".login-email")).toHaveText(email);
   await page.goForward();
   await expect(page).toHaveURL(clubUrl);
   await expect(page.locator(".topbar h1")).toHaveText(DISPLAY_NAME);

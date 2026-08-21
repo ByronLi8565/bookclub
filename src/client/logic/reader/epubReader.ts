@@ -1,14 +1,7 @@
 import * as Effect from "effect/Effect";
 import type { Book } from "epubjs";
 import type Section from "epubjs/types/section";
-import {
-  epubAnchor,
-  findAllRanges,
-  searchQuote,
-  type Highlight,
-  type HighlightAnchor,
-  type SourceReader,
-} from "../notes/highlights.ts";
+import { epubAnchor, findAllRanges, type SourceReader } from "../notes/highlights.ts";
 
 // One loaded spine item, presented to a per-section scan.
 interface SectionHandle {
@@ -16,7 +9,7 @@ interface SectionHandle {
   cfiFromRange(range: Range): string | null;
 }
 
-// Build the note/search reader over a live epub.js Book. `getBook` is consulted
+// Build the search reader over a live epub.js Book. `getBook` is consulted
 // lazily on every call so the reader can be created once yet always act on the
 // currently-open book (or no-op when none is loaded).
 export function makeEpubReader(getBook: () => Book | null): SourceReader {
@@ -60,28 +53,6 @@ export function makeEpubReader(getBook: () => Book | null): SourceReader {
     );
   });
 
-  const locateHighlight = Effect.fn("EpubReader.locateHighlight")(function* (h: Highlight) {
-    return yield* withBook<HighlightAnchor | null>(null, (book) =>
-      Effect.gen(function* () {
-        if (h.anchor.kind === "epub-cfi") {
-          const cfi = h.anchor.value;
-          const range = yield* Effect.tryPromise(() => book.getRange(cfi)).pipe(
-            Effect.map((value) => value ?? null),
-            Effect.orElseSucceed(() => null),
-          );
-          if (range) return epubAnchor(cfi);
-        }
-        const fresh = yield* findInSections((section) => {
-          const found = searchQuote(section.document, h.quote);
-          const cfi = found ? section.cfiFromRange(found) : null;
-          return cfi ? [cfi] : [];
-        });
-        const first = fresh[0];
-        return first ? epubAnchor(first) : null;
-      }),
-    );
-  });
-
   const search = Effect.fn("EpubReader.search")(function* (query: string) {
     if (query.trim() === "") return [];
     return yield* findInSections((section) =>
@@ -92,5 +63,5 @@ export function makeEpubReader(getBook: () => Book | null): SourceReader {
     );
   });
 
-  return { locateHighlight, search };
+  return { search };
 }
