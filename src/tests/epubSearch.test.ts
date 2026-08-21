@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import ePub, { type Book } from "epubjs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeEpubReader } from "../client/ui/reader/engine/epubReader.ts";
+import { makeEpubReader } from "../client/logic/reader/epubReader.ts";
 
 let book: Book;
 

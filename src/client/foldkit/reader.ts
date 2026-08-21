@@ -13,7 +13,7 @@ import {
 import { PdfPageLayout } from "../../shared/types/userPrefs.ts";
 import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
-import { getRenderSnapshot } from "../ui/reader/engine/renderSnapshot.ts";
+import { getRenderSnapshot } from "../logic/reader/renderSnapshot.ts";
 import {
   browserReaderPositions,
   noReaderPositions,

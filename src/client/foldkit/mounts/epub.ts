@@ -15,8 +15,8 @@ import {
   epubPageCount,
   measureEpubPagination,
   type EpubPagination,
-} from "../../ui/reader/engine/epubPagination.ts";
-import { makeEpubReader } from "../../ui/reader/engine/epubReader.ts";
+} from "../../logic/reader/epubPagination.ts";
+import { makeEpubReader } from "../../logic/reader/epubReader.ts";
 
 export const EpubSpread = Schema.Literals(["auto", "none"]);
 export type EpubSpread = typeof EpubSpread.Type;

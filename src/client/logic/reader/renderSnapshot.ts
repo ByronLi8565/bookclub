@@ -1,4 +1,4 @@
-import type { SourceKind } from "../../../../shared/types/sources.ts";
+import type { SourceKind } from "../../../shared/types/sources.ts";
 
 export interface RenderSnapshot {
   sourceId: string;

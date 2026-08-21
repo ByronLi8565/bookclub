@@ -33,13 +33,13 @@ import {
   spreadFits,
   spreadPages,
   spreadStart,
-} from "../../ui/reader/engine/pdfSpread.ts";
+} from "../../logic/reader/pdfSpread.ts";
 import {
   getCachedPdfDocument,
   hasCachedPdfDocument,
   putCachedPdfDocument,
-} from "../../ui/reader/engine/renderCache.ts";
-import { putRenderSnapshot } from "../../ui/reader/engine/renderSnapshot.ts";
+} from "../../logic/reader/renderCache.ts";
+import { putRenderSnapshot } from "../../logic/reader/renderSnapshot.ts";
 
 const MAX_RENDER_DPR = 2;
 const SPREAD_CROP_PAD_PX = 16;

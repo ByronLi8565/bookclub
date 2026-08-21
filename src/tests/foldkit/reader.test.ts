@@ -23,7 +23,7 @@ import {
 } from "../../client/foldkit/reader.ts";
 import { PdfSpreadRendered } from "../../client/foldkit/mounts/pdf.ts";
 import { MovedEpub } from "../../client/foldkit/mounts/epub.ts";
-import { epubPageCount } from "../../client/ui/reader/engine/epubPagination.ts";
+import { epubPageCount } from "../../client/logic/reader/epubPagination.ts";
 
 /** The slice owns live library handles, so a test builds its own with a byte
  *  loader that is never reached: nothing here mounts a document. */

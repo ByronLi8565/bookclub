@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy } from "../../../logic/sources/pdf.ts";
+import type { PDFDocumentProxy } from "../sources/pdf.ts";
 
 interface CachedPdfDocument {
   doc: PDFDocumentProxy;

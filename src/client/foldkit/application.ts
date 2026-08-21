@@ -31,7 +31,7 @@ import settingsIcon from "@assets/settings.svg";
 import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
 import { books } from "../../shared/sources.ts";
 import { GroupAction, permits } from "../../shared/groupPermissions.ts";
-import { stepExpandedPane } from "../ui/workspace/visibility.ts";
+import { stepExpandedPane } from "../logic/visibility.ts";
 import {
   InfoModel,
   infoView,

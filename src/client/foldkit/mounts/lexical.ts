@@ -54,8 +54,8 @@ import {
   completedNoteHashtagCursor,
   processCompletedNoteHashtags,
 } from "../../../shared/notes/tags.ts";
-import { createReferenceTransformer } from "../../ui/notes/editor/referenceTransformer.ts";
-import { ReferenceNode } from "../../ui/notes/editor/ReferenceNode.ts";
+import { createReferenceTransformer } from "../../logic/notes/referenceTransformer.ts";
+import { ReferenceNode } from "../../logic/notes/ReferenceNode.ts";
 
 export const ChangedNoteDraft = m("ChangedNoteDraft", {
   groupRef: Schema.String,

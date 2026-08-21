@@ -1,9 +1,9 @@
 @import "./styles/base.css";
-@import "./ui/workspace/workspace.css";
-@import "./ui/shared/shared.css";
-@import "./ui/reader/reader.css";
-@import "./ui/notes/notes.css";
-@import "./ui/home/home.css";
-@import "./ui/group/group.css";
-@import "./ui/shared/toast/toast.css";
+@import "./styles/workspace.css";
+@import "./styles/shared.css";
+@import "./styles/reader.css";
+@import "./styles/notes.css";
+@import "./styles/home.css";
+@import "./styles/group.css";
+@import "./styles/toast.css";
 @import "./styles/mobile.css";

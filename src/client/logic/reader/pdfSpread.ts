@@ -1,5 +1,5 @@
-import type { PdfPageLayout } from "../../../../shared/types/userPrefs.ts";
-import { clamp } from "../../../../shared/format.ts";
+import type { PdfPageLayout } from "../../../shared/types/userPrefs.ts";
+import { clamp } from "../../../shared/format.ts";
 
 export const SPREAD_GUTTER_PX = 4;
 export const MIN_SPREAD_PANE_WIDTH = 440;

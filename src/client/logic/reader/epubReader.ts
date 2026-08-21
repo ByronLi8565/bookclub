@@ -8,7 +8,7 @@ import {
   type Highlight,
   type HighlightAnchor,
   type SourceReader,
-} from "../../../logic/notes/highlights.ts";
+} from "../notes/highlights.ts";
 
 // One loaded spine item, presented to a per-section scan.
 interface SectionHandle {
