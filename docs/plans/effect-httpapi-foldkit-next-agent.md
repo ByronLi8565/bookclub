@@ -20,14 +20,16 @@ next.
   collaborators are constructor-injected, which is what lets the browser harness open a book with no
   account and no source cache; production passes `browserReaderEnvironment`.
 - **Phase 5 items 5-7 are done** (see below for what that covers and what it does not).
-- Note composition runs through the Lexical Mount, including image paste and a file picker; both
-  reach one `UploadNoteImage` Command.
-- **React is still the production client.** The Foldkit entry stays out of the production bundle
-  (359.00 kB gzip).
-- **The Foldkit entry is reachable in development** at `/foldkit` (`foldkit.html`), served by the
-  same dev worker as React at `/`. Vite's build input is `index.html` alone, so the extra page costs
-  the production bundle nothing. `@foldkit/vite-plugin` is registered for `serve` only — in a build
-  it adds ~9 kB gzip to the React bundle for HMR machinery nothing ships.
+- Note composition runs through the Lexical Mount by paste, as React did.
+- **Foldkit is the client.** React is deleted: `index.html` loads `src/client/foldkit/entry.ts`, and
+  `react`, `react-dom`, `wouter`, `react-swipeable`, `@tanstack/react-hotkeys`, `@lexical/react`,
+  `@vitejs/plugin-react` and the two `@types` packages are out of `package.json`. The client is
+  349.59 kB gzip, against React's last 358.64 kB.
+- **Routes are URLs.** `routes.ts` owns the table (`/` and `/clubs/:groupRef?invite=`), and every
+  route change goes out as a URL and comes back through `onUrlChange` — the address bar and the
+  Model cannot disagree. Deep links, reload, back and forward are covered in `foldkitApp.pw.ts`.
+- `src/client/ui/` is gone. What Foldkit shared with React moved to `src/client/logic/reader/`,
+  `logic/notes/`, `logic/visibility.ts`, and the stylesheets to `src/client/styles/`.
 
 ## What the reader now does
 
@@ -67,13 +69,15 @@ The harness cannot use the production source cache: Playwright's WebKit build re
 `Blob` in IndexedDB. It substitutes a byte loader that fetches the fixture URL, which is only
 possible because the loader is injected when the slice is constructed.
 
-## Validation — 2026-08-20 (after the parity suite)
+## Validation — 2026-08-20 (after cutover)
 
 - `bun run check` passes (format, lint, typecheck).
-- `bun run test` — 437 passed across 61 files, including 18 parity comparisons against React.
+- `bun run test` — 415 passed across 53 files, including the 18 parity comparisons.
 - `bun run e2e` — 10 passed across 9 scenarios against a booted wrangler worker.
-- `bun run build` passes; the React client is 358.64 kB gzip, so Foldkit stays out of it.
-- `foldkitApp.pw.ts` — passes on Desktop Chrome.
+- `bun run build` — 349.59 kB gzip, against React's last 358.64 kB.
+- `foldkitApp.pw.ts` — passes on Desktop Chrome at `/`, with a clean console, including the reload
+  and back/forward assertions that only routing can satisfy.
+- **Not run:** every WebKit project, and PWA/Capacitor builds. See the two notes in Phase 8.
 - **The WebKit projects were not run.** See "Running the browser suite": they cannot start in a
   detached session. They passed 51/51 on 2026-08-18 and nothing since then touched the reader,
   gesture, or composer paths, but that is an inference and not a result.
@@ -377,24 +381,27 @@ and every `home-*` rule matched nothing.
 asserts that structure, because a view with the right elements and the wrong classes is unstyled
 markup that no Model-level test can see.
 
-### 5. Phase 8 cutover — delete React
+### 5. Phase 8 cutover — done, on the `foldkit-cutover` branch
 
-In plan order: run the browser suite against both entries on the same user-meaningful scenarios and
-fix parity in Foldkit; make Foldkit the production entry and verify PWA, Capacitor iOS, and Android
-builds *before* deleting anything; then delete React components, hooks, harnesses, and the
-React-only dependencies once `rg` shows no runtime callers.
+Three commits, in this order deliberately:
 
-Two specifics worth planning for:
+1. **Route by URL, while React was still there to compare against.** Wiring routing changed the club
+   list and the topbar back into `<a href>` — which is what React renders — so the parity suite went
+   from one recorded deviation to none. Landing routing *before* the deletion is what let the suite
+   prove it.
+2. **Remove the React client** and make `index.html` the Foldkit entry.
+3. **Move the shared modules** out of the emptied `ui/` tree.
 
-- `src/client/logic/net/api.ts` (`apiFetch`) can now be deleted outright. It survives only for React
-  callers; `bookclubClient` already reproduces everything it does.
-- **Wire URL routing** (see "Known gaps"): `routing: { onUrlRequest, onUrlChange }` on
-  `makeApplication`, `parseUrlWithFallback` over `/` and `/clubs/:groupRef`, `Navigation.pushUrl` for
-  in-app moves, and the club buttons back to `<a href>`. Do it in the same change that makes
-  `index.html` the Foldkit entry, so `/clubs/…` stops belonging to React.
-- `src/tests/playwright/visual.pw.ts` snapshots are taken against the React DOM and will not survive
-  cutover. Re-baseline **after** the parity scenarios pass, and diff old against new for unintended
-  visual changes rather than accepting the new images blind.
+What is still outstanding from this phase:
+
+- **PWA, Capacitor iOS and Android builds are unverified.** `bun run build` passes and the service
+  worker is generated, but no device or simulator build has been run against the Foldkit entry.
+- `src/client/logic/net/api.ts` (`apiFetch`) survives: presence and account still call it. Folding
+  the rest into `bookclubClient` is worth doing but is not cutover work.
+- **The five `e2e/browser/*.pw.ts` suites have not been run** against the Foldkit client. They
+  navigate by URL, which now works, and the markup they select is the markup the parity signatures
+  pin — so they are expected to pass, but WebKit cannot start in a detached session and expectation
+  is not evidence. **Run them first.**
 
 ### 6. Phase 9 — documentation, hardening, deployment
 
@@ -405,18 +412,8 @@ authorized.
 
 ## Known gaps in the Foldkit shell
 
-Every item that was on this list is built. What is left is one structural piece and a set of small
+Every item that was on this list is built, URL routing included. What is left is a set of small
 deliberate deviations, each recorded where it was made.
-
-**Structural, and a cutover task rather than a shell one:**
-
-- **No URL routing.** Routes are Model state; React uses wouter over `/` and `/clubs/:groupRef`, so
-  deep links, the browser's back button, and a reload landing where you were do not work yet.
-  Foldkit has the router for it (`root`, `literal`, `param`, `mapTo`, `parseUrlWithFallback`, and
-  `Navigation.pushUrl`) and the Route union is already React's two routes, so this is wiring
-  `routing` into `makeApplication` and turning the club buttons back into `<a href>`. It was left
-  until cutover deliberately: in development the entry is served at `/foldkit`, and `/clubs/…` there
-  belongs to the React app.
 
 **Deliberate deviations, all small:**
 

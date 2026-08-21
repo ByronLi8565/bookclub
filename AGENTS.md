@@ -1,7 +1,18 @@
 # AGENTS.md
 
-Bookclub: a collaborative book-reading app. One Cloudflare Worker + React SPA. `src/client` (React/Vite), `src/server` (HTTP + the `agents` SDK over
-Durable Objects), `src/shared` (wire types). E2E specifics: `e2e/AGENTS.md`.
+Bookclub: a collaborative book-reading app. One Cloudflare Worker + a Foldkit SPA. `src/client`
+(Foldkit/Vite: `foldkit/` is the application, `logic/` the framework-free modules it builds on,
+`styles/` the stylesheets), `src/server` (HTTP + the `agents` SDK over Durable Objects),
+`src/shared` (wire types). E2E specifics: `e2e/AGENTS.md`.
+
+- The client is **Foldkit**, an Elm architecture: `Model`/`Message`/`Command`/`Subscription`/`Mount`.
+  There is no React and no second UI framework — do not add one. State changes go through `update`;
+  effects are Commands; the DOM is a `view`.
+- Routes are URLs. `src/client/foldkit/routes.ts` owns the table, and every route change — clicked or
+  programmatic — goes out as a URL and comes back through `onUrlChange`, so the address bar and the
+  Model cannot disagree.
+- `src/tests/parity/` holds the React client's rendered markup, recorded on the day it was deleted.
+  A change to a file in `signatures/` is a change to the user interface: review it as one.
 
 - Package manager is **bun**; run scripts as `bun run <script>`. Never `bun test`
   (not our runner) — use `bun run test` (Vitest).

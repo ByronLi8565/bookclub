@@ -1002,7 +1002,13 @@ suites were all moved over together, and the four upload scenarios pass against 
    runner, duplicate toast/modal state, and the embedded/parallel runtime entry.
 6. Compare production bundles. Do not ship both renderers; investigate any final Foldkit bundle
    regression large enough to affect startup on a typical mobile connection.
-7. Decide what happens to `src/tests/playwright/visual.pw.ts`. Its snapshots are taken against the
+7. **Done at cutover:** `src/tests/playwright/visual.pw.ts` and its snapshots were deleted with the
+   React reader they were taken against. The markup contract now lives in
+   `src/tests/parity/signatures/`, which pins the rendered tree rather than its pixels — a stronger
+   check for this migration, since it names the element that drifted instead of showing a diff image.
+   The original note follows.
+
+   Its snapshots are taken against the
    React DOM and will not survive cutover. Since the plan keeps the existing CSS and accessible DOM,
    re-baselining with `bun run test:visual:update` is expected — but re-baseline deliberately, after
    the parity scenarios pass, and diff the old and new snapshots for unintended visual changes
