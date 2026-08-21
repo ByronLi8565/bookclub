@@ -1,4 +1,4 @@
-import type { PdfPageLayout } from "../../../logic/settings/userPrefs.ts";
+import type { PdfPageLayout } from "../../../../shared/types/userPrefs.ts";
 import { clamp } from "../../../../shared/format.ts";
 
 export const SPREAD_GUTTER_PX = 4;

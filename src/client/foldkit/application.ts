@@ -20,7 +20,7 @@ import {
 } from "./resources/noteAgent.ts";
 import { passkeyLogin, passkeysSupported, registerPasskey } from "../logic/auth/authClient.ts";
 import { loginErrorMessage } from "../logic/auth/authMessages.ts";
-import type { Url } from "foldkit/url";
+import { Url } from "foldkit";
 import { AppRoute, Club, Home, hrefFor, routeOf } from "./routes.ts";
 import { clubNameErrorMessage } from "../logic/groups/groupMessages.ts";
 import { setSessionToken } from "../logic/net/api.ts";
@@ -306,6 +306,7 @@ export const CancelledCreatingClub = m("CancelledCreatingClub");
 export const FailedCreateGroup = m("FailedCreateGroup", { error: Schema.String });
 export const JoinedGroup = m("JoinedGroup", { group: GroupSummary });
 export const FailedJoin = m("FailedJoin");
+export const RequestedUrl = m("RequestedUrl", { href: Schema.String });
 export const LeftForExternalUrl = m("LeftForExternalUrl", { href: Schema.String });
 export const LeftTheApp = m("LeftTheApp");
 export const ChangedNewGroupName = m("ChangedNewGroupName", { name: Schema.String });
@@ -412,6 +413,7 @@ export type Message =
   | typeof FailedCreateGroup.Type
   | typeof JoinedGroup.Type
   | typeof FailedJoin.Type
+  | typeof RequestedUrl.Type
   | typeof LeftForExternalUrl.Type
   | typeof LeftTheApp.Type
   | typeof ChangedNewGroupName.Type
@@ -803,7 +805,7 @@ const MIN_SPLIT_SHARE = 25;
 const MAX_SPLIT_SHARE = 80;
 
 /** The first paint of whatever URL the browser opened on. */
-export const initFromUrl = (url: Url): Update => {
+export const initFromUrl = (url: Url.Url): Update => {
   const [model] = init();
   return navigateTo(model, routeOf(url));
 };
@@ -1290,22 +1292,17 @@ const updateSlices = (model: Model, message: Message): Update => {
           newGroupPending: false,
           newGroupError: null,
           currentGroup: message.group,
-          route: Club({ groupRef: groupUrlName(message.group) }),
         },
         [PushUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })],
       ];
-    case "JoinedGroup": {
-      const groupRef = groupUrlName(message.group);
+    case "JoinedGroup":
+      // The token is spent; leaving it in the address bar would let the back
+      // button and a copied link try to redeem it again. Dropping it is a URL
+      // change, so the club reloads through the same path every arrival takes.
       return [
-        { ...model, route: Club({ groupRef }), currentGroup: message.group },
-        [
-          // The token is spent; leaving it in the address bar would let the back
-          // button and a copied link try to redeem it again.
-          ReplaceUrl({ href: hrefFor(Club({ groupRef })) }),
-          LoadGroup({ groupRef }),
-        ],
+        { ...model, currentGroup: message.group },
+        [ReplaceUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })],
       ];
-    }
     case "LoadedGroup": {
       // An invite link is only spent once the club says this reader is not
       // already in it, which is the order React redeems in too.
@@ -1416,7 +1413,6 @@ const updateSlices = (model: Model, message: Message): Update => {
           ...model,
           // Signing out leaves you on the clubs card as an anonymous reader,
           // not staring at the form you just left.
-          route: Home(),
           session: AnonymousSession(),
           account: UnavailableAccount(),
           groups: [],
@@ -1427,7 +1423,6 @@ const updateSlices = (model: Model, message: Message): Update => {
       return [
         {
           ...model,
-          route: Home(),
           groups: model.groups.filter((group) => group.groupId !== message.groupId),
           currentGroup: null,
           members: [],
@@ -1453,6 +1448,8 @@ const updateSlices = (model: Model, message: Message): Update => {
       return [model, [SetMemberRole(message)]];
     case "RequestedDeleteGroup":
       return [model, [DeleteGroup(message)]];
+    case "RequestedUrl":
+      return [model, [PushUrl({ href: message.href })]];
     case "LeftForExternalUrl":
       return [model, [LoadExternalUrl({ href: message.href })]];
     case "LeftTheApp":
@@ -2601,11 +2598,15 @@ export const shellView = (model: Model, h: HtmlBuilder<Message>): Html =>
     ],
   );
 
-/** A link to somewhere in the app becomes a route change; anything else leaves.
- *  The runtime intercepts the click, so every `<a href>` in the views routes. */
+/**
+ * A link to somewhere in the app pushes its URL and nothing more; the route
+ * change comes back through `onUrlChange`. Keeping that one way round is what
+ * makes the address bar and the Model incapable of disagreeing — every route
+ * change in the app, clicked or programmatic, arrives as a URL first.
+ */
 export const onUrlRequest = (request: Navigation.UrlRequest): Message =>
   request._tag === "Internal"
-    ? Navigated({ route: routeOf(request.url) })
+    ? RequestedUrl({ href: Url.toString(request.url) })
     : LeftForExternalUrl({ href: request.href });
 
 export const makeBookclubApplication = (container: HTMLElement) => {

@@ -10,7 +10,9 @@ import {
   FailedSession,
   FOLDKIT_RUNTIME_ID,
   ChangedLoginEmail,
+  FailedClientCommand,
   LeftTheApp,
+  LoadGroup,
   PushUrl,
   ChangedNewGroupName,
   CreateGroup,
@@ -95,10 +97,12 @@ describe("Foldkit Bookclub boundary", () => {
       Story.model((model) => expect(model.inviteToken).toBe("invite-token")),
       Story.message(RequestedDeleteGroup({ groupRef: "club-ref", groupId })),
       Story.Command.resolve(DeleteGroup, DeletedGroup({ groupId })),
-      // The address bar moves with the Model, or the back button lies about
-      // where the reader has been.
+      // Deleting a club navigates by URL rather than by assignment, so the
+      // address bar can never disagree with the Model about where the reader is.
       Story.Command.expectExact(PushUrl({ href: "/" })),
       Story.Command.resolve(PushUrl, LeftTheApp()),
+      // The runtime turns that push back into a route change.
+      Story.message(Navigated({ route: Home() })),
       Story.model((model) => expect(model.route._tag).toBe("Home")),
       Story.message(RequestedSignOut()),
       Story.Command.resolve(SignOut, SignedOut()),
@@ -213,6 +217,11 @@ describe("Foldkit Bookclub boundary", () => {
       Story.Command.resolve(CreateGroup, CreatedGroup({ group })),
       Story.Command.expectExact(PushUrl({ href: "/clubs/new-club-public-1" })),
       Story.Command.resolve(PushUrl, LeftTheApp()),
+      Story.message(Navigated({ route: Club({ groupRef: "new-club-public-1" }) })),
+      // Loading the club itself is another story's subject; this one ends at
+      // the route the push produced.
+      Story.Command.resolve(LoadGroup, FailedClientCommand({ message: "not in this test" })),
+      Story.Command.resolve(DismissToastLater, DismissedToast({ id: "not-this-one" })),
       Story.model((model) => {
         expect(model.creatingClub).toBe(false);
         expect(model.newGroupName).toBe("");

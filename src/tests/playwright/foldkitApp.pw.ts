@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 // single session, and a detached macOS launchd session gives Chromium only one
 // usable browser context (see PW_DETACHED_SESSION in playwright.config.ts).
 const PASSWORD = "devdevdev";
+const REF_PATTERN = "[a-z0-9-]+";
 const DISPLAY_NAME = "Parity Club";
 
 /** Seeds an account and a club with a book through the API, so the journey
@@ -45,7 +46,7 @@ async function seedClub(request: APIRequestContext): Promise<string> {
 test("a reader signs in, picks a club, and opens its book", async ({ page, request }) => {
   const email = await seedClub(request);
 
-  await page.goto("/foldkit");
+  await page.goto("/");
 
   // `home.css` applies through these class names and nothing else, so a page
   // that renders the right elements with the wrong ones is bare markup.
@@ -100,7 +101,10 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   await expect(page.locator(".login-email")).toHaveText(email);
   await expect(dialog).toHaveCount(0);
 
-  await page.locator(".home-club-list").getByRole("button", { name: DISPLAY_NAME }).click();
+  // A club is reached by its URL now, so the entry is a link and the click has
+  // to leave the address bar pointing at the club.
+  await page.locator(".home-club-list").getByRole("link", { name: DISPLAY_NAME }).click();
+  await expect(page).toHaveURL(new RegExp(`/clubs/${REF_PATTERN}$`, "u"));
 
   // A club reference is `slug-publicId`; a bare publicId answers 404 and the
   // club never resolves. A club with a book *is* the workspace — there is no
@@ -140,4 +144,19 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   await expect(page.locator("dialog.modal[open]")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("dialog.modal")).toHaveCount(0);
+
+  // A club URL is a place, not a screen the app happened to be showing: a reload
+  // has to land back on the book, and the way out has to be the browser's own
+  // back button. Neither worked while the route lived only in the Model.
+  const clubUrl = page.url();
+  await page.reload();
+  await expect(page.locator(".app > .topbar")).toBeVisible();
+  await expect(page.locator(".topbar h1")).toHaveText(DISPLAY_NAME);
+  await expect(page.locator(".epub-container iframe").first()).toBeVisible({ timeout: 30_000 });
+
+  await page.goBack();
+  await expect(page.locator(".home-card")).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(clubUrl);
+  await expect(page.locator(".topbar h1")).toHaveText(DISPLAY_NAME);
 });

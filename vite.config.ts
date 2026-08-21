@@ -1,6 +1,5 @@
 import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import { readFileSync } from "node:fs";
-import react from "@vitejs/plugin-react";
 import { foldkit } from "@foldkit/vite-plugin";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { VitePWA } from "vite-plugin-pwa";
@@ -64,7 +63,6 @@ export default defineConfig(({ command }) => ({
   plugins: [
     lowerDecorators(),
     pdfjsWasm(),
-    react(),
     // Foldkit's HMR model preservation is worth ~9 kB gzip, so it stays in dev.
     ...(command === "serve" ? [foldkit()] : []),
     // Local development inherits the declarative SQLite DO exports from wrangler.jsonc.
