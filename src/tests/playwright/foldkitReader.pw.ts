@@ -1,4 +1,4 @@
-import { expect, test, type Frame, type Page } from "@playwright/test";
+import { expect, test, type FrameLocator, type Page } from "@playwright/test";
 
 // The Foldkit reader against real epub.js and PDF.js. jsdom renders neither, so
 // the reader's chrome — painted highlights, search matches, spread changes,
@@ -56,15 +56,15 @@ async function selectPdfText(page: Page): Promise<void> {
     });
 }
 
-async function epubFrame(page: Page): Promise<Frame> {
-  await expect(page.locator(".epub-container iframe").first()).toBeVisible({ timeout: 30_000 });
-  const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-  if (!frame) throw new Error("EPUB content frame did not load");
+async function epubFrame(page: Page): Promise<FrameLocator> {
+  const visibleFrame = page.locator(".reader-surface .epub-container iframe").first();
+  await expect(visibleFrame).toBeVisible({ timeout: 30_000 });
+  const frame = visibleFrame.contentFrame();
   await frame.locator("body").waitFor();
   return frame;
 }
 
-async function selectEpubText(frame: Frame): Promise<void> {
+async function selectEpubText(frame: FrameLocator): Promise<void> {
   await frame.locator("body").evaluate((body) => {
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
@@ -198,6 +198,17 @@ test("Foldkit EPUB: reader keys work while focus is inside the book", async ({ p
 
   await frame.locator("body").press("d");
   await expect(page.locator(".app")).toHaveAttribute("data-layout", "auto");
+});
+
+test("Foldkit EPUB: pressing inside the book dismisses parent reader chrome", async ({ page }) => {
+  await openBook(page, books[1].path, books[1].ready);
+  const frame = await epubFrame(page);
+  await selectEpubText(frame);
+  await expect(page.locator(".selection-actions")).toBeVisible({ timeout: 30_000 });
+
+  await frame.locator("body").click({ force: true });
+
+  await expect(page.locator(".selection-actions")).toBeHidden();
 });
 
 for (const book of books) {

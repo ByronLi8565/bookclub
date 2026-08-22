@@ -263,6 +263,16 @@ export const epubJsEngine: EpubEngine = ({
     if (!document.dispatchEvent(forwarded)) event.preventDefault();
   };
   rendition.on("keydown", forwardKey);
+  const forwardPress = () => {
+    element.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
+  };
+  const bridgeContent = (content: Contents) => {
+    // Listen on the iframe document itself: no event from this browsing context
+    // can bubble to the application's document-level Foldkit Subscriptions.
+    content.document.addEventListener("mousedown", forwardPress, { passive: true });
+    content.document.addEventListener("touchstart", forwardPress, { passive: true });
+  };
+  rendition.hooks.content.register(bridgeContent);
   let destroyed = false;
   const resizeRendition = rendition.resize.bind(rendition);
   // SAFETY: epub.js's declaration omits the manager that its own resize
@@ -427,6 +437,7 @@ export const epubJsEngine: EpubEngine = ({
     destroy() {
       destroyed = true;
       rendition.off("keydown", forwardKey);
+      rendition.hooks.content.deregister(bridgeContent);
       resizeObserver?.disconnect();
       // The replacement Mount may acquire before epub.js is safe to destroy.
       // Release the old session's visible DOM immediately so two renditions
