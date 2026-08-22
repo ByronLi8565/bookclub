@@ -271,10 +271,80 @@ describe("Foldkit application slice seams", () => {
     expect(focused.reader?.activeHighlightId).toBe("highlight-1");
   });
 
+  it("opens the other book before jumping to a note that lives in it", () => {
+    // The note list shows every book's notes, so the note clicked is often not
+    // about the book on screen. Jumping used to send the open book an anchor it
+    // could not resolve, and nothing happened at all.
+    const group = {
+      groupId: "group-1",
+      slug: "club",
+      publicId: "alpha",
+      displayName: "Club",
+      ownerId: "reader-1",
+      sources: ["source-1", "source-2"],
+      bookTitles: {},
+      sourceMeta: {
+        "source-1": {
+          kind: "epub" as const,
+          contentType: "application/epub+zip",
+          size: 1,
+          addedBy: "reader-1",
+        },
+        "source-2": {
+          kind: "epub" as const,
+          contentType: "application/epub+zip",
+          size: 1,
+          addedBy: "reader-1",
+        },
+      },
+      memberCount: 1,
+    };
+    const anchor = { kind: "epub-cfi" as const, value: "epubcfi(/6/8)" };
+    const reading = { ...openedReader(), currentGroup: group };
+
+    const [switching, switchCommands] = update(
+      reading,
+      JumpedToHighlight({ sourceId: "source-2", anchor }),
+    );
+    // The other book is opened and the anchor is held, not thrown at the reader
+    // that cannot resolve it.
+    expect(switching.reader?.sourceId).toBe("source-2");
+    expect(switching.pendingJump).toEqual({ sourceId: "source-2", anchor });
+    expect(switchCommands.map((command) => command.name)).not.toContain("GoToReaderAnchor");
+
+    // A book still loading cannot resolve an anchor either, so the jump waits.
+    expect(switching.reader?.loading).toBe(true);
+
+    const [arrived, arrivedCommands] = update(
+      switching,
+      OpenedEpub({ sourceId: "source-2", title: "The Other Book", place: null }),
+    );
+    expect(arrived.pendingJump).toBeNull();
+    expect(arrived.reader?.pane).toBe("reader");
+    expect(arrivedCommands.map((command) => command.name)).toContain("GoToReaderAnchor");
+  });
+
+  it("ignores an anchor meant for a book that is not open", () => {
+    const [ignored, commands] = update(
+      openedReader(),
+      JumpedToHighlight({
+        sourceId: "source-9",
+        anchor: { kind: "epub-cfi", value: "epubcfi(/6/8)" },
+      }),
+    );
+    // No club loaded, so there is no book to switch to; the open reader must not
+    // be sent someone else's anchor.
+    expect(ignored.reader?.sourceId).toBe("source-1");
+    expect(commands.map((command) => command.name)).not.toContain("GoToReaderAnchor");
+  });
+
   it("sends the reader back to the passage a note points at", () => {
     const [jumped, commands] = update(
       openedReader(),
-      JumpedToHighlight({ anchor: { kind: "epub-cfi", value: "epubcfi(/6/8)" } }),
+      JumpedToHighlight({
+        sourceId: "source-1",
+        anchor: { kind: "epub-cfi", value: "epubcfi(/6/8)" },
+      }),
     );
     expect(jumped.reader?.pane).toBe("reader");
     expect(commands.map((command) => command.name)).toEqual(["GoToReaderAnchor"]);

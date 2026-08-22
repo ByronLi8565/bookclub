@@ -181,7 +181,12 @@ export const StartedBookRename = m("StartedBookRename", { title: Schema.String }
 export const ChangedBookTitleDraft = m("ChangedBookTitleDraft", { title: Schema.String });
 export const CancelledBookRename = m("CancelledBookRename");
 /** Show a passage the notes pane pointed at. */
-export const JumpedToHighlight = m("JumpedToHighlight", { anchor: HighlightAnchor });
+/** A note's highlight names the book it lives in, because the note list shows
+ *  every book's notes and the one being read is often not the one clicked. */
+export const PendingJump = Schema.Struct({ sourceId: Schema.String, anchor: HighlightAnchor });
+export type PendingJump = typeof PendingJump.Type;
+
+export const JumpedToHighlight = m("JumpedToHighlight", PendingJump.fields);
 export const SetReaderZoom = m("SetReaderZoom", { percent: Schema.Number });
 export const FailedReaderCommand = m("FailedReaderCommand", { message: Schema.String });
 export const CompletedReaderAction = m("CompletedReaderAction");
@@ -1118,10 +1123,14 @@ export const makeReaderSlice = ({
       case "DismissedReaderSelection":
         return [{ ...reader, selection: null }, [DismissReaderSelection({ kind: reader.kind })]];
       case "JumpedToHighlight":
-        return [
-          { ...reader, pane: "reader" },
-          [GoToReaderAnchor({ anchor: message.anchor, kind: reader.kind })],
-        ];
+        // Another book's anchor means nothing to this one: the host opens that
+        // book and replays the jump once it is ready.
+        return message.sourceId !== reader.sourceId
+          ? [reader, []]
+          : [
+              { ...reader, pane: "reader" },
+              [GoToReaderAnchor({ anchor: message.anchor, kind: reader.kind })],
+            ];
       case "ToggledBookMenu":
         return [{ ...reader, bookMenuOpen: !reader.bookMenuOpen }, []];
       case "ClosedBookMenu":

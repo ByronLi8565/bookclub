@@ -121,6 +121,7 @@ import {
   makeReaderSubscriptions,
   openReader,
   SelectedReaderSource,
+  PendingJump,
   type ReaderMessage,
   type ReaderSelection,
 } from "./reader.ts";
@@ -263,6 +264,9 @@ export const Model = Schema.Struct({
   newPassword: Schema.String,
   accountBusy: Schema.Boolean,
   selectedSourceId: Schema.NullOr(Schema.String),
+  /** A jump waiting on the book it points into. Clicking a note about another
+   *  book opens that book, and the anchor can only be applied once it is. */
+  pendingJump: Schema.NullOr(PendingJump),
   reader: Schema.NullOr(ReaderWorkspace),
   overlay: Overlay,
   info: InfoModel,
@@ -926,6 +930,7 @@ export const init = (): readonly [Model, []] => [
     newPassword: "",
     accountBusy: false,
     selectedSourceId: null,
+    pendingJump: null,
     reader: null,
     overlay: NoOverlay(),
     info: initialInfoModel(),
@@ -1181,7 +1186,22 @@ const updateInviteSlice = (model: Model, message: InviteMessage): Update => {
 };
 
 export const update = (model: Model, message: Message): Update =>
-  reconcileReaderIdentity(updateSlices(model, message));
+  reconcilePendingJump(reconcileReaderIdentity(updateSlices(model, message)));
+
+/**
+ * Replays a jump that was waiting on its book. A reader still loading cannot
+ * resolve an anchor, so this waits for the book to report itself open — the
+ * same thing React waited on before running a pending jump.
+ */
+const reconcilePendingJump = ([model, commands]: Update): Update => {
+  const { pendingJump, reader } = model;
+  if (pendingJump === null || reader === null) return [model, commands];
+  if (reader.sourceId !== pendingJump.sourceId || reader.loading) return [model, commands];
+  const jumped = updateReader(reader, JumpedToHighlight(pendingJump));
+  return jumped === null
+    ? [{ ...model, pendingJump: null }, commands]
+    : [{ ...model, pendingJump: null, reader: jumped[0] }, [...commands, ...jumped[1]]];
+};
 
 const updateSlices = (model: Model, message: Message): Update => {
   if (message._tag === "ToggledReaderLayout") {
@@ -1193,6 +1213,21 @@ const updateSlices = (model: Model, message: Message): Update => {
         value: settingsPrefs(model.settings).reader.pdfPageLayout === "auto" ? "single" : "auto",
       }),
     );
+  }
+  if (
+    message._tag === "JumpedToHighlight" &&
+    model.reader !== null &&
+    message.sourceId !== model.reader.sourceId &&
+    model.currentGroup?.sourceMeta[message.sourceId] !== undefined
+  ) {
+    // The note is about a book that is not open. Opening one is the host's job —
+    // it owns the club and so the source's kind — and the anchor is held until
+    // the reader reports that book ready.
+    const [switched, commands] = updateSlices(model, SelectedBook({ sourceId: message.sourceId }));
+    return [
+      { ...switched, pendingJump: { sourceId: message.sourceId, anchor: message.anchor } },
+      commands,
+    ];
   }
   if (isReaderMessage(message)) return updateReaderSlice(model, message);
   if (isNotesMessage(message)) return updateNotesSlice(model, message);
@@ -1768,7 +1803,8 @@ const workspaceLayoutView = (
     {
       sourceId: reader.sourceId,
       groupRef,
-      jumpToHighlight: (anchor) => JumpedToHighlight({ anchor }),
+      jumpToHighlight: (highlight) =>
+        JumpedToHighlight({ anchor: highlight.anchor, sourceId: highlight.sourceId }),
       viewer: { userId: viewerId, isOwner: model.currentGroup?.ownerId === viewerId },
       canWrite: model.membership?.isMember === true,
       // Avatars are a preference; without the resolver the panel falls through

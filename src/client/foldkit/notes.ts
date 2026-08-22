@@ -634,7 +634,7 @@ export interface NotesViewContext<Message = never> {
   readonly groupRef: string;
   /** What "show me this passage" means to the caller. Notes know which anchor a
    *  note stands on; only the workspace knows what reading it looks like. */
-  readonly jumpToHighlight?: (anchor: HighlightAnchor) => Message;
+  readonly jumpToHighlight?: (highlight: Highlight) => Message;
   /** Who is reading, which is what decides whether a note offers edit and
    *  delete. Without one the panel is read-only. */
   readonly viewer?: NoteViewer;
@@ -832,7 +832,7 @@ export const notesView = <Message>(
         h.Class("quote truncate"),
         h.Disabled(!anchored),
         ...(anchored && highlight !== null && jumpToHighlight !== undefined
-          ? [h.Title("Jump to highlight"), h.OnClick(jumpToHighlight(highlight.anchor))]
+          ? [h.Title("Jump to highlight"), h.OnClick(jumpToHighlight(highlight))]
           : []),
       ],
       [noteTitle(note)],
