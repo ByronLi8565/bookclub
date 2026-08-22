@@ -8,6 +8,9 @@ import { groupUrlName, type GroupUrlParts } from "../../shared/groupUrls.ts";
 import { UPLOAD_FILE_FIELD } from "../../shared/http/uploads.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
 import type { SourceInspection } from "../logic/sources/checkHealth.ts";
+// The reader and the presence modal both import this outright, so it is in the
+// bundle either way; loading it lazily here only split the graph on paper.
+import { putCachedSource } from "../logic/groups/sourceCache.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { modalView } from "./modal.ts";
 
@@ -234,7 +237,6 @@ export const UploadBook = Command.define("UploadBook", {
       Effect.flatMap(({ hash }) =>
         Effect.promise(async () => {
           try {
-            const { putCachedSource } = await import("../logic/groups/sourceCache.ts");
             await putCachedSource(hash, file);
           } catch {
             // A book that failed to cache is still uploaded; it downloads again.

@@ -1,9 +1,12 @@
+import { getAgentByName } from "agents";
 import { canonicalEmail } from "../shared/email.ts";
 import type { Env } from "./env.ts";
 import type { AuthState } from "./state/AuthAgent.ts";
 import type { GroupState } from "./state/GroupAgent.ts";
 import type { NoteState } from "./state/NoteAgent.ts";
 import type { RegistryState } from "./state/GroupRegistry.ts";
+import { REGISTRY_ID } from "./state/registryId.ts";
+import { selectStaleBackups } from "./backupRetention.ts";
 
 // A full, self-contained snapshot of every Durable Object's state. Durable
 // Objects are the only home for clubs, notes, memberships and user records, so
@@ -29,9 +32,6 @@ export interface BackupResult {
 const PREFIX = "snapshots/";
 const LATEST_KEY = `${PREFIX}latest.json`;
 
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
-
 // The registry maps slugs and public ids to group ids; the union of both is the
 // set of all live groups.
 function groupIdsFrom(registry: RegistryState): string[] {
@@ -42,12 +42,6 @@ function groupIdsFrom(registry: RegistryState): string[] {
 }
 
 export async function collectSnapshot(env: Env): Promise<BackupSnapshot> {
-  // Lazy import keeps the cloudflare:-scheme `agents` module out of the
-  // top-level graph so the pure retention helpers stay unit-testable.
-  const [{ getAgentByName }, { REGISTRY_ID }] = await Promise.all([
-    import("agents"),
-    import("./state/GroupRegistry.ts"),
-  ]);
   const registry = await (await getAgentByName(env.GroupRegistry, REGISTRY_ID)).exportState();
 
   const groups: Record<string, GroupState> = {};
@@ -139,40 +133,6 @@ export async function listBackups(env: Env): Promise<BackupListing[]> {
     .toSorted((a, b) => b.key.localeCompare(a.key));
 }
 
-export interface RetainableBackup {
-  key: string;
-  uploaded: number;
-}
-
-// Tiered retention: keep every snapshot from the last 24h, then one per
-// calendar-day bucket for the past week, one per 7-day bucket for the past
-// month, and discard anything older. Returns the keys that should be deleted.
-export function selectStaleBackups(backups: RetainableBackup[], now: number): string[] {
-  const newestFirst = backups.toSorted((a, b) => b.uploaded - a.uploaded);
-  const seenDailyBuckets = new Set<number>();
-  const seenWeeklyBuckets = new Set<number>();
-  const stale: string[] = [];
-
-  for (const backup of newestFirst) {
-    const age = now - backup.uploaded;
-    if (age < DAY_MS) continue; // recent: keep all
-    if (age < 7 * DAY_MS) {
-      // Keep the newest snapshot in each day bucket, drop the rest.
-      const bucket = Math.floor(backup.uploaded / DAY_MS);
-      if (seenDailyBuckets.has(bucket)) stale.push(backup.key);
-      else seenDailyBuckets.add(bucket);
-    } else if (age < 30 * DAY_MS) {
-      // Keep the newest snapshot in each week bucket, drop the rest.
-      const bucket = Math.floor(backup.uploaded / (7 * DAY_MS));
-      if (seenWeeklyBuckets.has(bucket)) stale.push(backup.key);
-      else seenWeeklyBuckets.add(bucket);
-    } else {
-      stale.push(backup.key); // older than 30 days
-    }
-  }
-  return stale;
-}
-
 export interface PruneResult {
   deleted: number;
   kept: number;
@@ -204,10 +164,6 @@ export async function restoreFrom(env: Env, key: string): Promise<RestoreResult>
   // SAFETY: this R2 object is written only by createBackup using the BackupSnapshot schema.
   const snapshot = (await object.json()) as BackupSnapshot;
 
-  const [{ getAgentByName }, { REGISTRY_ID }] = await Promise.all([
-    import("agents"),
-    import("./state/GroupRegistry.ts"),
-  ]);
   await (await getAgentByName(env.GroupRegistry, REGISTRY_ID)).importState(snapshot.registry);
   await Promise.all([
     ...Object.entries(snapshot.groups).map(async ([id, state]) =>

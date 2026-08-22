@@ -1,7 +1,7 @@
 import { Agent } from "agents";
 import type { Env } from "../env.ts";
 
-export const REGISTRY_ID = "global";
+export { REGISTRY_ID } from "./registryId.ts";
 
 export interface RegistryState {
   names?: Record<string, string>;

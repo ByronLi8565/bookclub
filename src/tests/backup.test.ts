@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectStaleBackups, type RetainableBackup } from "../server/backup.ts";
+import { selectStaleBackups, type RetainableBackup } from "../server/backupRetention.ts";
 
 const NOW = Date.parse("2026-06-30T12:00:00.000Z");
 const HOUR = 60 * 60 * 1000;
