@@ -282,33 +282,38 @@ export const epubJsEngine: EpubEngine = ({
   const display = rendition.display.bind(rendition) as (target?: string) => Promise<void>;
 
   let opening: Promise<unknown> | null = null;
+  let ready: Promise<void> | null = null;
 
   return {
     book,
     async load(bytes, initialCfi) {
-      opening = book.open(bytes, "binary");
-      await opening;
-      const metadata = await book.loaded.metadata.catch(() => null);
-      const navigation = await book.loaded.navigation.catch(() => null);
-      // Try the most specific target first: a body-matter landmark can fail to
-      // resolve to a spine item, so we end at the first explicitly linear spine
-      // item rather than trusting epub.js's version-dependent default target.
-      const candidates = [
-        linearSpineTarget(book, initialCfi),
-        linearSpineTarget(book, navigation ? readingStartHref(navigation) : undefined),
-        firstLinearSpineTarget(book),
-      ].filter((target, index, all): target is string => {
-        return target !== undefined && all.indexOf(target) === index;
-      });
-      for (const target of candidates) {
-        try {
-          await display(target);
-          return metadata?.title?.trim() || null;
-        } catch {
-          continue;
+      const loading = (async () => {
+        opening = book.open(bytes, "binary");
+        await opening;
+        const metadata = await book.loaded.metadata.catch(() => null);
+        const navigation = await book.loaded.navigation.catch(() => null);
+        // Try the most specific target first: a body-matter landmark can fail to
+        // resolve to a spine item, so we end at the first explicitly linear spine
+        // item rather than trusting epub.js's version-dependent default target.
+        const candidates = [
+          linearSpineTarget(book, initialCfi),
+          linearSpineTarget(book, navigation ? readingStartHref(navigation) : undefined),
+          firstLinearSpineTarget(book),
+        ].filter((target, index, all): target is string => {
+          return target !== undefined && all.indexOf(target) === index;
+        });
+        for (const target of candidates) {
+          try {
+            await display(target);
+            return metadata?.title?.trim() || null;
+          } catch {
+            continue;
+          }
         }
-      }
-      throw new Error("No displayable section found in epub");
+        throw new Error("No displayable section found in epub");
+      })();
+      ready = loading.then(() => {});
+      return await loading;
     },
     place: () => readPlace(rendition, pagination),
     selection: () => readSelection(rendition),
@@ -316,7 +321,20 @@ export const epubJsEngine: EpubEngine = ({
       rendition.on("relocated", handler);
       return () => rendition.off("relocated", handler);
     },
-    turnPage: (direction) => (direction === "next" ? rendition.next() : rendition.prev()),
+    async turnPage(direction) {
+      const started = ready;
+      if (started === null || destroyed) return;
+      try {
+        await started;
+      } catch {
+        return;
+      }
+      // epub.js delegates to `manager.prev/next`; a queued command can outlive
+      // the manager during a book switch even though the Rendition object is
+      // still reachable.
+      if (destroyed || !renditionState.manager) return;
+      await (direction === "next" ? rendition.next() : rendition.prev());
+    },
     goTo: (cfi) => display(linearSpineTarget(book, cfi) ?? firstLinearSpineTarget(book)),
     setFontSize(percent) {
       currentFontSize = percent;

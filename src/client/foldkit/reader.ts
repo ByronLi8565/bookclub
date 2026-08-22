@@ -218,7 +218,6 @@ export type PendingJump = typeof PendingJump.Type;
 
 export const JumpedToHighlight = m("JumpedToHighlight", PendingJump.fields);
 export const SetReaderZoom = m("SetReaderZoom", { percent: Schema.Number });
-export const FailedReaderCommand = m("FailedReaderCommand", { message: Schema.String });
 export const CompletedReaderAction = m("CompletedReaderAction");
 
 export const ReaderMessage = Schema.Union([
@@ -260,7 +259,6 @@ export const ReaderMessage = Schema.Union([
   CancelledBookRename,
   JumpedToHighlight,
   SetReaderZoom,
-  FailedReaderCommand,
   CompletedReaderAction,
   OpenedEpub,
   MovedEpub,
@@ -851,15 +849,18 @@ export const makeReaderSlice = ({
 
   const epubSpread = (layout: PdfPageLayout) => (layout === "auto" ? "auto" : "none");
 
-  const failed = (error: unknown) => FailedReaderCommand({ message: String(error) });
+  const logCommandFailure = (error: unknown) =>
+    Effect.sync(() => console.error("Reader command failed", error)).pipe(
+      Effect.as(CompletedReaderAction()),
+    );
 
   const SearchReader = Command.define("SearchReader", {
     args: { query: Schema.String, kind: SourceKind },
-    messages: [SearchedReader, FailedReaderCommand],
+    messages: [SearchedReader, CompletedReaderAction],
     execute: ({ query, kind }) =>
       (kind === "epub" ? epubReaderMount.reader.search(query) : pdfReaderMount.search(query)).pipe(
         Effect.map((matches) => SearchedReader({ query, matches })),
-        Effect.catch((error) => Effect.succeed(failed(error))),
+        Effect.catch(logCommandFailure),
       ),
   });
 
@@ -869,20 +870,17 @@ export const makeReaderSlice = ({
       kind: SourceKind,
       zoomPercent: Schema.Number,
     },
-    messages: [CompletedReaderAction, FailedReaderCommand],
+    messages: [CompletedReaderAction],
     execute: ({ direction, kind, zoomPercent }) =>
       (kind === "epub"
         ? epubReaderMount.turnPage(direction)
         : pdfReaderMount.turnPage(direction, zoomPercent)
-      ).pipe(
-        Effect.as(CompletedReaderAction()),
-        Effect.catch((error) => Effect.succeed(failed(error))),
-      ),
+      ).pipe(Effect.as(CompletedReaderAction()), Effect.catch(logCommandFailure)),
   });
 
   const GoToSearchMatch = Command.define("GoToSearchMatch", {
     args: { anchor: HighlightAnchor, kind: SourceKind },
-    messages: [CompletedReaderAction, FailedReaderCommand],
+    messages: [CompletedReaderAction],
     execute: ({ anchor, kind }) =>
       (kind === "epub" ? epubReaderMount.goTo(anchor) : pdfReaderMount.goTo(anchor)).pipe(
         Effect.andThen(
@@ -891,17 +889,17 @@ export const makeReaderSlice = ({
             : pdfReaderMount.setSearchHighlight(anchor),
         ),
         Effect.as(CompletedReaderAction()),
-        Effect.catch((error) => Effect.succeed(failed(error))),
+        Effect.catch(logCommandFailure),
       ),
   });
 
   const GoToReaderAnchor = Command.define("GoToReaderAnchor", {
     args: { anchor: HighlightAnchor, kind: SourceKind },
-    messages: [CompletedReaderAction, FailedReaderCommand],
+    messages: [CompletedReaderAction],
     execute: ({ anchor, kind }) =>
       (kind === "epub" ? epubReaderMount.goTo(anchor) : pdfReaderMount.goTo(anchor)).pipe(
         Effect.as(CompletedReaderAction()),
-        Effect.catch((error) => Effect.succeed(failed(error))),
+        Effect.catch(logCommandFailure),
       ),
   });
 
@@ -1073,22 +1071,22 @@ export const makeReaderSlice = ({
    *  place and its painted annotations across a spread change. */
   const SetEpubSpread = Command.define("SetEpubSpread", {
     args: { layout: PdfPageLayout },
-    messages: [MeasuredReaderPagination, FailedReaderCommand],
+    messages: [MeasuredReaderPagination, CompletedReaderAction],
     execute: ({ layout }) =>
       epubReaderMount.setSpread(epubSpread(layout)).pipe(
         Effect.andThen(epubReaderMount.measurePagination),
         Effect.map((place) => MeasuredReaderPagination({ place })),
-        Effect.catch((error) => Effect.succeed(failed(error))),
+        Effect.catch(logCommandFailure),
       ),
   });
 
   const MeasureEpubPagination = Command.define("MeasureEpubPagination", {
     args: {},
-    messages: [MeasuredReaderPagination, FailedReaderCommand],
+    messages: [MeasuredReaderPagination, CompletedReaderAction],
     execute: () =>
       epubReaderMount.measurePagination.pipe(
         Effect.map((place) => MeasuredReaderPagination({ place })),
-        Effect.catch((error) => Effect.succeed(failed(error))),
+        Effect.catch(logCommandFailure),
       ),
   });
 
@@ -1500,8 +1498,6 @@ export const makeReaderSlice = ({
               [],
             ]
           : [reader, []];
-      case "FailedReaderCommand":
-        return [{ ...reader, error: message.message }, []];
       case "CompletedReaderAction":
         return [reader, []];
     }

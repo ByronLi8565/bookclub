@@ -519,6 +519,23 @@ describe("EPUB Foldkit Mount", () => {
     element.remove();
   }, 30000);
 
+  it("ignores a page turn before epub.js has installed its manager", async () => {
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const session = epubJsEngine({
+      element,
+      spread: "auto",
+      fontSizePercent: 100,
+      colors: { background: "#fff", text: "#000", link: "#00f" },
+      onHighlightClick: () => {},
+    });
+
+    await expect(session.turnPage("previous")).resolves.toBeUndefined();
+
+    session.destroy();
+    element.remove();
+  });
+
   it("acquires and releases real epub.js resources while its render is still pending", async () => {
     const adapter = makeEpubMount({
       loadSource: () => Promise.resolve(dorianBytes()),
