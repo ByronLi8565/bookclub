@@ -278,15 +278,17 @@ export const epubJsEngine: EpubEngine = ({
     });
     if (!document.dispatchEvent(forwarded)) event.preventDefault();
   };
-  rendition.on("keydown", forwardKey);
   const forwardPress = () => {
     element.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
   };
+  const bridgedDocuments = new Set<Document>();
   const bridgeContent = (content: Contents) => {
     // Listen on the iframe document itself: no event from this browsing context
     // can bubble to the application's document-level Foldkit Subscriptions.
+    content.document.addEventListener("keydown", forwardKey);
     content.document.addEventListener("mousedown", forwardPress, { passive: true });
     content.document.addEventListener("touchstart", forwardPress, { passive: true });
+    bridgedDocuments.add(content.document);
   };
   rendition.hooks.content.register(bridgeContent);
   let destroyed = false;
@@ -424,7 +426,6 @@ export const epubJsEngine: EpubEngine = ({
     },
     async setSpread(next) {
       if (next === currentSpread) return;
-      currentSpread = next;
       rendition.spread(next);
       const place = readPlace(rendition, pagination);
       if (place?.cfi) await display(place.cfi);
@@ -436,6 +437,10 @@ export const epubJsEngine: EpubEngine = ({
       searchCfi = null;
       this.syncHighlights(painted);
       this.setSearchHighlight(search);
+      // A failed redisplay must remain retryable: the model already records
+      // the requested layout, so only commit the imperative state once the
+      // replacement content and its annotations are ready.
+      currentSpread = next;
     },
     async measurePagination(isCancelled) {
       const measured = await measureEpubPagination(
@@ -452,8 +457,13 @@ export const epubJsEngine: EpubEngine = ({
     },
     destroy() {
       destroyed = true;
-      rendition.off("keydown", forwardKey);
       rendition.hooks.content.deregister(bridgeContent);
+      for (const document of bridgedDocuments) {
+        document.removeEventListener("keydown", forwardKey);
+        document.removeEventListener("mousedown", forwardPress);
+        document.removeEventListener("touchstart", forwardPress);
+      }
+      bridgedDocuments.clear();
       resizeObserver?.disconnect();
       // The replacement Mount may acquire before epub.js is safe to destroy.
       // Release the old session's visible DOM immediately so two renditions
@@ -513,6 +523,28 @@ function failureMessage(error: unknown): string {
 export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOptions) {
   let live: EpubSession | null = null;
   let measureSeq = 0;
+  let requestedSpread: EpubSpread | null = null;
+  let spreadSession: EpubSession | null = null;
+  let spreadTask: Promise<void> | null = null;
+
+  const applyRequestedSpread = (session: EpubSession): Promise<void> => {
+    if (spreadTask !== null && spreadSession === session) return spreadTask;
+    spreadSession = session;
+    const applyLatest = async (): Promise<void> => {
+      if (live !== session || requestedSpread === null) return;
+      const next = requestedSpread;
+      await session.setSpread(next);
+      if (requestedSpread !== next) await applyLatest();
+    };
+    const task = applyLatest();
+    spreadTask = task.finally(() => {
+      if (spreadSession === session) {
+        spreadSession = null;
+        spreadTask = null;
+      }
+    });
+    return spreadTask;
+  };
 
   const onLiveSession = <A>(fallback: A, use: (session: EpubSession) => Promise<A>) =>
     Effect.suspend(() => {
@@ -558,6 +590,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
 
             const session = yield* Effect.acquireRelease(
               Effect.sync(() => {
+                requestedSpread = spread;
                 const created = engine({
                   element,
                   spread,
@@ -657,7 +690,14 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
         live?.setSearchHighlight(anchor?.kind === "epub-cfi" ? anchor.value : null);
       }),
     setSpread: (spread: EpubSpread) =>
-      onLiveSession(undefined, (session) => session.setSpread(spread)),
+      Effect.tryPromise({
+        try: async () => {
+          requestedSpread = spread;
+          const session = live;
+          if (session !== null) await applyRequestedSpread(session);
+        },
+        catch: (cause) => cause,
+      }),
     /** Measurement is expensive and viewport-dependent, so a newer request
      *  cancels the one in flight rather than queueing behind it. */
     measurePagination: Effect.suspend(() => {

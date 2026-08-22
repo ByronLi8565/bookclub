@@ -298,6 +298,40 @@ describe("EPUB Foldkit Mount", () => {
     handle.dispose();
   });
 
+  it("serializes spread changes and applies the latest requested layout", async () => {
+    const fake = makeFakeEngine();
+    const adapter = makeEpubMount({
+      loadSource: () => Promise.resolve(dorianBytes()),
+      engine: fake.engine,
+    });
+    const handle = startReader(adapter, "a");
+    await vi.waitFor(() => expect(log()).toContain("OpenedEpub:a"));
+
+    const calls: string[] = [];
+    let finishFirst = (): void => {
+      throw new Error("first spread change has not started");
+    };
+    fake.latest().setSpread = async (spread) => {
+      calls.push(spread);
+      if (calls.length === 1) {
+        await new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        });
+      }
+    };
+
+    const first = Effect.runPromise(adapter.setSpread("none"));
+    await vi.waitFor(() => expect(calls).toEqual(["none"]));
+    const second = Effect.runPromise(adapter.setSpread("auto"));
+    expect(calls).toEqual(["none"]);
+
+    finishFirst();
+    await Promise.all([first, second]);
+    expect(calls).toEqual(["none", "auto"]);
+
+    handle.dispose();
+  });
+
   it("publishes selection transitions polled from the live documents", async () => {
     const fake = makeFakeEngine();
     const adapter = makeEpubMount({
