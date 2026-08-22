@@ -15,7 +15,7 @@ export const books = {
     file: new URL("../../assets/dorian.epub", import.meta.url),
     contentType: "application/epub+zip",
     title: "The Picture of Dorian Gray",
-    ready: ".epub-container iframe",
+    ready: ".reader-surface .epub-container iframe",
   },
 } as const;
 
@@ -147,4 +147,44 @@ export function currentPage(page: Page): Promise<number | null> {
     const match = element.textContent?.match(/(\d+)\s*\/\s*(\d+)/u);
     return match ? Number(match[1]) : null;
   });
+}
+
+/** Common journeys should fail on browser/runtime faults even when the final
+ * element happens to render. Assertions at the end keep intentional setup
+ * requests readable while making silent console and transport failures fatal. */
+export function watchForUnexpectedBrowserFailures(page: Page) {
+  const failures: string[] = [];
+  page.on("pageerror", (error) => failures.push(`page error: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    // epub.js copies a book's inline scripts into a deliberately scriptless
+    // sandbox. WebKit reports each refused script as a console error even
+    // though blocking it is the reader's security contract.
+    if (
+      message.text().includes("Blocked script execution") &&
+      message.text().includes("allow-scripts")
+    ) {
+      return;
+    }
+    failures.push(`console error: ${message.text()}`);
+  });
+  page.on("requestfailed", (request) => {
+    const reason = request.failure()?.errorText ?? "unknown failure";
+    if (!reason.includes("ERR_ABORTED")) {
+      failures.push(`request failed: ${request.method()} ${request.url()} (${reason})`);
+    }
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      failures.push(
+        `server error: ${response.status()} ${response.request().method()} ${response.url()}`,
+      );
+    }
+  });
+  return async () => {
+    await expect(page.locator(".toast--error"), "the journey raises no error toast").toHaveCount(0);
+    expect(failures, "the journey raises no browser, console, transport, or server error").toEqual(
+      [],
+    );
+  };
 }

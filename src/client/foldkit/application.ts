@@ -23,6 +23,7 @@ import { loginErrorMessage } from "../logic/auth/authMessages.ts";
 import { Url } from "foldkit";
 import { AppRoute, Club, Home, hrefFor, routeOf } from "./routes.ts";
 import { clubNameErrorMessage } from "../logic/groups/groupMessages.ts";
+import { effectiveHighlight } from "../logic/notes/conversation.ts";
 import { setSessionToken } from "../logic/net/api.ts";
 import { apiFailure } from "../logic/net/failure.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
@@ -37,7 +38,7 @@ import {
 } from "./offlineCache.ts";
 import { loadingView } from "./loading.ts";
 import { escapeKeyStream, modalView, pressOutsideModalStream } from "./modal.ts";
-import settingsIcon from "@assets/settings.svg";
+import { settingsIconView } from "./icons.ts";
 import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
 import { books } from "../../shared/sources.ts";
 import { GroupAction, permits } from "../../shared/groupPermissions.ts";
@@ -110,6 +111,7 @@ import {
 import {
   ChangedReaderLayout,
   CommittedReaderSelection,
+  CompletedReaderAction,
   IdentifiedReaderSession,
   JumpedToHighlight,
   ReaderWorkspace,
@@ -125,6 +127,8 @@ import {
   type ReaderMessage,
   type ReaderSelection,
 } from "./reader.ts";
+import { ThemeTokens, resolveThemeTokens } from "../../shared/types/theme.ts";
+import { SourceKind } from "../../shared/types/sources.ts";
 
 // One slice per application: the Mounts inside it own the live book handles.
 const reader = makeReaderSlice(browserReaderEnvironment);
@@ -510,6 +514,23 @@ export const LoadSession = Command.define("LoadSession", {
       }),
     ),
   ),
+});
+
+/** Neither renderer's content sits behind the app's `:root` custom properties
+ *  — an EPUB's is in its own iframe, a PDF's is a baked raster canvas — so a
+ *  theme change has to be told to whichever one is open directly. */
+export const ApplyReaderColors = Command.define("ApplyReaderColors", {
+  args: { tokens: ThemeTokens, kind: SourceKind },
+  messages: [CompletedReaderAction],
+  execute: ({ tokens, kind }) =>
+    (kind === "epub"
+      ? reader.epub.setColors({
+          background: tokens.background,
+          text: tokens.text,
+          link: tokens.link,
+        })
+      : reader.pdf.setColors({ background: tokens.background, text: tokens.text })
+    ).pipe(Effect.as(CompletedReaderAction())),
 });
 
 export const LoadGroups = Command.define("LoadGroups", {
@@ -1043,13 +1064,13 @@ const commitSelection = (
 const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
   if (message._tag === "SelectedReaderSource") {
     const { groupRef } = message;
-    const [reader, commands] = updateReader(openReader(message), message) ?? [
+    const [nextReader, commands] = updateReader(openReader(message), message) ?? [
       openReader(message),
       [],
     ];
     // A club *is* its open book; opening one changes what the club page shows
     // rather than where the reader is.
-    return [{ ...model, route: Club({ groupRef }), reader }, commands];
+    return [{ ...model, route: Club({ groupRef }), reader: nextReader }, commands];
   }
   if (model.reader === null) return [model, []];
   const selection = model.reader.selection;
@@ -1084,15 +1105,15 @@ const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
  * reading rather than one that reaches into the session.
  */
 const reconcileReaderIdentity = ([model, commands]: Update): Update => {
-  const { reader, currentGroup, session } = model;
-  if (reader === null || currentGroup === null || session._tag !== "AuthenticatedSession") {
+  const { reader: currentReader, currentGroup, session } = model;
+  if (currentReader === null || currentGroup === null || session._tag !== "AuthenticatedSession") {
     return [model, commands];
   }
-  if (reader.userId === session.user.id && reader.groupId === currentGroup.groupId) {
+  if (currentReader.userId === session.user.id && currentReader.groupId === currentGroup.groupId) {
     return [model, commands];
   }
   const identified = updateReader(
-    reader,
+    currentReader,
     IdentifiedReaderSession({ userId: session.user.id, groupId: currentGroup.groupId }),
   );
   return identified === null
@@ -1108,15 +1129,33 @@ const reconcileReaderIdentity = ([model, commands]: Update): Update => {
 const updateSettingsSlice = (model: Model, message: SettingsMessage): Update => {
   const [settings, commands] = updateSettings(model.settings, message);
   const layout = settingsPrefs(settings).reader.pdfPageLayout;
+  const smartArrows = settingsPrefs(settings).reader.smartArrows;
   const relaid =
     model.reader === null || model.reader.layout === layout
       ? null
       : updateReader(model.reader, ChangedReaderLayout({ layout }));
-  const applied =
+  const appliedLayout =
     relaid === null ? { ...model, settings } : { ...model, settings, reader: relaid[0] };
   const withLayout = relaid === null ? commands : [...commands, ...relaid[1]];
+  const applied =
+    appliedLayout.reader === null || appliedLayout.reader.smartArrows === smartArrows
+      ? appliedLayout
+      : { ...appliedLayout, reader: { ...appliedLayout.reader, smartArrows } };
+  // `updateSettings` only ever replaces `appearance` when it actually changes,
+  // so identity is enough to tell — neither renderer's content sits behind
+  // the app's `:root` custom properties, so a change has to be told directly
+  // to whichever one is open (a PDF re-renders its page; an EPUB restyles its
+  // iframe in place).
+  const appearance = settingsPrefs(settings).appearance;
+  const withColors =
+    appearance === model.settings.prefs.appearance || applied.reader === null
+      ? withLayout
+      : [
+          ...withLayout,
+          ApplyReaderColors({ tokens: resolveThemeTokens(appearance), kind: applied.reader.kind }),
+        ];
   const notice = settingsNotice(settings);
-  if (notice === null) return [applied, withLayout];
+  if (notice === null) return [applied, withColors];
   const [read] = updateSettings(settings, DismissedSettingsNotice());
   const [toasted, toastCommands] = withToast(
     { ...applied, settings: read },
@@ -1124,7 +1163,7 @@ const updateSettingsSlice = (model: Model, message: SettingsMessage): Update => 
       ? errorToast(notice.title, notice.body)
       : infoToast(notice.title, notice.body),
   );
-  return [toasted, [...withLayout, ...toastCommands]];
+  return [toasted, [...withColors, ...toastCommands]];
 };
 
 /** A finished upload is the club's first book: the modal closes and the club is
@@ -1194,10 +1233,12 @@ export const update = (model: Model, message: Message): Update =>
  * same thing React waited on before running a pending jump.
  */
 const reconcilePendingJump = ([model, commands]: Update): Update => {
-  const { pendingJump, reader } = model;
-  if (pendingJump === null || reader === null) return [model, commands];
-  if (reader.sourceId !== pendingJump.sourceId || reader.loading) return [model, commands];
-  const jumped = updateReader(reader, JumpedToHighlight(pendingJump));
+  const { pendingJump, reader: currentReader } = model;
+  if (pendingJump === null || currentReader === null) return [model, commands];
+  if (currentReader.sourceId !== pendingJump.sourceId || currentReader.loading) {
+    return [model, commands];
+  }
+  const jumped = updateReader(currentReader, JumpedToHighlight(pendingJump));
   return jumped === null
     ? [{ ...model, pendingJump: null }, commands]
     : [{ ...model, pendingJump: null, reader: jumped[0] }, [...commands, ...jumped[1]]];
@@ -1230,6 +1271,23 @@ const updateSlices = (model: Model, message: Message): Update => {
     ];
   }
   if (isReaderMessage(message)) return updateReaderSlice(model, message);
+  if (message._tag === "FollowedNoteReference") {
+    // A reference to note 3 is a way of pointing at note 3, so following one is
+    // clicking it: the same jump, and therefore the same book-opening and the
+    // same held anchor when the note lives in a book that is not open.
+    const [focused, commands] = updateNotesSlice(model, message);
+    const target = focused.notes.notes.find((note) => note.seq === message.seq);
+    const byId = new Map(focused.notes.notes.map((note) => [note.id, note] as const));
+    const highlight = target === undefined ? null : effectiveHighlight(target, byId);
+    // A note with no highlight of its own, and no ancestor carrying one, has no
+    // place in the book to go to. Focusing it in the panel is the whole answer.
+    if (highlight === null) return [focused, commands];
+    const [jumped, jumpCommands] = updateSlices(
+      focused,
+      JumpedToHighlight({ anchor: highlight.anchor, sourceId: highlight.sourceId }),
+    );
+    return [jumped, [...commands, ...jumpCommands]];
+  }
   if (isNotesMessage(message)) return updateNotesSlice(model, message);
   if (isInfoMessage(message)) {
     const [info, commands] = updateInfo(model.info, message);
@@ -1282,7 +1340,12 @@ const updateSlices = (model: Model, message: Message): Update => {
       switch (message.overlay._tag) {
         case "SettingsOverlay": {
           const [next, commands] = updateSettingsSlice(opened, OpenedSettings());
-          return [next, [LoadAccountSecurity(), ...commands]];
+          return [
+            next,
+            model.session._tag === "AuthenticatedSession"
+              ? [LoadAccountSecurity(), ...commands]
+              : commands,
+          ];
         }
         case "InviteOverlay":
           return updateInviteSlice(opened, OpenedInvite({ groupRef: message.overlay.groupRef }));
@@ -1790,7 +1853,7 @@ const paneClass = (base: string, hidden: boolean): string =>
 
 const workspaceLayoutView = (
   model: Model,
-  reader: ReaderWorkspace,
+  activeReader: ReaderWorkspace,
   groupRef: string,
   h: HtmlBuilder<Message>,
 ): Html => {
@@ -1801,7 +1864,7 @@ const workspaceLayoutView = (
   const notes = notesView(
     model.notes,
     {
-      sourceId: reader.sourceId,
+      sourceId: activeReader.sourceId,
       groupRef,
       jumpToHighlight: (highlight) =>
         JumpedToHighlight({ anchor: highlight.anchor, sourceId: highlight.sourceId }),
@@ -1842,7 +1905,9 @@ const workspaceLayoutView = (
   const track = h.div(
     [
       h.Class(narrow ? "workspace-layout-track pager-track" : "workspace-layout-track"),
-      ...(narrow && reader.pane === "notes" ? [h.Style({ transform: "translateX(-100%)" })] : []),
+      ...(narrow && activeReader.pane === "notes"
+        ? [h.Style({ transform: "translateX(-100%)" })]
+        : []),
     ],
     [
       h.div(
@@ -1853,16 +1918,17 @@ const workspaceLayoutView = (
         ],
         [
           readerView(
-            reader,
+            activeReader,
             {
               books: model.currentGroup === null ? [] : books(model.currentGroup),
-              title: model.currentGroup?.bookTitles[reader.sourceId] ?? null,
+              title: model.currentGroup?.bookTitles[activeReader.sourceId] ?? null,
               onSelectBook: (sourceId) => SelectedBook({ sourceId }),
               // Renaming a book is a permission, not a decoration.
               onRenameBook: permits(model.membership?.role ?? "visitor", GroupAction.RenameBook)
                 ? (sourceId, title) => RequestedBookRename({ sourceId, title })
                 : null,
               onAddBook: OpenedOverlay({ overlay: UploadOverlay() }),
+              colors: resolveThemeTokens(model.settings.prefs.appearance),
             },
             h,
           ),
@@ -1912,12 +1978,12 @@ const workspaceLayoutView = (
       track,
       h.div(
         [h.Class("pager-tabs")],
-        reader.selection === null
+        activeReader.selection === null
           ? [
               h.button(
                 [
                   h.Type("button"),
-                  h.AriaPressed(String(reader.pane === "reader")),
+                  h.AriaPressed(String(activeReader.pane === "reader")),
                   h.OnClick(SwitchedReaderPane({ pane: "reader" })),
                   h.Title("Show reader"),
                 ],
@@ -1926,7 +1992,7 @@ const workspaceLayoutView = (
               h.button(
                 [
                   h.Type("button"),
-                  h.AriaPressed(String(reader.pane === "notes")),
+                  h.AriaPressed(String(activeReader.pane === "notes")),
                   h.OnClick(SwitchedReaderPane({ pane: "notes" })),
                   h.Title("Show notes"),
                 ],
@@ -2094,7 +2160,7 @@ export const workspaceHeaderView = (
           h.Title("Settings"),
           h.OnClick(OpenedOverlay({ overlay: SettingsOverlay() })),
         ],
-        [h.img([h.Src(settingsIcon), h.Alt(""), h.AriaHidden(true)])],
+        [settingsIconView(h)],
       ),
       h.button(
         [
@@ -2113,15 +2179,15 @@ export const workspaceHeaderView = (
  *  Chrome hiding is a class on the shell, which is what the CSS keys off. */
 const workspaceView = (
   model: Model,
-  reader: ReaderWorkspace,
+  activeReader: ReaderWorkspace,
   groupRef: string,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.div(
-    [h.Class(reader.chromeLevel >= 1 ? "app app--chrome-hidden" : "app")],
+    [h.Class(activeReader.chromeLevel >= 1 ? "app app--chrome-hidden" : "app")],
     [
       workspaceHeaderView(model, model.currentGroup?.displayName ?? "Bookclub", h),
-      workspaceLayoutView(model, reader, groupRef, h),
+      workspaceLayoutView(model, activeReader, groupRef, h),
       ...overlayView(model, h),
     ],
   );
@@ -2146,7 +2212,7 @@ const homeTopButtons = (model: Model, h: HtmlBuilder<Message>): Html =>
                 h.Title("Settings"),
                 h.OnClick(OpenedOverlay({ overlay: SettingsOverlay() })),
               ],
-              [h.img([h.Src(settingsIcon), h.Alt(""), h.AriaHidden(true)])],
+              [settingsIconView(h)],
             ),
           ]
         : []),
@@ -2205,9 +2271,8 @@ const backToClubs = (h: HtmlBuilder<Message>): Html =>
   );
 
 const clubList = (model: Model, h: HtmlBuilder<Message>): Html =>
-  model.session._tag !== "AuthenticatedSession"
-    ? h.span([h.Class("home-existing-label")], ["sign in to see your clubs"])
-    : model.groups.length === 0
+  model.session._tag === "AuthenticatedSession"
+    ? model.groups.length === 0
       ? h.span([h.Class("home-existing-label")], ["no clubs yet \u2014 create one above"])
       : h.ul(
           [h.Class("home-club-list")],
@@ -2238,7 +2303,8 @@ const clubList = (model: Model, h: HtmlBuilder<Message>): Html =>
               ],
             ),
           ),
-        );
+        )
+    : h.span([h.Class("home-existing-label")], ["sign in to see your clubs"]);
 
 const homeView = (model: Model, h: HtmlBuilder<Message>, overlay: Html[] = []): Html =>
   homeCard(
@@ -2250,9 +2316,8 @@ const homeView = (model: Model, h: HtmlBuilder<Message>, overlay: Html[] = []): 
         [h.Class("home-main")],
         [
           h.h1([h.Class("home-title")], ["Bookclub"]),
-          ...(model.session._tag !== "AuthenticatedSession"
-            ? []
-            : model.creatingClub
+          ...(model.session._tag === "AuthenticatedSession"
+            ? model.creatingClub
               ? [
                   h.form(
                     [h.Class("home-create"), h.OnSubmit(SubmittedNewGroup())],
@@ -2290,7 +2355,8 @@ const homeView = (model: Model, h: HtmlBuilder<Message>, overlay: Html[] = []): 
                     ],
                     ["create a new bookclub"],
                   ),
-                ]),
+                ]
+            : []),
           ...(model.newGroupError === null
             ? []
             : [h.p([h.Class("login-error")], [model.newGroupError])]),
@@ -2572,19 +2638,7 @@ const workspaceLoadingView = (model: Model, h: HtmlBuilder<Message>): Html =>
   h.div(
     [h.Class("app")],
     [
-      h.header(
-        [h.Class("topbar")],
-        [
-          h.a(
-            [h.Class("topbar-home"), h.Href(hrefFor(Home())), h.AriaLabel("back to your clubs")],
-            ["\u2039"],
-          ),
-          h.span(
-            [h.Class("presence-indicator"), h.AriaHidden(true)],
-            [h.span([h.Class("presence-count")], ["0"]), h.span([h.Class("presence-dot")], [])],
-          ),
-        ],
-      ),
+      workspaceHeaderView(model, model.currentGroup?.displayName ?? "Bookclub", h),
       h.div(
         [
           h.Class(
@@ -2593,10 +2647,21 @@ const workspaceLoadingView = (model: Model, h: HtmlBuilder<Message>): Html =>
         ],
         [
           h.div(
-            [h.Class("workspace-layout-track")],
+            [
+              h.Class(
+                model.viewport === "narrow"
+                  ? "workspace-layout-track pager-track"
+                  : "workspace-layout-track",
+              ),
+            ],
             [
               h.div(
-                [h.Class(model.viewport === "narrow" ? "pager-page" : "split-pane")],
+                [
+                  h.Class(model.viewport === "narrow" ? "pager-page" : "split-pane"),
+                  ...(model.viewport === "narrow"
+                    ? []
+                    : [h.Style({ width: `${model.splitShare}%` })]),
+                ],
                 [
                   h.div(
                     [h.Class("reader")],
@@ -2613,6 +2678,9 @@ const workspaceLoadingView = (model: Model, h: HtmlBuilder<Message>): Html =>
                   ),
                 ],
               ),
+              ...(model.viewport === "narrow"
+                ? []
+                : [h.div([h.Class("split-divider"), h.AriaHidden(true)], [])]),
               h.div(
                 [
                   h.Class(

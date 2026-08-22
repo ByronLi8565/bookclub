@@ -1,4 +1,3 @@
-import editIcon from "@assets/edit.svg";
 import { Effect, Option, Schema } from "effect";
 import { Command } from "foldkit";
 import * as FoldkitFile from "foldkit/file";
@@ -27,6 +26,7 @@ import {
 } from "../logic/notes/noteQuery.ts";
 import { addNoteOp, addReplyOp, editNoteOp, removeNoteOp } from "../logic/notes/noteOps.ts";
 import { canDeleteNote, canEditNote, type NoteViewer } from "../logic/notes/permissions.ts";
+import { editIconView } from "./icons.ts";
 import { noteBodyView } from "./noteBody.ts";
 import {
   NoteFilterMode,
@@ -944,7 +944,7 @@ export const notesView = <Message>(
                 }),
               ),
             ],
-            [h.img([h.Src(editIcon), h.Alt(""), h.AriaHidden(true)])],
+            [editIconView(h)],
           ),
         ]
       : []),

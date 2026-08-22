@@ -17,7 +17,8 @@
 .settings-button {
   width: 32px;
 
-  & img {
+  & img,
+  & svg {
     width: 16px;
     height: 16px;
     display: block;
@@ -244,6 +245,73 @@
     right: 0;
     min-width: max(240px, 100%);
   }
+}
+
+.theme-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: auto;
+  padding: 8px;
+  border: var(--line-thin);
+  background: var(--color-background);
+  color: var(--color-text);
+
+  &.is-active {
+    border: var(--line);
+  }
+
+  &:hover {
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+}
+
+.theme-swatch-preview {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  height: 28px;
+  border: var(--line-thin);
+}
+
+.theme-swatch-chip {
+  min-width: 0;
+}
+
+.theme-swatch-label {
+  font-size: var(--font-xs);
+  text-align: center;
+}
+
+.theme-config-input {
+  width: 100%;
+  font: inherit;
+  font-size: var(--font-xs);
+  background: var(--color-background);
+  color: var(--color-text);
+  border: var(--line);
+  padding: 8px;
+  resize: vertical;
+}
+
+.theme-config-errors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-xs);
+  color: var(--color-danger);
 }
 
 .settings-dropdown-trigger {

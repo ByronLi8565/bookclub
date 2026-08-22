@@ -95,7 +95,9 @@ const render = async (
       slow: false,
     }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise((resolve) => {
+    setTimeout(resolve, 300);
+  });
   const html = document.body.innerHTML;
   handle.dispose();
   const holder = document.createElement("div");
@@ -186,7 +188,7 @@ describe("Foldkit notes view", () => {
 
   it("offers edit and delete only to a reader allowed to use them", async () => {
     const mine = await render(online);
-    expect(mine.querySelector('button.edit[aria-label="edit"] img')).not.toBeNull();
+    expect(mine.querySelector('button.edit[aria-label="edit"] svg')).not.toBeNull();
     expect(mine.querySelector('.delete-wrap > button.delete[aria-label="delete"]')).not.toBeNull();
 
     const theirs = await render(online, { viewer: { userId: "someone-else", isOwner: false } });

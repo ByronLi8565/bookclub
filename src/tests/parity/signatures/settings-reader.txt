@@ -34,7 +34,5 @@ div.modal-backdrop[role=presentation]
           "User"
         button[type=button aria-pressed=false title=General settings]
           "General"
-        button[type=button aria-pressed=false title=PDF settings]
-          "PDF"
-        button[type=button aria-pressed=false title=Appearance settings]
-          "Appearance"
+        button[type=button aria-pressed=false title=Reader settings]
+          "Reader"

@@ -1,0 +1,16 @@
+[     385ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/MutableRef-niuBNl6N.js?v=6ceeb3b4:0
+[     386ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/effect_Types.js?v=e944d61d:0
+[     386ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/dist-DaauLReM.js?v=6ceeb3b4:0
+[     386ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/ChannelSchema-DbV4S_oC.js?v=6ceeb3b4:0
+[     389ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/effect_Schema.js?v=e944d61d:0
+[     389ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/FiberSet-BePp4gKQ.js?v=6ceeb3b4:0
+[     390ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/effect_unstable_http.js?v=dd510693:0
+[     393ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/effect_unstable_httpapi.js?v=136c7803:0
+[     394ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/effect_Effect.js?v=e944d61d:0
+[     423ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/epubjs.js?v=f12fb438:0
+[     595ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/result-CKzPJ4jk.js?v=6ceeb3b4:0
+[     607ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/record-Cd9fNuvR.js?v=6ceeb3b4:0
+[     607ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/array-DE0-d-gS.js?v=6ceeb3b4:0
+[     615ms] [ERROR] Failed to load resource: the server responded with a status of 504 (Outdated Optimize Dep) @ http://localhost:5174/node_modules/.vite/deps/hashMap-Dy6z_Xuu.js?v=6ceeb3b4:0
+[   62561ms] [WARNING] Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: https://html.spec.whatwg.org/multipage/canvas.html#concept-canvas-will-read-frequently @ http://localhost:5174/src/client/foldkit/mounts/pdf.ts:73
+[  155908ms] [LOG] [vite] server connection lost. Polling for restart... @ http://localhost:5174/@vite/client:992

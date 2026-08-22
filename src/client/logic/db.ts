@@ -3,10 +3,11 @@ import * as Schema from "effect/Schema";
 
 // IndexedDB upgrades run cumulatively; preserve existing stores when bumping DB_VERSION.
 const DB_NAME = "bookclub";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export const BOOKS_STORE = "books";
 export const NOTES_STORE = "notes";
+export const READER_SNAPSHOTS_STORE = "reader-snapshots";
 
 export class PersistError extends Schema.TaggedError<PersistError>()("IndexedDb.PersistError", {
   operation: Schema.String,
@@ -23,6 +24,8 @@ function open(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(BOOKS_STORE)) db.createObjectStore(BOOKS_STORE);
       if (!db.objectStoreNames.contains(NOTES_STORE)) db.createObjectStore(NOTES_STORE);
+      if (!db.objectStoreNames.contains(READER_SNAPSHOTS_STORE))
+        db.createObjectStore(READER_SNAPSHOTS_STORE);
     });
     req.addEventListener("success", () => resolve(req.result));
     req.addEventListener("error", () => reject(req.error));

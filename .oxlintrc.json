@@ -36,6 +36,7 @@
     "typescript/consistent-type-imports": "error",
     "import/no-cycle": "error",
     "no-console": "off",
+    "no-underscore-dangle": ["warn", { "allow": ["_tag"] }],
     "no-inline-comments": "off",
     "max-lines": "off",
     "max-lines-per-function": "off",
@@ -45,6 +46,7 @@
     "unicorn/prefer-query-selector": "off",
     "unicorn/consistent-function-scoping": "off",
     "unicorn/no-array-callback-reference": "off",
-    "unicorn/prefer-dom-node-append": "off"
+    "unicorn/prefer-dom-node-append": "off",
+    "unicorn/prefer-top-level-await": "off"
   }
 }

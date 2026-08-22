@@ -138,12 +138,17 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   await page.getByRole("button", { name: "close" }).click();
   await expect(page.locator("dialog.modal")).toHaveCount(0);
 
+  const accountSecurity = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/me/passkeys",
+  );
   await page.getByRole("button", { name: "settings" }).click();
   await expect(page.locator("dialog.modal[open]")).toBeVisible();
+  expect((await accountSecurity).status()).toBe(200);
+  await expect(page.locator(".toast--error")).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.locator("dialog.modal")).toHaveCount(0);
 
-  await page.getByRole("button", { name: /people online/ }).click();
+  await page.getByRole("button", { name: /people online/u }).click();
   await expect(page.locator("dialog.modal[open]")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator("dialog.modal")).toHaveCount(0);

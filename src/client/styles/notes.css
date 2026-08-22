@@ -90,7 +90,8 @@
     align-items: center;
     justify-content: center;
 
-    & img {
+    & img,
+    & svg {
       width: 14px;
       height: 14px;
     }
@@ -618,7 +619,7 @@
   border: var(--line);
   border-radius: 8px;
   background: var(--color-background);
-  box-shadow: 2px 2px 0 var(--color-text);
+  box-shadow: 2px 2px 0 var(--color-shadow);
   font: inherit;
   font-weight: 700;
   line-height: 1;

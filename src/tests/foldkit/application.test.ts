@@ -48,13 +48,34 @@ import {
   CloseLoginAfterSuccess,
   ChangedLoginCode,
   LoginOverlay,
+  LoadAccountSecurity,
   OpenedOverlay,
+  SettingsOverlay,
   init,
   makeBookclubApplication,
   update,
 } from "../../client/foldkit/application.ts";
 
 describe("Foldkit Bookclub boundary", () => {
+  it("opens public settings without requesting private account security", () => {
+    const [initial] = init();
+    const [anonymous, anonymousCommands] = update(
+      initial,
+      OpenedOverlay({ overlay: SettingsOverlay() }),
+    );
+    expect(anonymous.overlay).toEqual(SettingsOverlay());
+    expect(anonymousCommands.map((command) => command.name)).not.toContain(
+      LoadAccountSecurity.name,
+    );
+
+    const [signedIn] = update(
+      initial,
+      LoadedSession({ user: { id: "reader-1", email: "reader@example.com", name: "Reader" } }),
+    );
+    const [, signedInCommands] = update(signedIn, OpenedOverlay({ overlay: SettingsOverlay() }));
+    expect(signedInCommands.map((command) => command.name)).toContain(LoadAccountSecurity.name);
+  });
+
   it("keeps serializable session, account, and error-toast transitions", () => {
     const [initial] = init();
     const user = { id: "user-1", email: "reader@example.com", name: "Reader" };

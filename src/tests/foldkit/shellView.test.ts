@@ -65,7 +65,9 @@ const render = async (model: Model): Promise<HTMLElement> => {
       slow: false,
     }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await new Promise((resolve) => {
+    setTimeout(resolve, 200);
+  });
   const html = document.body.innerHTML;
   handle.dispose();
   const holder = document.createElement("div");
@@ -198,6 +200,11 @@ describe("the Foldkit shell", () => {
 
     // Not the home card: the page must not jump when the book arrives.
     expect(tree.querySelector(".app > .topbar .topbar-home")).not.toBeNull();
+    expect(tree.querySelector(".workspace-layout.split .workspace-layout-track")).not.toBeNull();
+    expect(
+      tree.querySelector<HTMLElement>(".workspace-layout-track > .split-pane")?.style.width,
+    ).toBe("62%");
+    expect(tree.querySelector(".workspace-layout-track > .split-divider")).not.toBeNull();
     expect(tree.querySelector(".reader-surface .loading--reader")).not.toBeNull();
     expect(tree.querySelector(".note-panel .loading--note-panel")).not.toBeNull();
   });

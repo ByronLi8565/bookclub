@@ -3,6 +3,7 @@
   --color-text: #000;
   --color-muted: #777;
   --color-border: #000;
+  --color-shadow: #000;
   --color-link: #0000ee;
   --color-highlight: #ffe600;
   --color-danger: #d60000;
@@ -23,10 +24,10 @@
   --muted-opacity: 0.6;
   --subtle-opacity: 0.7;
   --highlight-opacity: 0.4;
-  --shadow-sm: 4px 4px 0 var(--color-text);
-  --shadow-popover: 5px 5px 0 var(--color-text);
-  --shadow-md: 6px 6px 0 var(--color-text);
-  --shadow-lg: 8px 8px 0 var(--color-text);
+  --shadow-sm: 4px 4px 0 var(--color-shadow);
+  --shadow-popover: 5px 5px 0 var(--color-shadow);
+  --shadow-md: 6px 6px 0 var(--color-shadow);
+  --shadow-lg: 8px 8px 0 var(--color-shadow);
   --modal-width: 460px;
   --chrome-collapse-duration: 260ms;
   --chrome-fade-duration: 180ms;

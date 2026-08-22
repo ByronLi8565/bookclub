@@ -8,13 +8,13 @@
 | `e2e/browser/*.pw.ts`                                | Desktop Safari          | Two readers in two browsers against a live worker: collaboration, invites, group management, reading position.                                                                                               |
 
 ```sh
-bun run test:e2e                              # everything
-PW_DETACHED_SESSION=1 bunx playwright test --project="Desktop Chrome"
+bun run test:e2e:smoke # common signed-in PDF, EPUB, notes, highlights, settings, and upload paths
+bun run test:e2e       # everything
 ```
 
-The WebKit projects need a terminal attached to the GUI session; see "Running the browser suite" in
-`docs/plans/effect-httpapi-foldkit-next-agent.md` for why, and for the Chromium flag that makes the
-detached case work at all.
+Both commands boot the Vite/Cloudflare dev worker themselves. The WebKit projects need a terminal
+attached to the GUI session; detached automation can still select the Desktop Chrome project and
+set `PW_DETACHED_SESSION=1` as described in `docs/plans/effect-httpapi-foldkit-next-agent.md`.
 
 Visual snapshots were taken against the React reader and were deleted with it. The markup contract
 now lives in `src/tests/parity/signatures/`, which pins the rendered tree rather than its pixels.

@@ -96,7 +96,7 @@ export const GroupDataHandlers = HttpApiBuilder.group(
               ? parsedWordCount
               : null;
           const source = stored.source;
-          const result = yield* attempt(async () =>
+          const result = yield* attempt(() =>
             group.addSource(me.id, source.id, {
               kind: source.kind,
               contentType: source.contentType,

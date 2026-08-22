@@ -1,5 +1,3 @@
-import toolIcon from "@assets/tool.svg";
-import trashIcon from "@assets/trash.svg";
 import { Effect, Schema, Stream } from "effect";
 import { Command } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
@@ -19,6 +17,7 @@ import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts
 import { downloadFile } from "../logic/files/browserDownload.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { isNative } from "../logic/net/api.ts";
+import { toolIconView, trashIconView } from "./icons.ts";
 import { modalTabsView, modalView } from "./modal.ts";
 import { ChangedNoteAgentPresence } from "./resources/noteAgent.ts";
 
@@ -886,7 +885,7 @@ const bookRowView = <Message>(
                               h.AriaLabel(canEditMetadata ? "Edit book metadata" : "Book tools"),
                               h.Title("Book tools"),
                             ],
-                            [h.img([h.Src(toolIcon), h.Alt(""), h.AriaHidden(true)])],
+                            [toolIconView(h)],
                           ),
                         ]
                       : []),
@@ -905,7 +904,7 @@ const bookRowView = <Message>(
                                   h.AriaExpanded(confirming),
                                   h.Title("Delete book"),
                                 ],
-                                [h.img([h.Src(trashIcon), h.Alt(""), h.AriaHidden(true)])],
+                                [trashIconView(h)],
                               ),
                               ...(confirming
                                 ? [
@@ -1050,7 +1049,7 @@ const imagesView = <Message>(
                                       h.AriaLabel(`Delete image ${index + 1}`),
                                       h.Title("Delete image"),
                                     ],
-                                    [h.img([h.Src(trashIcon), h.Alt(""), h.AriaHidden(true)])],
+                                    [trashIconView(h)],
                                   ),
                                 ]
                               : []),

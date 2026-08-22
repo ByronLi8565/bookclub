@@ -14,12 +14,12 @@
 
   box-shadow:
     5px 5px 0 0 var(--color-background),
-    5px 5px 0 3px var(--color-text),
+    5px 5px 0 3px var(--color-shadow),
     10px 10px 0 0 var(--color-background),
-    10px 10px 0 3px var(--color-text),
+    10px 10px 0 3px var(--color-shadow),
     15px 15px 0 0 var(--color-background),
-    15px 15px 0 3px var(--color-text),
-    20px 20px 0 0 var(--color-text);
+    15px 15px 0 3px var(--color-shadow),
+    20px 20px 0 0 var(--color-shadow);
 
   &::before {
     content: "";
@@ -76,7 +76,8 @@
   width: 32px;
   height: 32px;
 
-  & img {
+  & img,
+  & svg {
     width: 16px;
     height: 16px;
     display: block;

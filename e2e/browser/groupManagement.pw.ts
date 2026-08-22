@@ -205,7 +205,7 @@ test("Reader · an EPUB starts and advances in linear spine order", async ({ pag
   });
   await uploadDialog.getByTitle("Upload book").click();
 
-  const book = page.frameLocator(".epub-container iframe");
+  const book = page.frameLocator(books.epub.ready);
   await expect(
     book.getByRole("heading", { name: "Linear reading start" }),
     "a navigation-only cover cannot replace the EPUB's reading order",
@@ -256,8 +256,8 @@ test("Reader · a saved non-linear EPUB position falls forward to reading order"
       localStorage.setItem(`bookclub.selectedSource.${groupId}`, selectedSourceId),
     { groupId: group.groupId, selectedSourceId: sourceId },
   );
-  await openWorkspace(page, ref, ".epub-container iframe");
-  const book = page.frameLocator(".epub-container iframe");
+  await openWorkspace(page, ref, books.epub.ready);
+  const book = page.frameLocator(books.epub.ready);
   await expect(
     book.getByRole("heading", { name: "Linear reading start" }),
     "a saved position cannot restore a reader to a non-linear cover",

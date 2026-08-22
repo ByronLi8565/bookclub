@@ -8,8 +8,11 @@ const books = [
   { name: "EPUB", path: "/fixtures/dorian.epub", ready: ".epub-container iframe >> nth=0" },
 ] as const;
 
-async function openBook(page: Page, path: string, ready: string): Promise<void> {
-  await page.goto(`/src/tests/harness/foldkitReader.html?book=${path}`);
+async function openBook(page: Page, path: string, ready: string, extra = ""): Promise<void> {
+  const kind = path.toLowerCase().endsWith(".pdf") ? "pdf" : "epub";
+  await page.goto(
+    `/src/tests/harness/foldkitReader.html?kind=${kind}&book=${encodeURIComponent(path)}${extra}`,
+  );
   await expect(page.locator(ready)).toBeVisible({ timeout: 30_000 });
 }
 
@@ -235,10 +238,240 @@ test("Foldkit reader: page-turn zones appear only where there is a page to turn 
 test("Foldkit reader: F fits the PDF text to the viewport", async ({ page }) => {
   await openBook(page, books[0].path, books[0].ready);
   await expect.poll(() => pageCount(page), { timeout: 60_000 }).not.toBeNull();
-  const zoom = () => page.locator(".font-size").textContent();
-  const before = await zoom();
+  const scroller = page.locator(".pdf-scroller");
+  const distanceFromTextTop = () =>
+    page.evaluate(() => {
+      const viewport = document.querySelector<HTMLElement>(".pdf-scroller");
+      const spans = [...document.querySelectorAll<HTMLElement>(".textLayer span")];
+      if (!viewport || spans.length === 0) return Infinity;
+      const viewportTop = viewport.getBoundingClientRect().top;
+      const textTop = Math.min(...spans.map((span) => span.getBoundingClientRect().top));
+      const expected = Math.max(0, viewport.scrollTop + textTop - viewportTop - 24);
+      return Math.abs(viewport.scrollTop - expected);
+    });
+
+  // A newly opened PDF starts fitted without requiring an explicit shortcut.
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(distanceFromTextTop, { timeout: 30_000 }).toBeLessThanOrEqual(10);
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  const before = await scroller.evaluate((element) => element.scrollTop);
+  expect(before).toBeGreaterThan(0);
 
   await page.keyboard.press("f");
 
-  await expect.poll(zoom, { timeout: 30_000 }).not.toBe(before);
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollTop), { timeout: 30_000 })
+    .toBeLessThan(before);
+
+  // Fit is a viewing mode, not a one-shot zoom. The next spread is measured
+  // independently and lands at its own text top without another `f` press.
+  const fittedPage = await pageCount(page);
+  await page.getByTitle("Next page").click();
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).not.toBe(fittedPage);
+  await expect(page.locator(".textLayer span").first()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(distanceFromTextTop, { timeout: 30_000 }).toBeLessThanOrEqual(9);
+  await expect(page.locator(".font-size")).not.toHaveText("");
+
+  // A deliberate zoom change leaves fit mode; later pages preserve that exact
+  // zoom until the reader asks to fit again.
+  const fittedCanvasWidth = await page
+    .locator(".pdf-pane canvas")
+    .first()
+    .evaluate((canvas) => canvas.getBoundingClientRect().width);
+  const fittedZoomLabel = await page.locator(".font-size").textContent();
+  await page.getByTitle("Increase text size").click();
+  await expect(page.locator(".font-size")).not.toHaveText(fittedZoomLabel ?? "");
+  const manualZoom = await page.locator(".font-size").textContent();
+  const manualPage = await pageCount(page);
+  await expect
+    .poll(() =>
+      page
+        .locator(".pdf-pane canvas")
+        .first()
+        .evaluate((canvas) => canvas.getBoundingClientRect().width),
+    )
+    .not.toBe(fittedCanvasWidth);
+  await expect(scroller).toHaveAttribute("data-rendered-zoom", manualZoom?.replace("%", "") ?? "");
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await page.getByTitle("Next page").click();
+  await expect
+    .poll(() => pageCount(page), { timeout: 1_000 })
+    .not.toBe(manualPage)
+    .catch(() => page.getByTitle("Next page").click());
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).not.toBe(manualPage);
+  await expect(page.locator(".font-size")).toHaveText(manualZoom ?? "");
+});
+
+test("Foldkit reader: each PDF spread pane contains its own cropped page", async ({ page }) => {
+  await openBook(page, books[0].path, books[0].ready);
+  await page.getByTitle("Next page").click();
+  await page.keyboard.press("d");
+  await expect(page.locator(".pdf-pane")).toHaveCount(2, { timeout: 30_000 });
+
+  const geometry = await page.locator(".pdf-pane").evaluateAll((panes) =>
+    panes.map((pane) => {
+      const inner = pane.querySelector<HTMLElement>(".pdf-pane-inner");
+      if (!inner) throw new Error("PDF pane has no inner page");
+      return {
+        pane: pane.getBoundingClientRect().toJSON(),
+        inner: inner.getBoundingClientRect().toJSON(),
+      };
+    }),
+  );
+
+  expect(geometry[1]!.pane.left).toBeGreaterThan(geometry[0]!.pane.left);
+  for (const { pane, inner } of geometry) {
+    expect(inner.left).toBeLessThanOrEqual(pane.left);
+    expect(inner.right).toBeGreaterThanOrEqual(pane.right);
+  }
+});
+
+test("Foldkit reader: EPUB stays inside a resized one- or two-page viewport", async ({ page }) => {
+  await openBook(page, books[1].path, books[1].ready);
+  const surface = page.locator(".reader-surface");
+  // Pagination measurement owns a second offscreen rendition under <body>;
+  // only the container inside the reader surface is the visible book.
+  const container = surface.locator(".epub-container");
+
+  for (const width of [900, 560]) {
+    await surface.evaluate((element, nextWidth) => {
+      element.style.width = `${nextWidth}px`;
+    }, width);
+    await expect
+      .poll(async () => {
+        const [surfaceBox, containerBox] = await Promise.all([
+          surface.boundingBox(),
+          container.boundingBox(),
+        ]);
+        if (!surfaceBox || !containerBox) return false;
+        return (
+          containerBox.x >= surfaceBox.x &&
+          containerBox.x + containerBox.width <= surfaceBox.x + surfaceBox.width + 1
+        );
+      })
+      .toBe(true);
+    await page.keyboard.press("d");
+    await expect(container).toBeVisible();
+  }
+});
+
+test("Foldkit reader: a PDF page turn does not inherit horizontal panning", async ({ page }) => {
+  await openBook(page, books[0].path, books[0].ready);
+  const scroller = page.locator(".pdf-scroller");
+  for (let step = 0; step < 3; step++) await page.getByTitle("Increase text size").click();
+  await scroller.evaluate((element) => {
+    element.scrollLeft = 120;
+    element.scrollTop = element.scrollHeight;
+  });
+  expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+
+  const before = await pageCount(page);
+  await page.getByTitle("Next page").click();
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).not.toBe(before);
+  expect(await scroller.evaluate((element) => element.scrollLeft)).toBe(0);
+});
+
+test("Foldkit reader: the next PDF page turns from prefetched pixels", async ({ page }) => {
+  await openBook(page, books[0].path, books[0].ready);
+  const scroller = page.locator(".pdf-scroller");
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).toBeGreaterThan(0);
+  const before = await pageCount(page);
+  if (before === null) throw new Error("PDF page count is unavailable");
+  const next = before + 1;
+  await expect
+    .poll(
+      () =>
+        scroller.evaluate((element) =>
+          (element.dataset.prefetchedPages ?? "").split(",").map(Number),
+        ),
+      { timeout: 30_000 },
+    )
+    .toContain(next);
+
+  await page.getByTitle("Next page").click();
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).toBe(next);
+  await expect(page.locator('.pdf-pane canvas[data-raster-source="cache"]')).toBeVisible();
+});
+
+test("Foldkit reader: refresh shows the persisted PDF page while reopening", async ({ page }) => {
+  await openBook(page, books[0].path, books[0].ready);
+  await expect(page.locator(".pdf-pane canvas").first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".pdf-scroller")).toHaveAttribute("data-snapshot-status", "persisted");
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        return await new Promise<boolean>((resolve) => {
+          const open = indexedDB.open("bookclub");
+          open.addEventListener("error", () => resolve(false));
+          open.addEventListener("success", () => {
+            const db = open.result;
+            const request = db
+              .transaction("reader-snapshots")
+              .objectStore("reader-snapshots")
+              .count();
+            request.addEventListener("success", () => resolve(request.result > 0));
+            request.addEventListener("error", () => resolve(false));
+          });
+        });
+      }),
+    )
+    .toBe(true);
+
+  await page.addInitScript(() => {
+    // SAFETY: this test-only flag is installed and read by this same init script.
+    const state = window as Window & { sawReaderSnapshot?: boolean };
+    state.sawReaderSnapshot = false;
+    new MutationObserver(() => {
+      if (document.querySelector(".reader-snapshot img")) state.sawReaderSnapshot = true;
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await page.route("**/fixtures/moby-dick.pdf", async (route) => {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 500);
+    });
+    await route.continue();
+  });
+  await page.reload();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        // SAFETY: the navigation init script above owns this test-only window flag.
+        return (window as Window & { sawReaderSnapshot?: boolean }).sawReaderSnapshot ?? false;
+      }),
+    )
+    .toBe(true);
+});
+
+test("Foldkit reader: themed PDF spread stays hidden until both pages are recolored", async ({
+  page,
+}) => {
+  await openBook(page, books[0].path, books[0].ready, "&theme=dark");
+  await page.getByTitle("Next page").click();
+  await page.keyboard.press("d");
+  const canvases = page.locator(".pdf-pane canvas");
+  await expect(canvases).toHaveCount(2, { timeout: 30_000 });
+  await canvases.evaluateAll((elements) => {
+    document.body.dataset.canvasVisibility = "";
+    for (const [index, element] of elements.entries()) {
+      new MutationObserver(() => {
+        document.body.dataset.canvasVisibility += ` ${index}:${element.style.visibility}`;
+      }).observe(element, { attributes: true, attributeFilter: ["style"] });
+    }
+  });
+
+  const before = await pageCount(page);
+  await page.getByTitle("Next page").click();
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).not.toBe(before);
+  await expect
+    .poll(() => page.locator("body").evaluate((body) => body.dataset.canvasVisibility))
+    .toContain("0:hidden");
+  await expect
+    .poll(() => page.locator("body").evaluate((body) => body.dataset.canvasVisibility))
+    .toContain("1:hidden");
+  for (const canvas of await canvases.all())
+    await expect(canvas).toHaveCSS("visibility", "visible");
 });

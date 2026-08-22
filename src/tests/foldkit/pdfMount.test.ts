@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from "node:fs";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { Runtime } from "foldkit";
 import { m } from "foldkit/message";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import {
   PdfDocumentLoadFailed,
   PdfDocumentReady,
   PdfSpreadRendered,
-  makePdfDocumentMount,
+  makePdfMount,
   pdfSearchAnchors,
   type PdfMountEnvironment,
   type PdfMountMessage,
@@ -19,8 +19,12 @@ import { pageGeometry, type PDFDocumentProxy } from "../../client/logic/sources/
 
 const MOBY_DICK = readFileSync(`${process.cwd()}/assets/moby-dick.pdf`);
 const WORKER_PATH = `${process.cwd()}/node_modules/pdfjs-dist/build/pdf.worker.min.mjs`;
+const CANVAS_GET_CONTEXT = Object.getOwnPropertyDescriptor(
+  HTMLCanvasElement.prototype,
+  "getContext",
+);
 
-type ShimTarget = Uint8Array | Map<unknown, unknown> | PromiseConstructor;
+type ShimTarget = Uint8Array | Map<unknown, unknown> | PromiseConstructor | Math;
 
 function ensureMember(target: ShimTarget, name: string, value: unknown): void {
   if (name in target) return;
@@ -46,6 +50,9 @@ function installPdfJsBrowserShims(): void {
   });
   ensureMember(Promise, "try", (fn: (...args: unknown[]) => unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => fn(...args)),
+  );
+  ensureMember(Math, "sumPrecise", (values: Iterable<number>) =>
+    [...values].reduce((sum, value) => sum + value, 0),
   );
   // pdf.js only probes for these constructors at import time in a DOM realm.
   vi.stubGlobal("DOMMatrix", function DOMMatrixStub() {});
@@ -92,6 +99,7 @@ const testEnvironment = (overrides: Partial<PdfMountEnvironment> = {}): PdfMount
   devicePixelRatio: () => 1,
   cacheDocumentsAcrossMounts: false,
   captureSnapshots: false,
+  prefetchAdjacentPages: false,
   ...overrides,
 });
 
@@ -107,7 +115,8 @@ function runReader(environment: PdfMountEnvironment) {
   const container = document.createElement("div");
   container.id = "foldkit-pdf-mount-test";
   document.body.appendChild(container);
-  const PdfDocument = makePdfDocumentMount(environment);
+  const adapter = makePdfMount(environment);
+  const PdfDocument = adapter.Mount;
 
   const handle = Runtime.embed(
     Runtime.makeElement<Model, Message>({
@@ -136,6 +145,8 @@ function runReader(environment: PdfMountEnvironment) {
                     initialPage: model.page,
                     zoom: 100,
                     layout: "single",
+                    colors: { background: "#fff", text: "#000" },
+                    smartArrows: "instant",
                   }),
                 ),
               ],
@@ -147,7 +158,7 @@ function runReader(environment: PdfMountEnvironment) {
       slow: false,
     }),
   );
-  return { handle, received };
+  return { adapter, handle, received };
 }
 
 const messagesOf = (received: readonly Message[], tag: Message["_tag"]) =>
@@ -162,7 +173,11 @@ describe("PDF Foldkit Mount", () => {
 
   afterEach(() => {
     document.body.replaceChildren();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    if (CANVAS_GET_CONTEXT) {
+      Object.defineProperty(HTMLCanvasElement.prototype, "getContext", CANVAS_GET_CONTEXT);
+    }
   });
 
   it("acquires the real document and publishes ready and rendered events", async () => {
@@ -184,6 +199,33 @@ describe("PDF Foldkit Mount", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(document.querySelector(".pdf-scroller")).toBeNull());
+  }, 30_000);
+
+  it("turns to a prefetched page without rasterizing it again", async () => {
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => ({ setTransform: () => {}, drawImage: () => {} }),
+    });
+    const rasterized: number[] = [];
+    const { adapter, handle, received } = runReader(
+      testEnvironment({
+        prefetchAdjacentPages: true,
+        rasterize: ({ page, canvas }) => {
+          canvas.width = 100;
+          canvas.height = 120;
+          rasterized.push(page.pageNumber);
+          return settledTask();
+        },
+      }),
+    );
+
+    await vi.waitFor(() => expect(rasterized).toContain(2), { timeout: 20_000 });
+    expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
+    await Effect.runPromise(adapter.turnPage("next"));
+    await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2));
+    expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
+
+    handle.dispose();
   }, 30_000);
 
   it("cancels an in-flight page render task when the element is released", async () => {

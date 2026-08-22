@@ -13,6 +13,7 @@
     "test:foldkit": "vitest run src/tests/foldkit",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/browser/commonPaths.pw.ts --project=\"Desktop Safari\" --workers=1",
     "e2e": "vitest run --config e2e/vitest.config.ts",
     "e2e:watch": "vitest --config e2e/vitest.config.ts",
     "info:template": "node scripts/new-info-card.mjs",

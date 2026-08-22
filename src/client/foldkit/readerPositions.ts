@@ -71,7 +71,7 @@ export const browserReaderPositions: ReaderPositions = {
   sync: ({ userId, groupId, sourceId }) =>
     syncReadingPositionWith(clientTransport, userId, groupId, sourceId).pipe(
       Effect.asVoid,
-      Effect.orElseSucceed(() => undefined),
+      Effect.orElseSucceed(() => {}),
     ),
 };
 

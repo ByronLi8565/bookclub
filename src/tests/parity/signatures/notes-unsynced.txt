@@ -31,7 +31,8 @@ aside.note-panel
                   button.reply[type=button aria-label=reply title=Reply]
                     "↩"
                   button.edit[type=button aria-label=edit title=Edit]
-                    img[aria-hidden alt src=svg%3e]
+                    svg[aria-hidden]
+                      path
                   div.delete-wrap
                     button.delete[type=button aria-label=delete aria-expanded=false title=Delete]
                       "✕"

@@ -333,25 +333,20 @@ describe("the Foldkit settings modal", () => {
     expect(tree.querySelector(".modal-inner > .modal-head strong")?.textContent).toBe("settings");
     expect(tree.querySelector(".modal-inner > .modal-body.settings-body")).not.toBeNull();
     const tabs = tree.querySelectorAll(".pager-tabs.settings-tabs button");
-    expect([...tabs].map((tab) => tab.textContent)).toEqual([
-      "User",
-      "General",
-      "PDF",
-      "Appearance",
-    ]);
+    expect([...tabs].map((tab) => tab.textContent)).toEqual(["User", "General", "Reader"]);
     expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
     expect(tabs[1]?.getAttribute("title")).toBe("General settings");
   });
 
-  it("titles the account modal differently and always offers Appearance alongside it", async () => {
+  it("titles the account modal differently and always offers Reader alongside it", async () => {
     const tree = await renderSettings(initialSettingsModel(), { book: null });
 
     expect(tree.querySelector(".modal-head strong")?.textContent).toBe("account settings");
     const tabs = tree.querySelectorAll(".pager-tabs.settings-tabs button");
-    expect([...tabs].map((tab) => tab.textContent)).toEqual(["Account", "Appearance"]);
+    expect([...tabs].map((tab) => tab.textContent)).toEqual(["Account", "Reader"]);
   });
 
-  it("shows no tab row for a signed-out reader with no book, past Appearance", async () => {
+  it("shows no tab row for a signed-out reader with no book, past Reader", async () => {
     const tree = await renderSettings(initialSettingsModel(), { book: null, signedIn: false });
 
     expect(tree.querySelector(".pager-tabs")).toBeNull();
@@ -433,29 +428,29 @@ describe("the Foldkit settings modal", () => {
     expect(items[1]?.querySelector("button")?.getAttribute("class")).toBe("book-menu-item");
   });
 
-  it("draws the PDF page as the two reader dropdowns", async () => {
-    const tree = await renderSettings({ ...initialSettingsModel(), category: "pdf" }, { book });
+  it("draws layout, navigation, and appearance on one Reader page", async () => {
+    const tree = await renderSettings({ ...initialSettingsModel(), category: "reader" }, { book });
 
     const heads = [...tree.querySelectorAll(".settings-item-head")].map((h2) => h2.textContent);
-    expect(heads).toEqual(["Page layout", "Smart arrow keys"]);
+    expect(heads).toEqual(["Page layout", "Smart arrow keys", "Theme"]);
     const triggers = tree.querySelectorAll(".settings-dropdown-trigger");
-    expect(triggers[0]?.getAttribute("aria-label")).toBe("PDF page layout");
+    expect(triggers[0]?.getAttribute("aria-label")).toBe("Reader page layout");
     expect(triggers[0]?.querySelector("span")?.textContent).toBe("Single page");
-    expect(triggers[1]?.getAttribute("aria-label")).toBe("PDF smart arrow keys");
+    expect(triggers[1]?.getAttribute("aria-label")).toBe("Reader smart arrow keys");
     expect(triggers[1]?.querySelector("span")?.textContent).toBe("Instant");
   });
 
   it("falls back to the first page when the stored one is not on offer", async () => {
-    // "pdf" is not a page of the account modal, so the account page shows.
+    // "user" is not a page of the account modal, so the account page shows.
     const tree = await renderSettings(
-      { ...initialSettingsModel(), category: "pdf" },
+      { ...initialSettingsModel(), category: "user" },
       { book: null },
     );
 
     expect(tree.querySelector(".settings-body")?.children).toHaveLength(0);
   });
 
-  it("still offers Appearance, with no tab row, for a signed-out reader with no book", async () => {
+  it("still offers Reader, with no tab row, for a signed-out reader with no book", async () => {
     const tree = await renderSettings(initialSettingsModel(), { book: null, signedIn: false });
 
     expect(tree.querySelector(".settings-body")?.children.length).toBeGreaterThan(0);
@@ -583,8 +578,8 @@ describe("settings category choice", () => {
     Story.story(
       updateSettings,
       Story.given(initialSettingsModel()),
-      Story.message(ChoseSettingsCategory({ category: "pdf" })),
-      Story.model((model) => expect(model.category).toBe("pdf")),
+      Story.message(ChoseSettingsCategory({ category: "reader" })),
+      Story.model((model) => expect(model.category).toBe("reader")),
     );
   });
 });

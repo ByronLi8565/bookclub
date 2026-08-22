@@ -81,7 +81,7 @@ const reservePublicId = Effect.fn("GroupHandlers.reservePublicId")(function* (gr
   const groupRegistry = yield* registry();
   for (let tries = 0; tries < 10; tries++) {
     const publicId = randomId(6, "abcdefghijklmnopqrstuvwxyz0123456789");
-    const result = yield* attempt(async () => groupRegistry.reservePublicId(publicId, groupId));
+    const result = yield* attempt(() => groupRegistry.reservePublicId(publicId, groupId));
     if (result.ok) return publicId;
   }
   return yield* new ServiceUnavailable({ error: "id_exhausted" });
@@ -116,7 +116,7 @@ const titleResult = Effect.fn("GroupHandlers.titleResult")(function* (
 ) {
   const me = yield* CurrentIdentity;
   const { group } = yield* resolveGroup(groupRef);
-  const result = yield* attempt(async () => rename(me.id, group));
+  const result = yield* attempt(() => rename(me.id, group));
   if (!result.ok) return yield* failure(result.reason);
   return { group: result.summary };
 });
@@ -151,7 +151,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const groupId = ulid();
         const publicId = yield* reservePublicId(groupId);
         const group = yield* attempt(() => getAgentByName(env.GroupAgent, groupId));
-        const result = yield* attempt(async () => group.create(displayName, publicId, me));
+        const result = yield* attempt(() => group.create(displayName, publicId, me));
         if (!result.ok) return yield* failure(result.reason);
         return { group: result.summary };
       }),
@@ -184,7 +184,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const me = yield* CurrentIdentity;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () =>
+        const result = yield* attempt(() =>
           query.rotate === "1" ? group.rotateOpenInvite(me.id) : group.ensureOpenInvite(me.id),
         );
         if (!result.ok) return yield* failure(result.reason);
@@ -215,7 +215,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const me = yield* CurrentIdentity;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () => group.invite(me.id, email));
+        const result = yield* attempt(() => group.invite(me.id, email));
         if (!result.ok) return yield* failure(result.reason);
         yield* attempt(() =>
           sendInvite(
@@ -232,7 +232,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () =>
+        const result = yield* attempt(() =>
           group.setMemberRole(me.id, params.memberId, payload.role),
         );
         if (!result.ok) return yield* failure(result.reason);
@@ -245,7 +245,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
       Effect.gen(function* () {
         const me = yield* CurrentIdentity;
         const { group } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () => group.redeem(payload.token, me));
+        const result = yield* attempt(() => group.redeem(payload.token, me));
         if (!result.ok) return yield* failure(result.reason);
         return { group: result.summary };
       }),
@@ -255,7 +255,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () => group.deleteSource(me.id, params.sourceId));
+        const result = yield* attempt(() => group.deleteSource(me.id, params.sourceId));
         if (!result.ok) return yield* failure(result.reason);
         const notes = yield* attempt(() => getAgentByName(env.NoteAgent, summary.groupId));
         yield* attempt(() => notes.removeSource(params.sourceId));
@@ -284,7 +284,7 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         }
         const me = yield* CurrentIdentity;
         const { group } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () =>
+        const result = yield* attempt(() =>
           group.updateBookMetadata(me.id, params.sourceId, patch),
         );
         if (!result.ok) return yield* failure(result.reason);
@@ -296,20 +296,20 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(async () => group.deleteGroup(me.id));
+        const result = yield* attempt(() => group.deleteGroup(me.id));
         if (!result.ok) return yield* failure(result.reason);
         const groupRegistry = yield* registry();
-        yield* attempt(async () => groupRegistry.releaseGroup(result.groupId));
+        yield* attempt(() => groupRegistry.releaseGroup(result.groupId));
         yield* Effect.forEach(result.members, (member) =>
           Effect.gen(function* () {
             const auth = yield* attempt(() =>
               getAgentByName(env.AuthAgent, canonicalEmail(member.email)),
             );
-            yield* attempt(async () => auth.removeGroup(result.groupId));
+            yield* attempt(() => auth.removeGroup(result.groupId));
           }),
         );
         const notes = yield* attempt(() => getAgentByName(env.NoteAgent, summary.groupId));
-        yield* attempt(async () => notes.clear());
+        yield* attempt(() => notes.clear());
         yield* attempt(() => deleteImagesForScope(env, summary.groupId));
       }),
     ),

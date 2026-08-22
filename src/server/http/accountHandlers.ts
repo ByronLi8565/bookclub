@@ -82,7 +82,7 @@ export const AccountHandlers = HttpApiBuilder.group(AccountsApi, "migratedAccoun
         const me = yield* CurrentIdentity;
         const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
         return {
-          position: yield* attempt<StoredReadingPosition | null>(async () =>
+          position: yield* attempt<StoredReadingPosition | null>(() =>
             auth.getReadingPosition(query.groupId, query.sourceId),
           ),
         };
@@ -100,9 +100,7 @@ export const AccountHandlers = HttpApiBuilder.group(AccountsApi, "migratedAccoun
         const me = yield* CurrentIdentity;
         const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
         return {
-          position: yield* attempt<StoredReadingPosition>(async () =>
-            auth.setReadingPosition(position),
-          ),
+          position: yield* attempt<StoredReadingPosition>(() => auth.setReadingPosition(position)),
         };
       }),
     )
@@ -147,7 +145,7 @@ export const AccountHandlers = HttpApiBuilder.group(AccountsApi, "migratedAccoun
             ? new TooLarge({ error: stored.reason })
             : new BadRequest({ error: stored.reason });
         }
-        const user = yield* attempt(async () => auth.setAvatarImageId(stored.image.id));
+        const user = yield* attempt(() => auth.setAvatarImageId(stored.image.id));
         if (!user) return yield* new Unauthenticated({ error: "unauthenticated" });
         yield* Effect.forEach(user.groupIds, (groupId) =>
           Effect.gen(function* () {
@@ -179,7 +177,7 @@ export const AccountHandlers = HttpApiBuilder.group(AccountsApi, "migratedAccoun
         const membership = yield* attempt(() => group.membership(me.id));
         if (!membership.isMember) return yield* new Forbidden({ error: "not_member" });
         const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
-        const user = yield* attempt(async () => auth.setClubDisplayName(params.groupRef, name));
+        const user = yield* attempt(() => auth.setClubDisplayName(params.groupRef, name));
         if (!user) return yield* new Unauthenticated({ error: "unauthenticated" });
         const member = yield* attempt(() =>
           group.setMemberProfile(me.id, name, user.avatarImageId),

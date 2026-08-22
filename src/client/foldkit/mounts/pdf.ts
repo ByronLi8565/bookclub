@@ -2,6 +2,7 @@ import { Effect, Queue, Schema, Stream } from "effect";
 import { Mount } from "foldkit";
 import { m } from "foldkit/message";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
+import { hexToRgb } from "../../../shared/color.ts";
 import { clamp } from "../../../shared/format.ts";
 import {
   HighlightAnchor,
@@ -11,6 +12,7 @@ import {
 } from "../../../shared/types/notes.ts";
 import { SourceReadingPosition } from "../../../shared/types/readingPositions.ts";
 import { PdfPageLayout } from "../../../shared/types/userPrefs.ts";
+import { SmartArrows } from "../../../shared/types/userPrefs.ts";
 import {
   expandToWordBoundaries,
   popupPoint,
@@ -37,6 +39,7 @@ import {
 import {
   getCachedPdfDocument,
   hasCachedPdfDocument,
+  PdfRasterCache,
   putCachedPdfDocument,
 } from "../../logic/reader/renderCache.ts";
 import { putRenderSnapshot } from "../../logic/reader/renderSnapshot.ts";
@@ -45,6 +48,7 @@ const MAX_RENDER_DPR = 2;
 const SPREAD_CROP_PAD_PX = 16;
 const PDF_RECT_Y_NUDGE_PX = 4;
 const TEXT_TOP_MARGIN_PX = 24;
+const SCROLL_EDGE_EPSILON_PX = 20;
 const MIN_ZOOM = 50;
 const MAX_ZOOM = 400;
 
@@ -54,6 +58,7 @@ export const PdfDocumentReady = m("PdfDocumentReady", {
   sourceId: Schema.String,
   totalPages: Schema.Number,
   title: Schema.NullOr(Schema.String),
+  zoom: Schema.Number,
 });
 export const PdfSpreadRendered = m("PdfSpreadRendered", {
   sourceId: Schema.String,
@@ -63,6 +68,7 @@ export const PdfSpreadRendered = m("PdfSpreadRendered", {
   atStart: Schema.Boolean,
   atEnd: Schema.Boolean,
   percentage: Schema.Number,
+  zoom: Schema.Number,
 });
 export const PdfDocumentLoadFailed = m("PdfDocumentLoadFailed", {
   sourceId: Schema.String,
@@ -96,11 +102,62 @@ export interface PdfRenderTask {
 
 type PdfViewport = ReturnType<PDFPageProxy["getViewport"]>;
 
+/** A PDF page is rasterized once into a canvas — there's no live stylesheet
+ *  left to theme afterward, only pixels. `recolorPdfCanvas` is the closest a
+ *  baked page gets to following the theme. */
+export interface PdfColors {
+  readonly background: string;
+  readonly text: string;
+}
+
 export interface PdfRasterizeRequest {
   readonly page: PDFPageProxy;
   readonly canvas: HTMLCanvasElement;
   readonly viewport: PdfViewport;
   readonly dpr: number;
+  readonly colors: PdfColors;
+  /** A spread reveals both themed panes together after every page is ready. */
+  readonly deferReveal?: boolean;
+}
+
+const DEFAULT_PDF_COLORS: PdfColors = { background: "#ffffff", text: "#000000" };
+
+const isDefaultPdfColors = (colors: PdfColors): boolean =>
+  colors.background.toLowerCase() === DEFAULT_PDF_COLORS.background &&
+  colors.text.toLowerCase() === DEFAULT_PDF_COLORS.text;
+
+const GRAYSCALE_SATURATION_THRESHOLD = 24;
+
+/**
+ * A PDF page is baked pixels, not a stylesheet, so theming it is a tradeoff:
+ * this remaps only near-grayscale pixels (the ink and the paper) onto the
+ * theme's text/background colors, by luminance, and leaves anything more
+ * saturated alone — photos, colored diagrams, colored ink — the same
+ * restraint a "smart" e-reader dark mode uses so illustrations don't get
+ * inverted into unreadable negatives.
+ */
+export function recolorPdfCanvas(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  colors: PdfColors,
+): void {
+  if (width <= 0 || height <= 0 || isDefaultPdfColors(colors)) return;
+  const [bgR, bgG, bgB] = hexToRgb(colors.background);
+  const [textR, textG, textB] = hexToRgb(colors.text);
+  const imageData = context.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i]!;
+    const g = data[i + 1]!;
+    const b = data[i + 2]!;
+    if (Math.max(r, g, b) - Math.min(r, g, b) > GRAYSCALE_SATURATION_THRESHOLD) continue;
+    const lum = (r + g + b) / (3 * 255);
+    data[i] = Math.round(textR + (bgR - textR) * lum);
+    data[i + 1] = Math.round(textG + (bgG - textG) * lum);
+    data[i + 2] = Math.round(textB + (bgB - textB) * lum);
+  }
+  context.putImageData(imageData, 0, 0);
 }
 
 /** The live seams the Mount needs from the outside world. Everything here is
@@ -121,6 +178,8 @@ export interface PdfMountEnvironment {
    *  open an instant placeholder. Callers without a canvas backend, and mobile
    *  callers paying that cost on every page turn, disable it. */
   readonly captureSnapshots: boolean;
+  /** Browser readers warm adjacent spreads; deterministic/low-memory hosts can opt out. */
+  readonly prefetchAdjacentPages: boolean;
 }
 
 export const canvasRasterizer = ({
@@ -128,15 +187,30 @@ export const canvasRasterizer = ({
   canvas,
   viewport,
   dpr,
+  colors,
+  deferReveal = false,
 }: PdfRasterizeRequest): PdfRenderTask => {
+  const themed = !isDefaultPdfColors(colors);
+  // PDF.js paints progressively in the document's original colors. Keep that
+  // intermediate frame out of view until its pixels have been remapped, or a
+  // dark reader flashes a white page on every turn.
+  if (themed) canvas.style.visibility = "hidden";
   canvas.width = Math.floor(viewport.width * dpr);
   canvas.height = Math.floor(viewport.height * dpr);
   canvas.style.cssText = `width:${viewport.width}px;height:${viewport.height}px;`;
+  if (themed) canvas.style.visibility = "hidden";
   const context = canvas.getContext("2d");
-  if (!context) return { promise: Promise.resolve(), cancel: () => {} };
+  if (!context) {
+    if (!deferReveal) canvas.style.visibility = "visible";
+    return { promise: Promise.resolve(), cancel: () => {} };
+  }
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const task = page.render({ canvas, canvasContext: context, viewport });
-  return { promise: task.promise.then(() => {}), cancel: () => task.cancel() };
+  const promise = task.promise.then(() => {
+    recolorPdfCanvas(context, canvas.width, canvas.height, colors);
+    if (!deferReveal) canvas.style.visibility = "visible";
+  });
+  return { promise, cancel: () => task.cancel() };
 };
 
 export const browserPdfMountEnvironment = (
@@ -150,6 +224,7 @@ export const browserPdfMountEnvironment = (
   devicePixelRatio: () => globalThis.devicePixelRatio || 1,
   cacheDocumentsAcrossMounts: true,
   captureSnapshots: true,
+  prefetchAdjacentPages: true,
   ...overrides,
 });
 
@@ -172,7 +247,9 @@ interface Session {
   readonly sourceId: string;
   readonly groupRef: string;
   readonly layout: PdfPageLayout;
-  readonly zoom: number;
+  zoom: number;
+  smartArrows: SmartArrows;
+  colors: PdfColors;
   readonly scroller: HTMLDivElement;
   readonly wrap: HTMLDivElement;
   readonly panes: Pane[];
@@ -182,6 +259,10 @@ interface Session {
    *  from what the previous panes held. */
   readonly highlights: Map<string, HighlightAnchor>;
   readonly renderTasks: Set<PdfRenderTask>;
+  readonly rasterCache: PdfRasterCache;
+  readonly prefetching: Set<string>;
+  readonly prefetchTasks: Map<string, PdfRenderTask>;
+  readonly prefetchPromises: Map<string, Promise<void>>;
   readonly teardown: (() => void)[];
   readonly emit: (message: PdfMountMessage) => void;
   document: PDFDocumentProxy | null;
@@ -190,7 +271,9 @@ interface Session {
   page: number;
   spread: boolean;
   searchAnchor: HighlightAnchor | null;
+  fitToPage: boolean;
   released: boolean;
+  snapshotTimer: number | null;
 }
 
 function createPane(): Pane {
@@ -347,11 +430,14 @@ function paintAnnotations(session: Session): void {
 /** The zoom at which the current spread's *text* fills the viewport. Returns
  *  null when nothing is open or the pages carry no text geometry to fit to (a
  *  scan), in which case the reader leaves the zoom alone. */
-async function computeFitZoom(session: Session): Promise<number | null> {
+async function computeFitZoomAt(
+  session: Session,
+  left: number,
+  spread: boolean,
+): Promise<number | null> {
   const doc = session.document;
   if (!doc || session.released) return null;
-  const left = session.page;
-  const pages = spreadPages(left, session.spread, doc.numPages);
+  const pages = spreadPages(left, spread, doc.numPages);
   const measured = await Promise.all(
     pages.map(async (pageNum) => {
       const page = await doc.getPage(pageNum);
@@ -362,7 +448,7 @@ async function computeFitZoom(session: Session): Promise<number | null> {
     }),
   );
   const first = measured[0];
-  if (!first || session.released || session.page !== left) return null;
+  if (!first || session.released) return null;
 
   // With a spread each page is cropped to its own text, so the fit is against
   // the combined text width; a single page is uncropped, so it fits its full
@@ -380,14 +466,14 @@ async function computeFitZoom(session: Session): Promise<number | null> {
       continue;
     }
     anyText = true;
-    combinedWidth += session.spread ? (bounds.maxX - bounds.minX) * base.width : base.width;
+    combinedWidth += spread ? (bounds.maxX - bounds.minX) * base.width : base.width;
     unionMinY = Math.min(unionMinY, bounds.minY);
     unionMaxY = Math.max(unionMaxY, bounds.maxY);
   }
   if (!anyText) return null;
 
   const gutter = pages.length > 1 ? SPREAD_GUTTER_PX : 0;
-  const pad = session.spread ? SPREAD_CROP_PAD_PX : 0;
+  const pad = spread ? SPREAD_CROP_PAD_PX : 0;
   const fit =
     pages.length > 1
       ? (session.scroller.clientWidth - gutter) / (2 * first.base.width)
@@ -406,6 +492,9 @@ async function computeFitZoom(session: Session): Promise<number | null> {
   );
 }
 
+const computeFitZoom = (session: Session): Promise<number | null> =>
+  computeFitZoomAt(session, session.page, session.spread);
+
 function documentCacheKey(environment: PdfMountEnvironment, sourceId: string, bytes: number) {
   return environment.cacheDocumentsAcrossMounts ? `${sourceId}:${bytes}` : null;
 }
@@ -419,6 +508,8 @@ function openSession(
     initialPage: number;
     zoom: number;
     layout: PdfPageLayout;
+    colors: PdfColors;
+    smartArrows: SmartArrows;
   },
   emit: (message: PdfMountMessage) => void,
 ): Session {
@@ -437,12 +528,18 @@ function openSession(
     groupRef: args.groupRef,
     layout: args.layout,
     zoom: args.zoom,
+    colors: args.colors,
+    smartArrows: args.smartArrows,
     scroller,
     wrap,
     panes: [],
     geometry: new Map(),
     highlights: new Map(),
     renderTasks: new Set(),
+    rasterCache: new PdfRasterCache(),
+    prefetching: new Set(),
+    prefetchTasks: new Map(),
+    prefetchPromises: new Map(),
     teardown: [],
     emit,
     document: null,
@@ -451,7 +548,9 @@ function openSession(
     page: Math.max(1, Math.round(args.initialPage)),
     spread: false,
     searchAnchor: null,
+    fitToPage: true,
     released: false,
+    snapshotTimer: null,
   };
 
   const onScroll = () => publishPosition(session);
@@ -469,7 +568,20 @@ function openSession(
     const observer = new ResizeObserver(() => {
       if (scroller.clientWidth === lastWidth) return;
       lastWidth = scroller.clientWidth;
-      void renderSpread(session, environment);
+      cancelPrefetch(session);
+      session.rasterCache.clear();
+      session.scroller.dataset.prefetchedPages = "";
+      const oldMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const ratio = oldMax > 0 ? scroller.scrollTop / oldMax : 0;
+      const spreadFlipped =
+        spreadFits(session.layout, session.document?.numPages ?? 1, scroller.clientWidth) !==
+        session.spread;
+      void (session.fitToPage || spreadFlipped
+        ? fitSession(session, environment)
+        : renderSpread(session, environment).then(() => {
+            const newMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            scroller.scrollTop = ratio * newMax;
+          }));
     });
     observer.observe(scroller);
     session.teardown.push(() => observer.disconnect());
@@ -481,8 +593,11 @@ function openSession(
 function closeSession(session: Session): void {
   session.released = true;
   session.renderSeq += 1;
+  cancelPrefetch(session);
   for (const task of session.renderTasks) task.cancel();
   session.renderTasks.clear();
+  session.rasterCache.clear();
+  if (session.snapshotTimer !== null) clearTimeout(session.snapshotTimer);
   for (const off of session.teardown) off();
   session.teardown.length = 0;
   for (const pane of session.panes) {
@@ -495,6 +610,27 @@ function closeSession(session: Session): void {
   const key = session.documentCacheKey;
   if (doc && !(key !== null && hasCachedPdfDocument(key, doc))) void destroyPdf(doc);
   session.scroller.remove();
+}
+
+function cancelPrefetch(session: Session): void {
+  for (const task of session.prefetchTasks.values()) {
+    task.cancel();
+    session.renderTasks.delete(task);
+  }
+  session.prefetchTasks.clear();
+  session.prefetchPromises.clear();
+  session.prefetching.clear();
+}
+
+function cancelPrefetchExcept(session: Session, retainedKey: string): void {
+  for (const [key, task] of session.prefetchTasks) {
+    if (key === retainedKey) continue;
+    task.cancel();
+    session.renderTasks.delete(task);
+    session.prefetchTasks.delete(key);
+    session.prefetchPromises.delete(key);
+    session.prefetching.delete(key);
+  }
 }
 
 function ensurePanes(session: Session, count: number): Pane[] {
@@ -540,6 +676,53 @@ function publishPosition(session: Session): void {
       },
     }),
   );
+}
+
+function scrollBounds(session: Session) {
+  const { scroller } = session;
+  const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  let minTop = Infinity;
+  let maxBottom = -Infinity;
+  for (const pane of session.panes) {
+    if (pane.page === null) continue;
+    const geometry = session.geometry.get(pane.page);
+    if (!geometry || geometry.runs.length === 0) continue;
+    const offset = pane.el.offsetTop - pane.cropTopPx;
+    minTop = Math.min(
+      minTop,
+      offset + Math.min(...geometry.runs.map((run) => run.y)) * pane.pageHeightPx,
+    );
+    maxBottom = Math.max(
+      maxBottom,
+      offset + Math.max(...geometry.runs.map((run) => run.y + run.height)) * pane.pageHeightPx,
+    );
+  }
+  if (minTop === Infinity) return { floor: 0, ceil: maxScroll };
+  const floor = Math.min(maxScroll, Math.max(0, minTop - TEXT_TOP_MARGIN_PX));
+  const ceil = Math.max(
+    floor,
+    Math.min(maxScroll, maxBottom + TEXT_TOP_MARGIN_PX - scroller.clientHeight),
+  );
+  return { floor, ceil };
+}
+
+function scrollWithinPage(session: Session, direction: "next" | "previous"): boolean {
+  if (session.smartArrows === "off") return false;
+  const { floor, ceil } = scrollBounds(session);
+  if (ceil - floor <= SCROLL_EDGE_EPSILON_PX) return false;
+  const down = direction === "next";
+  const atEdge = down
+    ? session.scroller.scrollTop >= ceil - SCROLL_EDGE_EPSILON_PX
+    : session.scroller.scrollTop <= floor + SCROLL_EDGE_EPSILON_PX;
+  if (atEdge) return false;
+  const target = down
+    ? Math.min(ceil, session.scroller.scrollTop + session.scroller.clientHeight)
+    : Math.max(floor, session.scroller.scrollTop - session.scroller.clientHeight);
+  session.scroller.scrollTo({
+    top: target,
+    behavior: session.smartArrows === "smooth" ? "smooth" : "auto",
+  });
+  return true;
 }
 
 function publishSelection(session: Session): void {
@@ -591,7 +774,8 @@ function captureSnapshot(session: Session, total: number): void {
   try {
     const dataUrl = pane.canvas.toDataURL("image/webp", 0.82);
     if (!dataUrl.startsWith("data:image/")) return;
-    putRenderSnapshot({
+    session.scroller.dataset.snapshotStatus = "captured";
+    void putRenderSnapshot({
       sourceId: session.sourceId,
       kind: "pdf",
       locationKey: `pdf:${session.page}:${total}:${pane.canvas.width}x${pane.canvas.height}`,
@@ -599,9 +783,166 @@ function captureSnapshot(session: Session, total: number): void {
       height: pane.canvas.height,
       dataUrl,
       capturedAt: Date.now(),
+    }).then(() => {
+      if (!session.released) session.scroller.dataset.snapshotStatus = "persisted";
     });
   } catch {
     // A snapshot is an opening-placeholder optimization; never fail a render for it.
+  }
+}
+
+function scheduleSnapshot(session: Session, total: number): void {
+  if (!session.environment.captureSnapshots) return;
+  if (session.snapshotTimer !== null) clearTimeout(session.snapshotTimer);
+  const page = session.page;
+  session.snapshotTimer = window.setTimeout(() => {
+    session.snapshotTimer = null;
+    if (!session.released && session.page === page) captureSnapshot(session, total);
+  }, 250);
+}
+
+function rasterKey(page: number, viewport: PdfViewport, dpr: number, colors: PdfColors): string {
+  return [
+    page,
+    Math.floor(viewport.width * dpr),
+    Math.floor(viewport.height * dpr),
+    dpr,
+    colors.background.toLowerCase(),
+    colors.text.toLowerCase(),
+  ].join(":");
+}
+
+function copyRaster(
+  source: HTMLCanvasElement,
+  destination: HTMLCanvasElement,
+  viewport: Pick<PdfViewport, "width" | "height">,
+): boolean {
+  const visibility = destination.style.visibility;
+  destination.width = source.width;
+  destination.height = source.height;
+  destination.style.cssText = `width:${viewport.width}px;height:${viewport.height}px;`;
+  destination.style.visibility = visibility;
+  const context = destination.getContext("2d");
+  if (!context) return false;
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.drawImage(source, 0, 0);
+  return true;
+}
+
+function cacheRaster(session: Session, key: string, source: HTMLCanvasElement): void {
+  const cached = document.createElement("canvas");
+  if (copyRaster(source, cached, { width: source.width, height: source.height })) {
+    session.rasterCache.put(key, cached);
+  }
+}
+
+async function rasterizeVisiblePage(
+  session: Session,
+  environment: PdfMountEnvironment,
+  page: PDFPageProxy,
+  canvas: HTMLCanvasElement,
+  viewport: PdfViewport,
+  dpr: number,
+  themed: boolean,
+): Promise<void> {
+  const key = rasterKey(page.pageNumber, viewport, dpr, session.colors);
+  cancelPrefetchExcept(session, key);
+  const prefetched = session.prefetchPromises.get(key);
+  if (prefetched) await prefetched;
+  const cached = session.rasterCache.get(key);
+  if (cached && copyRaster(cached, canvas, viewport)) {
+    canvas.dataset.rasterSource = "cache";
+    return;
+  }
+
+  const task = environment.rasterize({
+    page,
+    canvas,
+    viewport,
+    dpr,
+    colors: session.colors,
+    deferReveal: themed,
+  });
+  session.renderTasks.add(task);
+  try {
+    await task.promise;
+    canvas.dataset.rasterSource = "render";
+    if (environment.prefetchAdjacentPages) cacheRaster(session, key, canvas);
+  } finally {
+    session.renderTasks.delete(task);
+  }
+}
+
+async function prefetchPage(
+  session: Session,
+  environment: PdfMountEnvironment,
+  pageNumber: number,
+  scale: number,
+  dpr: number,
+): Promise<void> {
+  const doc = session.document;
+  if (!doc || session.released) return;
+  const page = await doc.getPage(pageNumber);
+  if (session.released) return;
+  const viewport = page.getViewport({ scale });
+  const key = rasterKey(pageNumber, viewport, dpr, session.colors);
+  if (session.rasterCache.get(key) || session.prefetching.has(key)) return;
+  session.prefetching.add(key);
+  const canvas = document.createElement("canvas");
+  const task = environment.rasterize({ page, canvas, viewport, dpr, colors: session.colors });
+  session.renderTasks.add(task);
+  session.prefetchTasks.set(key, task);
+  try {
+    await task.promise;
+    if (!session.released) {
+      session.rasterCache.put(key, canvas);
+      const ready = new Set([
+        ...(session.scroller.dataset.prefetchedPages ?? "")
+          .split(",")
+          .filter((value) => value !== ""),
+        String(pageNumber),
+      ]);
+      session.scroller.dataset.prefetchedPages = [...ready].join(",");
+    }
+  } catch {
+    // Prefetch is speculative; the foreground render remains the recovery path.
+  } finally {
+    if (session.prefetchTasks.get(key) === task) {
+      session.renderTasks.delete(task);
+      session.prefetchTasks.delete(key);
+      session.prefetching.delete(key);
+    }
+  }
+}
+
+async function prefetchNeighbors(
+  session: Session,
+  environment: PdfMountEnvironment,
+  renderedPage: number,
+): Promise<void> {
+  const doc = session.document;
+  if (!doc || session.released || !environment.prefetchAdjacentPages) return;
+  const step = session.spread ? 2 : 1;
+  for (const candidate of [renderedPage + step, renderedPage - step]) {
+    if (candidate < 1 || candidate > doc.numPages || session.page !== renderedPage) return;
+    const left = spreadStart(candidate, session.spread);
+    const pages = spreadPages(left, session.spread, doc.numPages);
+    const first = await doc.getPage(pages[0]!);
+    if (session.released || session.page !== renderedPage) return;
+    const base = first.getViewport({ scale: 1 });
+    const gutter = pages.length > 1 ? SPREAD_GUTTER_PX : 0;
+    const available = session.scroller.clientWidth || base.width;
+    const fit = pages.length > 1 ? (available - gutter) / (2 * base.width) : available / base.width;
+    const targetZoom = session.fitToPage
+      ? await computeFitZoomAt(session, left, session.spread)
+      : session.zoom;
+    if (targetZoom === null || session.page !== renderedPage) return;
+    const scale = fit * (targetZoom / 100);
+    const dpr = Math.min(environment.devicePixelRatio(), MAX_RENDER_DPR);
+    for (const pageNumber of pages) {
+      if (session.page !== renderedPage) return;
+      await prefetchPage(session, environment, pageNumber, scale, dpr);
+    }
   }
 }
 
@@ -654,6 +995,12 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
   const panes = ensurePanes(session, pages.length);
   const gutter = pages.length > 1 ? SPREAD_GUTTER_PX : 0;
   const dpr = Math.min(environment.devicePixelRatio(), MAX_RENDER_DPR);
+  const themed = !isDefaultPdfColors(session.colors);
+  if (themed) {
+    // A reused right pane still contains the previous spread while the left
+    // page renders. Hide the whole spread up front and reveal it atomically.
+    for (const pane of panes) pane.canvas.style.visibility = "hidden";
+  }
 
   const firstPage = await doc.getPage(pages[0]!);
   if (stale()) return;
@@ -690,17 +1037,19 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
     const page = index === 0 ? firstPage : await doc.getPage(pageNum);
     if (stale()) return;
     const viewport = page.getViewport({ scale });
+    // Cached pixels can replace a page synchronously; its old transparent text
+    // layer must not remain selectable while the matching layer catches up.
+    pane.builder?.cancel();
+    pane.builder?.div.remove();
+    pane.builder = null;
+    pane.textLayer = null;
     pane.page = pageNum;
 
-    const task = environment.rasterize({ page, canvas: pane.canvas, viewport, dpr });
-    session.renderTasks.add(task);
     try {
-      await task.promise;
+      await rasterizeVisiblePage(session, environment, page, pane.canvas, viewport, dpr, themed);
     } catch {
       // A cancelled task is the release path doing its job, not a failure.
       return;
-    } finally {
-      session.renderTasks.delete(task);
     }
     if (stale()) return;
 
@@ -727,8 +1076,12 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
 
   session.wrap.style.width = `${totalWidth + gutter}px`;
   session.wrap.style.height = `${maxHeight}px`;
+  if (themed) {
+    for (const pane of panes) pane.canvas.style.visibility = "visible";
+  }
 
   const lastPage = pages.at(-1) ?? left;
+  session.scroller.dataset.renderedZoom = String(session.zoom);
   session.emit(
     PdfSpreadRendered({
       sourceId: session.sourceId,
@@ -738,11 +1091,15 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
       atStart: left <= 1,
       atEnd: lastPage >= doc.numPages,
       percentage: doc.numPages > 0 ? left / doc.numPages : 0,
+      zoom: session.zoom,
     }),
   );
   paintAnnotations(session);
-  captureSnapshot(session, doc.numPages);
+  scheduleSnapshot(session, doc.numPages);
   publishPosition(session);
+  // The document can be released while speculative page/geometry requests are
+  // in flight; foreground navigation remains the recovery path.
+  void prefetchNeighbors(session, environment, left).catch(() => {});
 }
 
 async function startSession(session: Session, environment: PdfMountEnvironment): Promise<void> {
@@ -767,14 +1124,19 @@ async function startSession(session: Session, environment: PdfMountEnvironment):
     // SAFETY: pdf.js metadata info is an optional string-keyed dictionary.
     const info = metadata?.info as { Title?: string } | undefined;
     if (session.released) return;
+    session.spread = spreadFits(session.layout, doc.numPages, session.scroller.clientWidth);
+    const fitZoom = await computeFitZoom(session);
+    if (fitZoom !== null) session.zoom = fitZoom;
     session.emit(
       PdfDocumentReady({
         sourceId: session.sourceId,
         totalPages: doc.numPages,
         title: info?.Title?.trim() || null,
+        zoom: session.zoom,
       }),
     );
     await renderSpread(session, environment);
+    session.scroller.scrollTop = scrollBounds(session).floor;
   } catch (error) {
     if (session.released) return;
     session.emit(
@@ -784,6 +1146,26 @@ async function startSession(session: Session, environment: PdfMountEnvironment):
       }),
     );
   }
+}
+
+async function fitSession(
+  session: Session,
+  environment: PdfMountEnvironment,
+): Promise<number | null> {
+  const doc = session.document;
+  if (!doc || session.released) return null;
+  session.fitToPage = true;
+  session.spread = spreadFits(session.layout, doc.numPages, session.scroller.clientWidth);
+  const zoom = await computeFitZoom(session);
+  // Manual zoom can arrive while the page measurements above are in flight.
+  // It owns the final value and exits fit mode, so the stale fit must not
+  // restore itself after that deliberate choice.
+  if (!session.fitToPage) return null;
+  if (zoom !== null) session.zoom = zoom;
+  await renderSpread(session, environment);
+  session.scroller.scrollTop = scrollBounds(session).floor;
+  publishPosition(session);
+  return zoom;
 }
 
 /**
@@ -834,6 +1216,8 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
       initialPage: Schema.Number,
       zoom: Schema.Number,
       layout: PdfPageLayout,
+      colors: Schema.Struct({ background: Schema.String, text: Schema.String }),
+      smartArrows: SmartArrows,
     },
     PdfDocumentReady,
     PdfSpreadRendered,
@@ -871,16 +1255,35 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
     const next = clamp(Math.round(page), 1, Math.max(1, total));
     if (next === session.page) return Promise.resolve();
     session.page = next;
-    // A page entered from a turn rests at its top rather than inheriting the
-    // previous page's scroll offset.
+    // A page entered from a turn rests at its origin rather than inheriting
+    // panning from a differently sized or cropped page.
     session.scroller.scrollTop = 0;
-    return renderSpread(session, environment);
+    session.scroller.scrollLeft = 0;
+    return session.fitToPage
+      ? fitSession(session, environment).then(() => {})
+      : renderSpread(session, environment);
   };
 
   return {
     Mount: PdfDocument,
-    turnPage: (direction: "next" | "previous") =>
+    turnPage: (direction: "next" | "previous", requestedZoom = live?.zoom ?? 100) =>
       onLiveSession((session) => {
+        // Commands may execute concurrently. A page turn carries the Model's
+        // zoom so it cannot overtake a manual zoom and accidentally preserve
+        // the old fit-to-page mode.
+        const adoptsPendingZoom = requestedZoom !== session.zoom;
+        if (adoptsPendingZoom) {
+          cancelPrefetch(session);
+          session.rasterCache.clear();
+          session.scroller.dataset.prefetchedPages = "";
+          session.fitToPage = false;
+          session.zoom = requestedZoom;
+        }
+        // The user issued this turn after the Model accepted a zoom step, but
+        // its render command has not reached the mount yet. The old page's
+        // scroll bounds no longer describe the requested zoom, so do not let
+        // those stale bounds consume the page-turn intent.
+        if (!adoptsPendingZoom && scrollWithinPage(session, direction)) return;
         const step = (session.spread ? 2 : 1) * (direction === "next" ? 1 : -1);
         return showPage(session, session.page + step);
       }),
@@ -917,17 +1320,45 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
           return pdfSearchMatches(session.geometry, query);
         });
       }),
-    /** The zoom that would make the current spread's text fill the viewport.
-     *  The reader applies it through the Model, because zoom is part of this
-     *  Mount's element key. */
-    fitZoom: Effect.suspend(() => {
+    /** Reframe the current spread around its text. Computing a percentage is
+     *  only half of fit-to-page: the live scroller must also land on the text
+     *  top after the resized page has established its final DOM geometry. */
+    fitToText: Effect.suspend(() => {
       const session = live;
       if (session === null || session.released) return Effect.succeed(null);
-      return Effect.promise(() => computeFitZoom(session)).pipe(Effect.orElseSucceed(() => null));
+      return Effect.promise(() => fitSession(session, environment)).pipe(
+        Effect.orElseSucceed(() => null),
+      );
     }),
     dismissSelection: Effect.sync(() => {
       globalThis.getSelection?.()?.removeAllRanges();
     }),
+    /** A PDF page is baked pixels, not a stylesheet, so a theme change has
+     *  nothing to re-flow — only a re-render can repaint it. The reader
+     *  keeps its scroll position because `renderSpread` redraws the same
+     *  page in place rather than reopening the document. */
+    setColors: (colors: PdfColors) =>
+      onLiveSession((session) => {
+        cancelPrefetch(session);
+        session.rasterCache.clear();
+        session.scroller.dataset.prefetchedPages = "";
+        session.colors = colors;
+        return renderSpread(session, environment);
+      }),
+    setZoom: (zoom: number) =>
+      onLiveSession((session) => {
+        session.fitToPage = false;
+        if (session.zoom === zoom) return;
+        cancelPrefetch(session);
+        session.rasterCache.clear();
+        session.scroller.dataset.prefetchedPages = "";
+        session.zoom = zoom;
+        return renderSpread(session, environment);
+      }),
+    setSmartArrows: (smartArrows: SmartArrows) =>
+      Effect.sync(() => {
+        if (live !== null) live.smartArrows = smartArrows;
+      }),
   };
 };
 

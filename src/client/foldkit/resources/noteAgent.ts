@@ -258,8 +258,12 @@ export const acquireNoteAgent = (
 
     const flushSignals = yield* Queue.sliding<void>(1);
     yield* Effect.addFinalizer(() => Queue.shutdown(flushSignals).pipe(Effect.asVoid));
+    // `Queue<void>.offer` requires its message argument; there is no value to
+    // pass but `undefined` itself.
+    // oxlint-disable-next-line unicorn/no-useless-undefined
     const requestFlush = Queue.offer(flushSignals, undefined).pipe(Effect.asVoid);
     const requestFlushUnsafe = (): void => {
+      // oxlint-disable-next-line unicorn/no-useless-undefined
       Queue.offerUnsafe(flushSignals, undefined);
     };
 

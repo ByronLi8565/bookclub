@@ -56,13 +56,7 @@ export const BACKUP_INPUT_ID = "settings-backup-input";
  */
 const armedBackupFiles = new Map<"download" | "restore", File>();
 
-export const SettingsCategory = Schema.Literals([
-  "account",
-  "user",
-  "general",
-  "pdf",
-  "appearance",
-]);
+export const SettingsCategory = Schema.Literals(["account", "user", "general", "reader"]);
 export type SettingsCategory = typeof SettingsCategory.Type;
 
 export const SettingsNotice = Schema.Struct({
@@ -707,18 +701,11 @@ const categoriesFor = (
   book: SettingsBook | null,
   signedIn: boolean,
 ): readonly { id: SettingsCategory; label: string }[] => {
-  // Appearance is neither club- nor account-specific, so it belongs wherever
-  // the reader opened settings from.
-  const appearance = { id: "appearance" as const, label: "Appearance" };
+  const reader = { id: "reader" as const, label: "Reader" };
   if (book !== null) {
-    return [
-      { id: "user", label: "User" },
-      { id: "general", label: "General" },
-      { id: "pdf", label: "PDF" },
-      appearance,
-    ];
+    return [{ id: "user", label: "User" }, { id: "general", label: "General" }, reader];
   }
-  return signedIn ? [{ id: "account", label: "Account" }, appearance] : [appearance];
+  return signedIn ? [{ id: "account", label: "Account" }, reader] : [reader];
 };
 
 export const settingsView = <Message>(
@@ -956,7 +943,7 @@ export const settingsView = <Message>(
           { value: "single", label: "Single page" },
           { value: "auto", label: "Two pages" },
         ],
-        "PDF page layout",
+        "Reader page layout",
         (value) => ChosePdfPageLayout({ value }),
       ),
     ),
@@ -971,7 +958,7 @@ export const settingsView = <Message>(
           { value: "smooth", label: "Smooth" },
           { value: "instant", label: "Instant" },
         ],
-        "PDF smart arrow keys",
+        "Reader smart arrow keys",
         (value) => ChoseSmartArrows({ value }),
       ),
     ),
@@ -1085,8 +1072,7 @@ export const settingsView = <Message>(
     if (category === "account") return accountSection ?? [];
     if (category === "user") return book === null ? [] : userSection(book);
     if (category === "general") return book === null ? [] : generalSection();
-    if (category === "appearance") return appearanceSection();
-    return pdfSection();
+    return [...pdfSection(), ...appearanceSection()];
   };
 
   return modalView<Message | SettingsMessage>(

@@ -95,6 +95,9 @@ function makeFakeEngine({ load }: FakeEngineOptions = {}): FakeEngine {
       setFontSize: (percent) => {
         lifecycle.push(`fontSize:${percent}`);
       },
+      setColors: (colors) => {
+        lifecycle.push(`colors:${colors.background}`);
+      },
       clearSelection: () => {
         lifecycle.push("clearSelection");
       },
@@ -104,8 +107,8 @@ function makeFakeEngine({ load }: FakeEngineOptions = {}): FakeEngine {
       setSearchHighlight: (cfi) => {
         lifecycle.push(`search:${cfi ?? "none"}`);
       },
-      setSpread: (spread) => {
-        lifecycle.push(`spread:${spread}`);
+      setSpread: (nextSpread) => {
+        lifecycle.push(`spread:${nextSpread}`);
         return Promise.resolve();
       },
       measurePagination: (isCancelled) => {
@@ -200,6 +203,7 @@ function startReader(adapter: ReturnType<typeof makeEpubMount>, initialSourceId:
                           initialCfi: null,
                           spread: "auto",
                           fontSizePercent: 100,
+                          colors: { background: "#fff", text: "#000", link: "#00e" },
                         }),
                       ),
                     ],
@@ -222,10 +226,42 @@ const clickButton = (label: string) => {
 };
 
 describe("EPUB Foldkit Mount", () => {
+  let iframeRangeObserver: MutationObserver;
+
   beforeEach(() => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 1, 1),
+    });
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [],
+    });
+    vi.stubGlobal("scrollTo", () => {});
+    iframeRangeObserver = new MutationObserver(() => {
+      for (const frame of document.querySelectorAll("iframe")) {
+        const frameDocument = frame.contentDocument;
+        if (!frameDocument) continue;
+        const frameRangePrototype = Object.getPrototypeOf(frameDocument.createRange());
+        Object.defineProperty(frameRangePrototype, "getBoundingClientRect", {
+          configurable: true,
+          value: () => new DOMRect(0, 0, 1, 1),
+        });
+        Object.defineProperty(frameRangePrototype, "getClientRects", {
+          configurable: true,
+          value: () => [],
+        });
+        if (frame.contentWindow) frame.contentWindow.scrollTo = () => {};
+      }
+    });
+    iframeRangeObserver.observe(document.body, { childList: true, subtree: true });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
       setTimeout(() => callback(performance.now()), 0),
     );
+  });
+
+  afterEach(() => {
+    iframeRangeObserver.disconnect();
   });
 
   afterEach(() => {
@@ -415,6 +451,7 @@ describe("EPUB Foldkit Mount", () => {
         setSpread: () => Promise.resolve(),
         measurePagination: () => Promise.resolve(false),
         setFontSize: () => {},
+        setColors: () => {},
         clearSelection: () => {},
         destroy: () => book.destroy(),
       };
@@ -438,6 +475,50 @@ describe("EPUB Foldkit Mount", () => {
     );
   }, 30000);
 
+  it("tears a real session down mid-open without throwing inside epub.js", async () => {
+    // `renderTo` queues `start` behind `book.opened`. Destroying the rendition
+    // before that queued task runs takes away the book reference it reads, and
+    // it throws where no caller can catch it — the failure a reader sees as a
+    // blank page. Opening a book that has been read before does exactly this,
+    // because the restored place remounts the element.
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown): void => void rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const session = epubJsEngine({
+      element,
+      spread: "auto",
+      fontSizePercent: 100,
+      colors: { background: "#fff", text: "#000", link: "#00f" },
+      onHighlightClick: () => {},
+    });
+
+    // Not awaited: the teardown has to land while the open is still in flight.
+    void session.load(dorianBytes(), null).catch(() => {});
+    session.destroy();
+
+    await vi.waitFor(() => expect(document.querySelector(".epub-container")).toBeNull(), {
+      timeout: 20000,
+    });
+    // Give any queued task the destroy stranded a chance to surface.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+    process.off("unhandledRejection", onRejection);
+
+    // Not "no rejections at all": jsdom cannot finish an epub.js render, so its
+    // own teardown raises noise no amount of correctness here removes. The
+    // regression has a shape of its own — epub.js reading a property off the
+    // book reference the destroy dropped.
+    const strandedReads = rejections
+      .map(String)
+      .filter((reason) => /reading '(package|navigation|spine|opened|packaging)'/u.test(reason));
+    expect(strandedReads).toEqual([]);
+    element.remove();
+  }, 30000);
+
   it("acquires and releases real epub.js resources while its render is still pending", async () => {
     const adapter = makeEpubMount({
       loadSource: () => Promise.resolve(dorianBytes()),
@@ -445,13 +526,11 @@ describe("EPUB Foldkit Mount", () => {
     });
     const handle = startReader(adapter, "a");
 
-    // `display()` never settles under jsdom, so the Mount is released mid-load:
-    // the rendition it attached must still be torn down deterministically.
+    // Whether jsdom finishes `display()` depends on its layout shims; either
+    // way releasing the Mount must tear down the rendition deterministically.
     await vi.waitFor(() => expect(document.querySelector(".epub-container")).not.toBeNull(), {
       timeout: 20000,
     });
-    expect(log()).not.toContain("OpenedEpub");
-
     clickButton("none");
     await vi.waitFor(() => expect(document.querySelector(".epub-container")).toBeNull());
 

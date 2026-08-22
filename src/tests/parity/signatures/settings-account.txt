@@ -7,6 +7,30 @@ div.modal-backdrop[role=presentation]
         button[type=button aria-label=close title=Close]
           "✕"
       div.modal-body.settings-body
+        section.settings-item
+          div.settings-item-text
+            h2.settings-item-head
+              "Page layout"
+          div.settings-item-control
+            div.book-menu.settings-dropdown
+              button.settings-action.settings-dropdown-trigger[type=button aria-label=Reader page layout aria-expanded=false title=Reader page layout]
+                span
+                  "Single page"
+                span.book-menu-arrow[aria-hidden]
+                  "▾"
+        section.settings-item
+          div.settings-item-text
+            h2.settings-item-head
+              "Smart arrow keys"
+            p.settings-item-desc
+              "Arrow keys try to scroll before turning page."
+          div.settings-item-control
+            div.book-menu.settings-dropdown
+              button.settings-action.settings-dropdown-trigger[type=button aria-label=Reader smart arrow keys aria-expanded=false title=Reader smart arrow keys]
+                span
+                  "Instant"
+                span.book-menu-arrow[aria-hidden]
+                  "▾"
         section.settings-item.settings-item--stacked
           div.settings-item-text
             h2.settings-item-head

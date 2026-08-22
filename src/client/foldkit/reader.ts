@@ -16,10 +16,11 @@ import {
   SourceKind,
   type SourceSummary,
 } from "../../shared/types/sources.ts";
-import { PdfPageLayout } from "../../shared/types/userPrefs.ts";
+import { PdfPageLayout, SmartArrows } from "../../shared/types/userPrefs.ts";
 import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { getRenderSnapshot } from "../logic/reader/renderSnapshot.ts";
+import { loadingView } from "./loading.ts";
 import {
   browserReaderPositions,
   noReaderPositions,
@@ -39,6 +40,7 @@ import {
   OpenedEpub,
   SelectedEpubText,
   makeEpubMount,
+  type EpubColors,
 } from "./mounts/epub.ts";
 import {
   PdfDocumentLoadFailed,
@@ -115,9 +117,10 @@ export const ReaderWorkspace = Schema.Struct({
   atStart: Schema.Boolean,
   atEnd: Schema.Boolean,
   layout: PdfPageLayout,
+  smartArrows: SmartArrows,
   /** EPUB text size and PDF zoom are the same control to the reader, but the
    *  renderers take them differently: an EPUB restyles in place, a PDF
-   *  re-rasterizes, so its zoom is part of the Mount's element key. */
+   *  re-rasterizes through the live Mount. */
   fontSizePercent: Schema.Number,
   zoomPercent: Schema.Number,
   searchOpen: Schema.Boolean,
@@ -132,7 +135,10 @@ export const ReaderWorkspace = Schema.Struct({
   snapshot: Schema.NullOr(ReaderSnapshotImage),
   /** Bumped when a restored reading position has to re-seed the Mount, which
    *  only a new element key can do. */
-  mountGeneration: Schema.Number,
+  /** A restored place the renderer has not been moved to yet. Held only while
+   *  the book is still opening: a session that has not displayed anything
+   *  cannot be told where to go. */
+  pendingPlace: Schema.NullOr(SourceReadingPosition),
   error: Schema.NullOr(Schema.String),
 });
 export type ReaderWorkspace = typeof ReaderWorkspace.Type;
@@ -311,15 +317,15 @@ export interface ReaderEnvironment {
   positions?: ReaderPositions;
   bookmarks?: ReaderBookmarks;
   /** The last rendered page for a source, used as an opening placeholder. */
-  snapshotFor?: (sourceId: string) => ReaderSnapshotImage | null;
+  snapshotFor?: (sourceId: string) => Promise<ReaderSnapshotImage | null>;
 }
 
 export const browserReaderEnvironment: ReaderEnvironment = {
   loadSource: loadBookBytes,
   positions: browserReaderPositions,
   bookmarks: browserReaderBookmarks,
-  snapshotFor: (sourceId) => {
-    const snapshot = getRenderSnapshot(sourceId);
+  snapshotFor: async (sourceId) => {
+    const snapshot = await getRenderSnapshot(sourceId);
     return snapshot === null
       ? null
       : { dataUrl: snapshot.dataUrl, width: snapshot.width, height: snapshot.height };
@@ -334,6 +340,10 @@ export interface ReaderViewContext<Message> {
   readonly onSelectBook: (sourceId: string) => Message;
   readonly onRenameBook: ((sourceId: string, title: string) => Message) | null;
   readonly onAddBook: Message | null;
+  /** Only an EPUB session needs this at mount time — its content lives in an
+   *  iframe the app's `:root` custom properties can't reach. A later theme
+   *  change is pushed in through `ApplyReaderColors` instead of a remount. */
+  readonly colors: EpubColors;
 }
 
 /** React's `bookLabel`: a stored title, else the open book's parsed one, else
@@ -411,7 +421,7 @@ const bookMenu = <Message>(
           h.Title("Switch book"),
           h.OnClick(ToggledBookMenu()),
         ],
-        ["\u25be"],
+        ["\u25BE"],
       ),
       ...(reader.bookMenuOpen
         ? [
@@ -565,6 +575,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   atStart: true,
   atEnd: false,
   layout: "single",
+  smartArrows: "instant",
   fontSizePercent: 100,
   zoomPercent: 100,
   searchOpen: false,
@@ -577,7 +588,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   chromeLevel: 0,
   pane: "reader",
   snapshot: null,
-  mountGeneration: 0,
+  pendingPlace: null,
   error: null,
 });
 
@@ -832,7 +843,7 @@ export const makeReaderSlice = ({
   loadSource,
   positions = noReaderPositions,
   bookmarks = noReaderBookmarks,
-  snapshotFor = () => null,
+  snapshotFor = () => Promise.resolve(null),
 }: ReaderEnvironment) => {
   const epubReaderMount = makeEpubMount({ loadSource });
   const pdfReaderMount = makePdfMount(browserPdfMountEnvironment(loadSource));
@@ -853,12 +864,16 @@ export const makeReaderSlice = ({
   });
 
   const TurnReaderPage = Command.define("TurnReaderPage", {
-    args: { direction: Schema.Literals(["next", "previous"]), kind: SourceKind },
+    args: {
+      direction: Schema.Literals(["next", "previous"]),
+      kind: SourceKind,
+      zoomPercent: Schema.Number,
+    },
     messages: [CompletedReaderAction, FailedReaderCommand],
-    execute: ({ direction, kind }) =>
+    execute: ({ direction, kind, zoomPercent }) =>
       (kind === "epub"
         ? epubReaderMount.turnPage(direction)
-        : pdfReaderMount.turnPage(direction)
+        : pdfReaderMount.turnPage(direction, zoomPercent)
       ).pipe(
         Effect.as(CompletedReaderAction()),
         Effect.catch((error) => Effect.succeed(failed(error))),
@@ -1007,18 +1022,35 @@ export const makeReaderSlice = ({
     args: { sourceId: Schema.String },
     messages: [ShowedReaderSnapshot],
     execute: ({ sourceId }) =>
-      Effect.sync(() => ShowedReaderSnapshot({ sourceId, snapshot: snapshotFor(sourceId) })),
+      Effect.promise(async () => {
+        // IndexedDB is only a paint optimization. Safari can leave an open
+        // request pending, so storage never gets to hold the real reader shut.
+        const snapshot = await Promise.race([
+          snapshotFor(sourceId),
+          new Promise<null>((resolve) => {
+            setTimeout(() => {
+              resolve(null);
+            }, 100);
+          }),
+        ]);
+        return ShowedReaderSnapshot({ sourceId, snapshot });
+      }),
   });
 
   const FitPdfToText = Command.define("FitPdfToText", {
     args: {},
-    messages: [SetReaderZoom, CompletedReaderAction],
-    execute: () =>
-      pdfReaderMount.fitZoom.pipe(
-        Effect.map((percent) =>
-          percent === null ? CompletedReaderAction() : SetReaderZoom({ percent }),
-        ),
-      ),
+    messages: [CompletedReaderAction],
+    // PdfSpreadRendered publishes the fitted zoom with the completed render.
+    // Feeding it back through ApplyPdfZoom would misclassify the fit itself as
+    // a manual zoom and immediately turn persistent fit mode back off.
+    execute: () => pdfReaderMount.fitToText.pipe(Effect.as(CompletedReaderAction())),
+  });
+
+  const ApplyPdfZoom = Command.define("ApplyPdfZoom", {
+    args: { percent: Schema.Number },
+    messages: [CompletedReaderAction],
+    execute: ({ percent }) =>
+      pdfReaderMount.setZoom(percent).pipe(Effect.as(CompletedReaderAction())),
   });
 
   const DismissReaderSelection = Command.define("DismissReaderSelection", {
@@ -1119,6 +1151,7 @@ export const makeReaderSlice = ({
             newColor,
           }),
         ];
+
   /** Recording is local and cheap, so every reported place is written; the
    *  server only hears about it on the sync tick. */
   const recordPosition = (reader: ReaderWorkspace) =>
@@ -1197,10 +1230,19 @@ export const makeReaderSlice = ({
         );
         return reader.kind === "epub"
           ? updateReader(reader, ChangedReaderFontSize({ percent: next }))
-          : [{ ...reader, zoomPercent: next }, []];
+          : [{ ...reader, zoomPercent: next }, [ApplyPdfZoom({ percent: next })]];
       }
       case "TurnedReaderPage":
-        return [reader, [TurnReaderPage({ direction: message.direction, kind: reader.kind })]];
+        return [
+          reader,
+          [
+            TurnReaderPage({
+              direction: message.direction,
+              kind: reader.kind,
+              zoomPercent: reader.zoomPercent,
+            }),
+          ],
+        ];
       case "ShowedReaderHighlights":
         return [
           { ...reader, highlights: message.highlights },
@@ -1229,19 +1271,17 @@ export const makeReaderSlice = ({
             }),
           ],
         ];
-      case "RestoredReaderPosition":
-        // A Mount is seeded at insert, so a place that arrives after the book
-        // opened only reaches the renderer through a new element key.
-        return message.sourceId !== reader.sourceId || message.position === null
-          ? [reader, []]
-          : [
-              {
-                ...reader,
-                position: message.position,
-                mountGeneration: reader.mountGeneration + 1,
-              },
-              [],
-            ];
+      case "RestoredReaderPosition": {
+        if (message.sourceId !== reader.sourceId || message.position === null) return [reader, []];
+        const restored = { ...reader, position: message.position };
+        // Moving the open book, rather than rebuilding the session around a new
+        // element key. A rebuild downloads and opens the book a second time, and
+        // destroys the first session while it is still opening — which is the
+        // blank page a reader gets when reopening a book they have read before.
+        return reader.loading
+          ? [{ ...restored, pendingPlace: message.position }, []]
+          : [restored, goToPlace(reader, message.position)];
+      }
       case "RequestedPositionSync":
         return reader.userId === null || reader.groupId === null
           ? [reader, []]
@@ -1330,12 +1370,12 @@ export const makeReaderSlice = ({
       case "JumpedToHighlight":
         // Another book's anchor means nothing to this one: the host opens that
         // book and replays the jump once it is ready.
-        return message.sourceId !== reader.sourceId
-          ? [reader, []]
-          : [
+        return message.sourceId === reader.sourceId
+          ? [
               { ...reader, pane: "reader" },
               [GoToReaderAnchor({ anchor: message.anchor, kind: reader.kind })],
-            ];
+            ]
+          : [reader, []];
       case "ToggledBookMenu":
         return [
           {
@@ -1362,17 +1402,21 @@ export const makeReaderSlice = ({
       case "RequestedFitToText":
         return reader.kind === "pdf" ? [reader, [FitPdfToText({})]] : null;
       case "SetReaderZoom":
+        // FitPdfToText has already applied this zoom to the live mount. This
+        // message only reconciles the Model; issuing a normal zoom command
+        // here would immediately leave fit mode again.
         return [{ ...reader, zoomPercent: message.percent }, []];
       case "MeasuredReaderPagination":
         return message.place === null ? [reader, []] : [placed(reader, message.place), []];
       case "OpenedEpub": {
         if (message.sourceId !== reader.sourceId) return [reader, []];
-        const opened = { ...reader, loading: false, title: message.title };
+        const opened = { ...reader, loading: false, title: message.title, pendingPlace: null };
         return [
           message.place === null ? opened : placed(opened, message.place),
           [
             MeasureEpubPagination({}),
             PaintReaderHighlights({ highlights: reader.highlights, kind: reader.kind }),
+            ...goToPlace(opened, reader.pendingPlace),
           ],
         ];
       }
@@ -1411,8 +1455,15 @@ export const makeReaderSlice = ({
       case "PdfDocumentReady":
         return message.sourceId === reader.sourceId
           ? [
-              { ...reader, loading: false, title: message.title, totalPages: message.totalPages },
-              [],
+              {
+                ...reader,
+                loading: false,
+                title: message.title,
+                totalPages: message.totalPages,
+                zoomPercent: message.zoom,
+                pendingPlace: null,
+              },
+              goToPlace(reader, reader.pendingPlace),
             ]
           : [reader, []];
       case "PdfSpreadRendered":
@@ -1423,6 +1474,7 @@ export const makeReaderSlice = ({
                 page: message.pages[0] ?? 1,
                 totalPages: message.total,
                 percentage: message.percentage,
+                zoomPercent: message.zoom,
                 atStart: message.atStart,
                 atEnd: message.atEnd,
               },
@@ -1474,6 +1526,7 @@ export const makeReaderSlice = ({
             initialCfi: reader.position?.kind === "epub" ? reader.position.cfi : null,
             spread: epubSpread(reader.layout),
             fontSizePercent: reader.fontSizePercent,
+            colors: context.colors,
           })
         : PdfReaderMount({
             sourceId: reader.sourceId,
@@ -1481,6 +1534,8 @@ export const makeReaderSlice = ({
             initialPage: reader.position?.kind === "pdf" ? reader.position.page : reader.page || 1,
             zoom: reader.zoomPercent,
             layout: reader.layout,
+            colors: { background: context.colors.background, text: context.colors.text },
+            smartArrows: reader.smartArrows,
           });
     const searchRow = h.div(
       [h.Class("reader-search")],
@@ -1664,23 +1719,10 @@ export const makeReaderSlice = ({
       ],
     );
 
-    const surface = h.div(
-      [
-        // The Mount owns whatever the key identifies: a PDF layout or zoom
-        // change rebuilds the document, an EPUB relayouts in place, and a
-        // restored place re-seeds either through the generation counter.
-        h.Key(
-          reader.kind === "pdf"
-            ? `pdf:${reader.sourceId}:${reader.layout}:${reader.zoomPercent}:${reader.mountGeneration}`
-            : `epub:${reader.sourceId}:${reader.mountGeneration}`,
-        ),
-        h.OnMount(mount),
-        h.Class("reader-surface"),
-      ],
-      // A snapshot of the last render stands in until the book paints, so
-      // reopening a book is not an empty frame.
-      reader.loading && reader.snapshot !== null
-        ? [
+    const loadingSurface = reader.loading
+      ? reader.snapshot === null
+        ? [loadingView(h, "loading--reader")]
+        : [
             h.div(
               [h.Class("reader-snapshot"), h.AriaHidden(true)],
               [
@@ -1693,7 +1735,23 @@ export const makeReaderSlice = ({
               ],
             ),
           ]
-        : [],
+      : [];
+    const surface = h.div(
+      [
+        // The Mount owns whatever the key identifies: a PDF layout or zoom
+        // change rebuilds the document, an EPUB relayouts in place, and a
+        // restored place re-seeds either through the generation counter.
+        h.Key(
+          reader.kind === "pdf"
+            ? `pdf:${reader.sourceId}:${reader.layout}:${reader.smartArrows}`
+            : `epub:${reader.sourceId}`,
+        ),
+        h.OnMount(mount),
+        h.Class("reader-surface"),
+      ],
+      // A snapshot of the last render stands in until the book paints, so
+      // reopening a book is not an empty frame.
+      loadingSurface,
     );
 
     const pageTurn = (direction: "previous" | "next") =>

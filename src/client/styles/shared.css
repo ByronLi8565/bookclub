@@ -247,6 +247,10 @@
   margin: 0;
   padding: 0;
   background: var(--color-background);
+  /* Native dialogs live in the top layer and retain the user-agent foreground
+     unless it is set explicitly; inheriting from body leaves dark modals with
+     black headings and labels in WebKit. */
+  color: var(--color-text);
   border: var(--line);
   box-shadow: var(--shadow-lg);
 }
@@ -290,6 +294,8 @@
     border: var(--line);
     padding: 8px 10px;
     width: 100%;
+    background: var(--color-background);
+    color: var(--color-text);
   }
 
   & .primary {

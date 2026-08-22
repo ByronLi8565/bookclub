@@ -16,6 +16,10 @@ import { DEFAULT_USER_PREFS } from "../../shared/types/userPrefs.ts";
 const agents = vi.hoisted(() => new Map<string, object>());
 // oxlint-disable-next-line anti-slop/no-module-mocking
 vi.mock("agents", () => ({
+  // `async` is load-bearing here, not stylistic: account handlers' `attempt`
+  // trusts its callback to already return a Promise rather than wrapping it,
+  // so a synchronous stub would throw at runtime even though nothing awaits.
+  // oxlint-disable-next-line require-await
   getAgentByName: async (_namespace: DurableObjectNamespace, name: string) => agents.get(name),
 }));
 
@@ -100,14 +104,22 @@ describe("Bookclub Worker HttpApi seam", () => {
       sourceId: "source-1",
       updatedAt: "2026-08-15T00:00:00.000Z",
     };
+    // Every stub method below is `async` for the same load-bearing reason as
+    // `getAgentByName` above — see its comment.
     agents.set(user.email, {
+      // oxlint-disable-next-line require-await
       getPrefs: async () => DEFAULT_USER_PREFS,
+      // oxlint-disable-next-line require-await
       setPrefs: async () => DEFAULT_USER_PREFS,
+      // oxlint-disable-next-line require-await
       getReadingPosition: async () => position,
+      // oxlint-disable-next-line require-await
       setReadingPosition: async () => position,
     });
     agents.set("group-1", {
+      // oxlint-disable-next-line require-await
       membership: async () => ({ isMember: true, role: "member" }),
+      // oxlint-disable-next-line require-await
       getSummary: async () => ({
         sources: [position.sourceId],
         sourceMeta: { [position.sourceId]: { kind: "epub" } },

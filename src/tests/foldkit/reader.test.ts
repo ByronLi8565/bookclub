@@ -28,7 +28,7 @@ import {
   type ReaderWorkspace,
 } from "../../client/foldkit/reader.ts";
 import { PdfSpreadRendered } from "../../client/foldkit/mounts/pdf.ts";
-import { MovedEpub } from "../../client/foldkit/mounts/epub.ts";
+import { MovedEpub, OpenedEpub } from "../../client/foldkit/mounts/epub.ts";
 import { epubPageCount } from "../../client/logic/reader/epubPagination.ts";
 
 /** The slice owns live library handles, so a test builds its own with a byte
@@ -133,6 +133,7 @@ describe("reader annotations", () => {
         atStart: false,
         atEnd: false,
         percentage: 0.2,
+        zoom: 100,
       }),
     );
     expect(model.page).toBe(2);
@@ -278,7 +279,8 @@ describe("reader place", () => {
           synced.push(input);
         }),
     },
-    snapshotFor: () => ({ dataUrl: "data:image/webp;base64,AA", width: 40, height: 60 }),
+    snapshotFor: () =>
+      Promise.resolve({ dataUrl: "data:image/webp;base64,AA", width: 40, height: 60 }),
   });
   const run = (
     reader: ReaderWorkspace,
@@ -304,26 +306,58 @@ describe("reader place", () => {
     ]);
   });
 
-  it("re-seeds the Mount when a restored place arrives after the book opened", () => {
-    const [restored] = run(
+  it("moves the open book to a restored place instead of rebuilding it", () => {
+    // Rebuilding the session around a new element key downloads and opens the
+    // book a second time, and destroys the first while it is still opening.
+    const opened = run(
       epubReader,
+      OpenedEpub({ sourceId: epubReader.sourceId, title: "Dorian", place: null }),
+    )[0];
+    expect(opened.loading).toBe(false);
+
+    const [restored, commands] = run(
+      opened,
       RestoredReaderPosition({
         sourceId: epubReader.sourceId,
         position: { kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 },
       }),
     );
     expect(restored.position).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 });
-    expect(restored.mountGeneration).toBe(epubReader.mountGeneration + 1);
+    expect(commandNames(commands)).toEqual(["GoToReaderAnchor"]);
+    expect(restored.pendingPlace).toBeNull();
 
     // A place for a book the reader is no longer showing changes nothing.
-    const [other] = run(
+    const [other, otherCommands] = run(
       restored,
       RestoredReaderPosition({
         sourceId: "another-source",
         position: { kind: "epub", cfi: "epubcfi(/6/2)", percentage: 0.1 },
       }),
     );
-    expect(other.mountGeneration).toBe(restored.mountGeneration);
+    expect(other.position).toEqual(restored.position);
+    expect(commandNames(otherCommands)).toEqual([]);
+  });
+
+  it("holds a restored place that arrives before the book has opened", () => {
+    // Nothing has displayed yet, so there is nowhere to navigate to; the place
+    // waits for the book rather than being dropped or forcing a remount.
+    const [waiting, waitingCommands] = run(
+      epubReader,
+      RestoredReaderPosition({
+        sourceId: epubReader.sourceId,
+        position: { kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 },
+      }),
+    );
+    expect(waiting.loading).toBe(true);
+    expect(waiting.pendingPlace).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 });
+    expect(commandNames(waitingCommands)).toEqual([]);
+
+    const [open, openCommands] = run(
+      waiting,
+      OpenedEpub({ sourceId: epubReader.sourceId, title: "Dorian", place: null }),
+    );
+    expect(open.pendingPlace).toBeNull();
+    expect(commandNames(openCommands)).toContain("GoToReaderAnchor");
   });
 
   it("records every reported place, but only for an identified reader", () => {

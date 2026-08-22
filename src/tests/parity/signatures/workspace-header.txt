@@ -8,6 +8,8 @@ header.topbar
       "2"
     span.presence-dot[aria-hidden]
   button.icon-button.settings-button[type=button aria-label=settings title=Settings]
-    img[aria-hidden alt src=svg%3e]
+    svg[aria-hidden]
+      circle
+      path
   button.workspace-info-button[type=button aria-label=open info title=About & release log]
     "i"

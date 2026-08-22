@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 type SchemaType<S extends Schema.Top> = S["Type"];
@@ -17,6 +18,7 @@ export const THEME_TOKEN_KEYS = [
   "text",
   "muted",
   "border",
+  "shadow",
   "link",
   "highlight",
   "danger",
@@ -30,6 +32,9 @@ export const ThemeTokens = Schema.Struct({
   text: Schema.String,
   muted: Schema.String,
   border: Schema.String,
+  // Older saved custom themes predate this token; decoding supplies the same
+  // black shadow the UI historically derived from its text color.
+  shadow: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("#000000"))),
   link: Schema.String,
   highlight: Schema.String,
   danger: Schema.String,
@@ -46,6 +51,7 @@ export const THEME_PRESETS = {
     text: "#000000",
     muted: "#777777",
     border: "#000000",
+    shadow: "#000000",
     link: "#0000ee",
     highlight: "#ffe600",
     danger: "#d60000",
@@ -53,10 +59,11 @@ export const THEME_PRESETS = {
     warning: "#c77800",
   },
   dark: {
-    background: "#111111",
+    background: "#242424",
     text: "#f2f2f2",
     muted: "#9a9a9a",
-    border: "#f2f2f2",
+    border: "#4a4a4a",
+    shadow: "#242424",
     link: "#8ab4ff",
     highlight: "#8a7300",
     danger: "#ff6b6b",
@@ -68,6 +75,7 @@ export const THEME_PRESETS = {
     text: "#3a3226",
     muted: "#8a7a5c",
     border: "#3a3226",
+    shadow: "#3a3226",
     link: "#5b4636",
     highlight: "#e8d27a",
     danger: "#9a3324",
@@ -79,6 +87,7 @@ export const THEME_PRESETS = {
     text: "#2b2b2b",
     muted: "#8a8880",
     border: "#2b2b2b",
+    shadow: "#2b2b2b",
     link: "#1c5fa8",
     highlight: "#f5e28a",
     danger: "#b3261e",
@@ -90,6 +99,7 @@ export const THEME_PRESETS = {
     text: "#3d3d3d",
     muted: "#8f8f8f",
     border: "#8f8f8f",
+    shadow: "#8f8f8f",
     link: "#4361a8",
     highlight: "#d8cf9a",
     danger: "#a85a52",

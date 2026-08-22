@@ -1,6 +1,7 @@
 import { Effect, Queue, Schedule, Schema, Stream } from "effect";
 import ePub, { type Book, type Contents, type Rendition } from "epubjs";
 import type Navigation from "epubjs/types/navigation";
+import type Section from "epubjs/types/section";
 import { Mount } from "foldkit";
 import { m } from "foldkit/message";
 import {
@@ -93,6 +94,7 @@ export interface EpubSession {
   turnPage(direction: "next" | "previous"): Promise<void>;
   goTo(cfi: string): Promise<void>;
   setFontSize(percent: number): void;
+  setColors(colors: EpubColors): void;
   clearSelection(): void;
   /** Paint the given highlights and erase every other painted one. epub.js
    *  annotations are keyed by CFI, so the session keeps its own id-to-CFI map
@@ -117,10 +119,19 @@ export interface PaintedHighlight {
   cfi: string;
 }
 
+/** The book's own stylesheet sets its own colors, so epub.js needs `!important`
+ *  to actually repaint the page rather than being outranked by it. */
+export interface EpubColors {
+  readonly background: string;
+  readonly text: string;
+  readonly link: string;
+}
+
 export interface EpubSessionOptions {
   element: Element;
   spread: EpubSpread;
   fontSizePercent: number;
+  colors: EpubColors;
   onHighlightClick: (id: string) => void;
 }
 
@@ -142,6 +153,14 @@ function linearSpineTarget(book: Book, target: string | null | undefined): strin
   } catch {
     return undefined;
   }
+}
+
+function firstLinearSpineTarget(book: Book): string | undefined {
+  let target: string | undefined;
+  book.spine.each((section: Section) => {
+    if (target === undefined && section.linear) target = section.href;
+  });
+  return target;
 }
 
 function readPlace(rendition: Rendition, pagination: EpubPagination | null): EpubPlace | null {
@@ -197,24 +216,69 @@ function clearContentSelections(rendition: Rendition): void {
 export const HIGHLIGHT_CLASS = "bc-highlight";
 export const SEARCH_HIGHLIGHT_CLASS = "bc-search";
 
+/** Re-registers the whole "default" theme, since epub.js has no way to patch
+ *  just the color rules within it — every call must restate the selection
+ *  styles alongside whatever colors are current. */
+function applyEpubTheme(rendition: Rendition, colors: EpubColors): void {
+  rendition.themes.default({
+    body: {
+      "-webkit-user-select": "text",
+      "user-select": "text",
+      background: `${colors.background} !important`,
+      color: `${colors.text} !important`,
+    },
+    a: { color: `${colors.link} !important` },
+  });
+}
+
 export const epubJsEngine: EpubEngine = ({
   element,
   spread,
   fontSizePercent,
+  colors,
   onHighlightClick,
 }) => {
   const book = ePub();
-  const rendition = book.renderTo(element, { width: "100%", height: "100%", spread });
+  const rendition = book.renderTo(element, {
+    width: "100%",
+    height: "100%",
+    flow: "paginated",
+    spread,
+  });
+  let destroyed = false;
+  const resizeRendition = rendition.resize.bind(rendition);
+  // SAFETY: epub.js's declaration omits the manager that its own resize
+  // implementation immediately dereferences. ResizeObserver may fire before
+  // startup assigns it, which is why the added property remains optional.
+  const renditionState = rendition as Rendition & { manager?: object };
+  // epub.js can retain a queued resize after Rendition.destroy has discarded
+  // that same manager. Keep both edge callbacks harmless.
+  rendition.resize = (width, height) => {
+    if (!destroyed && renditionState.manager) resizeRendition(width, height);
+  };
+  const resizeObserver =
+    typeof ResizeObserver === "function"
+      ? new ResizeObserver(() => {
+          // A resize notification can already be queued when disconnect runs.
+          // epub.js drops its manager during teardown, so that stale callback
+          // must not resize the dead rendition.
+          if (destroyed) return;
+          const width = element.clientWidth;
+          const height = element.clientHeight;
+          if (width > 0 && height > 0) rendition.resize(width, height);
+        })
+      : null;
+  resizeObserver?.observe(element);
   const drawn = new Map<string, string>();
   let searchCfi: string | null = null;
   let pagination: EpubPagination | null = null;
   let currentSpread: EpubSpread = spread;
   let currentFontSize = fontSizePercent;
-  rendition.themes.default({ body: { "-webkit-user-select": "text", "user-select": "text" } });
+  applyEpubTheme(rendition, colors);
   rendition.themes.fontSize(`${fontSizePercent}%`);
 
-  // SAFETY: epub.js accepts an omitted target to display its first linear
-  // section. Bound, because epub.js reads `this.displaying` inside `display`.
+  // SAFETY: bound because epub.js reads `this.displaying` inside `display`, and
+  // its public declaration accepts the same optional string target.
   const display = rendition.display.bind(rendition) as (target?: string) => Promise<void>;
 
   let opening: Promise<unknown> | null = null;
@@ -227,13 +291,15 @@ export const epubJsEngine: EpubEngine = ({
       const metadata = await book.loaded.metadata.catch(() => null);
       const navigation = await book.loaded.navigation.catch(() => null);
       // Try the most specific target first: a body-matter landmark can fail to
-      // resolve to a spine item, so we end at epub.js's own first-linear-section
-      // behavior rather than treating that as an unopenable book.
+      // resolve to a spine item, so we end at the first explicitly linear spine
+      // item rather than trusting epub.js's version-dependent default target.
       const candidates = [
         linearSpineTarget(book, initialCfi),
         linearSpineTarget(book, navigation ? readingStartHref(navigation) : undefined),
-        undefined,
-      ];
+        firstLinearSpineTarget(book),
+      ].filter((target, index, all): target is string => {
+        return target !== undefined && all.indexOf(target) === index;
+      });
       for (const target of candidates) {
         try {
           await display(target);
@@ -251,10 +317,13 @@ export const epubJsEngine: EpubEngine = ({
       return () => rendition.off("relocated", handler);
     },
     turnPage: (direction) => (direction === "next" ? rendition.next() : rendition.prev()),
-    goTo: (cfi) => display(cfi),
+    goTo: (cfi) => display(linearSpineTarget(book, cfi) ?? firstLinearSpineTarget(book)),
     setFontSize(percent) {
       currentFontSize = percent;
       rendition.themes.fontSize(`${percent}%`);
+    },
+    setColors(next) {
+      applyEpubTheme(rendition, next);
     },
     clearSelection: () => clearContentSelections(rendition),
     syncHighlights(highlights) {
@@ -320,14 +389,40 @@ export const epubJsEngine: EpubEngine = ({
       return true;
     },
     destroy() {
-      rendition.destroy();
-      // `Book.destroy` drops the deferred `loading` map, and the display-options
-      // fetch epub.js starts during `unpack` resolves against it afterwards. A
-      // book destroyed while that is in flight throws inside the library, so the
-      // teardown waits for the open to settle — and a session torn down before
-      // it ever opened has nothing in flight to wait for.
-      if (opening === null) book.destroy();
-      else void opening.catch(() => undefined).then(() => book.destroy());
+      destroyed = true;
+      resizeObserver?.disconnect();
+      // The replacement Mount may acquire before epub.js is safe to destroy.
+      // Release the old session's visible DOM immediately so two renditions
+      // can never share the reader while its handles finish asynchronously.
+      element.replaceChildren();
+      // Neither half of epub.js can be torn down while the book is still
+      // opening.
+      //
+      // `renderTo` queues `start` behind `book.opened`, and `Rendition.destroy`
+      // drops the very book reference that queued task goes on to read. It
+      // throws inside the library's own queue, where no caller can catch it,
+      // and the reader is left on an empty frame. `Book.destroy` drops the
+      // deferred `loading` map the display-options fetch resolves against,
+      // which fails the same way.
+      //
+      // So both wait for the open to settle, and for the start it unblocks to
+      // have run. A session torn down before it ever opened has nothing in
+      // flight to wait for; one whose open failed never starts at all, so
+      // waiting on `started` there would wait for ever.
+      if (opening === null) {
+        rendition.destroy();
+        book.destroy();
+        return;
+      }
+      void opening
+        .then(
+          () => rendition.started.catch(() => {}),
+          () => {},
+        )
+        .then(() => {
+          rendition.destroy();
+          book.destroy();
+        });
     },
   };
 };
@@ -358,7 +453,12 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
   const onLiveSession = <A>(fallback: A, use: (session: EpubSession) => Promise<A>) =>
     Effect.suspend(() => {
       const session = live;
-      return session === null ? Effect.succeed(fallback) : Effect.tryPromise(() => use(session));
+      return session === null
+        ? Effect.succeed(fallback)
+        : // The rejection is the failure. Left to `tryPromise`'s own wrapper the
+          // reader reports "An error occurred in Effect.tryPromise", which says
+          // nothing about the book that would not open.
+          Effect.tryPromise({ try: () => use(session), catch: (cause) => cause });
     });
 
   const EpubSource = Mount.defineStream(
@@ -371,6 +471,11 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
       initialCfi: Schema.NullOr(Schema.String),
       spread: EpubSpread,
       fontSizePercent: Schema.Number,
+      colors: Schema.Struct({
+        background: Schema.String,
+        text: Schema.String,
+        link: Schema.String,
+      }),
     },
     OpenedEpub,
     MovedEpub,
@@ -379,7 +484,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     ClickedEpubHighlight,
     FailedEpubLoad,
   )(
-    ({ sourceId, groupRef, initialCfi, spread, fontSizePercent }) =>
+    ({ sourceId, groupRef, initialCfi, spread, fontSizePercent, colors }) =>
       (element) =>
         Stream.callback<EpubMountMessage>((queue) =>
           Effect.gen(function* () {
@@ -393,6 +498,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
                   element,
                   spread,
                   fontSizePercent,
+                  colors,
                   onHighlightClick: (highlightId) =>
                     emit(ClickedEpubHighlight({ sourceId, highlightId })),
                 });
@@ -416,9 +522,13 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
               (unsubscribe) => Effect.sync(unsubscribe),
             );
 
-            const opened = yield* Effect.tryPromise(() =>
-              loadSource(sourceId, groupRef).then((bytes) => session.load(bytes, initialCfi)),
-            ).pipe(
+            const opened = yield* Effect.tryPromise({
+              try: () =>
+                loadSource(sourceId, groupRef).then((bytes) => session.load(bytes, initialCfi)),
+              // Keep the rejection itself, so what the reader is told is what
+              // actually went wrong with the book.
+              catch: (cause) => cause,
+            }).pipe(
               Effect.map((title) => ({ title })),
               Effect.tapError((error) =>
                 Effect.sync(() =>
@@ -466,6 +576,10 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     setFontSize: (percent: number) =>
       Effect.sync(() => {
         live?.setFontSize(percent);
+      }),
+    setColors: (colors: EpubColors) =>
+      Effect.sync(() => {
+        live?.setColors(colors);
       }),
     dismissSelection: Effect.sync(() => {
       live?.clearSelection();

@@ -290,6 +290,7 @@
   height: 100%;
   min-height: 0;
   position: relative;
+  overflow: hidden;
 
   & .loading--reader {
     z-index: 2;
@@ -301,6 +302,12 @@
     display: grid;
     place-items: center;
   }
+}
+
+.epub-container {
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .reader-snapshot {
@@ -432,6 +439,9 @@
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  /* The page itself is a raster canvas and keeps whatever colors the PDF was
+     authored with — only the margins around it can follow the theme. */
+  background: var(--color-background);
 
   &::-webkit-scrollbar {
     display: none;
@@ -513,6 +523,12 @@
       background: transparent;
     }
   }
+}
+
+.pdf-pane {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
 }
 
 .pdf-highlights,

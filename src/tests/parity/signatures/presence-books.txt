@@ -29,10 +29,15 @@ div.modal-backdrop[role=presentation]
                     "1,000 words · 1.0 KB"
                 div.group-book-actions
                   button.group-book-icon[type=button aria-label=Edit book metadata aria-expanded=false title=Book tools]
-                    img[aria-hidden alt src=svg%3e]
+                    svg[aria-hidden]
+                      path
                   div.group-book-delete
                     button.group-book-icon[type=button aria-label=Delete The Book aria-expanded=false title=Delete book]
-                      img[aria-hidden alt src=svg%3e]
+                      svg[aria-hidden]
+                        polyline
+                        path
+                        line
+                        line
       div.pager-tabs.settings-tabs
         button[type=button aria-pressed=false title=People and invitations]
           "People"

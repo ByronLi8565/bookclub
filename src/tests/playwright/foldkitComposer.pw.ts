@@ -38,6 +38,8 @@ test("dragging the handle resizes the image and writes the new width into the no
     .poll(() => draft(page), { timeout: 10_000 })
     .toMatch(new RegExp(String.raw`\[\[image:${IMAGE_ID}:\d{2}\]\]`, "u"));
   const width = await widget.evaluate((element) => element.style.width);
+  // `width` is a CSS length like "45px"; `Number()` would yield NaN on the unit.
+  // oxlint-disable-next-line unicorn/prefer-number-coercion
   expect(Number.parseInt(width, 10)).toBeLessThan(100);
 });
 

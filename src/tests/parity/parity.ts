@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { expect } from "vitest";
 import { signature, type SignatureOptions } from "./domSignature.ts";
 
@@ -8,7 +7,7 @@ export { signature } from "./domSignature.ts";
 export type { SignatureOptions } from "./domSignature.ts";
 export * from "./render.ts";
 
-const SIGNATURES = join(dirname(fileURLToPath(import.meta.url)), "signatures");
+const SIGNATURES = join(import.meta.dirname, "signatures");
 
 /**
  * A surface's recorded signature. These began as React's rendering, captured on

@@ -489,7 +489,9 @@ const registerNoteImageActions = (
     if (previewUrl !== "") URL.revokeObjectURL(previewUrl);
     pending.delete(token);
     // The upload is discarded rather than left for the note that never came,
-    // so it must not come back through undo either.
+    // so it must not come back through undo either. Lexical's command payload
+    // is required even when the command carries none.
+    // oxlint-disable-next-line unicorn/no-useless-undefined
     editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
     publish(RemovedNoteImage({ groupRef, imageId, token }));
   };

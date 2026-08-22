@@ -16,6 +16,7 @@ import {
   OpenedEpub,
   SelectedEpubText,
 } from "../../client/foldkit/mounts/epub.ts";
+import { FollowedNoteReference } from "../../client/foldkit/notes.ts";
 import {
   ChangedNotes,
   ConnectedNoteAgent,
@@ -269,6 +270,112 @@ describe("Foldkit application slice seams", () => {
     );
     expect(focused.notes.focusedNoteId).toBe("note-1");
     expect(focused.reader?.activeHighlightId).toBe("highlight-1");
+  });
+
+  const noteOn = (
+    seq: number,
+    sourceId: string,
+    highlight: {
+      anchor: { kind: "epub-cfi"; value: string } | { kind: "pdf-text"; page: number; rects: [] };
+    } | null,
+  ) => ({
+    id: `note-${seq}`,
+    seq,
+    sourceId,
+    author: { id: "reader-1", name: "Reader" },
+    parent: null,
+    body: `note ${seq}`,
+    highlights:
+      highlight === null
+        ? []
+        : [
+            {
+              id: `hl-${seq}`,
+              sourceId,
+              anchor: highlight.anchor,
+              quote: {
+                type: "TextQuoteSelector" as const,
+                exact: "a passage",
+                prefix: "",
+                suffix: "",
+              },
+              createdAt: "2026-08-17T00:00:00.000Z",
+            },
+          ],
+    tags: [],
+    createdAt: "2026-08-17T00:00:00.000Z",
+    editedAt: null,
+    deletedAt: null,
+    version: 1,
+  });
+
+  it("follows a numbered reference to where that note sits in the book", () => {
+    const anchor = { kind: "epub-cfi" as const, value: "epubcfi(/6/12)" };
+    const reading = openedReader();
+    const withNotes = {
+      ...reading,
+      notes: {
+        ...reading.notes,
+        notes: [noteOn(1, "source-1", null), noteOn(3, "source-1", { anchor })],
+      },
+    };
+
+    const [followed, commands] = update(withNotes, FollowedNoteReference({ seq: 3 }));
+    // Following [[3]] is clicking note 3: the panel focuses it and the reader
+    // goes to its passage, rather than only the former.
+    expect(followed.notes.focusedNoteId).toBe("note-3");
+    expect(followed.reader?.pane).toBe("reader");
+    expect(commands.map((command) => command.name)).toContain("GoToReaderAnchor");
+  });
+
+  it("opens the other book to follow a reference into it", () => {
+    const group = {
+      groupId: "group-1",
+      slug: "club",
+      publicId: "alpha",
+      displayName: "Club",
+      ownerId: "reader-1",
+      sources: ["source-1", "source-2"],
+      bookTitles: {},
+      sourceMeta: {
+        "source-1": {
+          kind: "epub" as const,
+          contentType: "application/epub+zip",
+          size: 1,
+          addedBy: "reader-1",
+        },
+        "source-2": {
+          kind: "epub" as const,
+          contentType: "application/epub+zip",
+          size: 1,
+          addedBy: "reader-1",
+        },
+      },
+      memberCount: 1,
+    };
+    const anchor = { kind: "epub-cfi" as const, value: "epubcfi(/6/12)" };
+    const reading = openedReader();
+    const withNotes = {
+      ...reading,
+      currentGroup: group,
+      notes: { ...reading.notes, notes: [noteOn(3, "source-2", { anchor })] },
+    };
+
+    const [followed] = update(withNotes, FollowedNoteReference({ seq: 3 }));
+    expect(followed.reader?.sourceId).toBe("source-2");
+    expect(followed.pendingJump).toEqual({ sourceId: "source-2", anchor });
+  });
+
+  it("only focuses a referenced note that has no passage to go to", () => {
+    const reading = openedReader();
+    const withNotes = {
+      ...reading,
+      notes: { ...reading.notes, notes: [noteOn(3, "source-1", null)] },
+    };
+
+    const [followed, commands] = update(withNotes, FollowedNoteReference({ seq: 3 }));
+    expect(followed.notes.focusedNoteId).toBe("note-3");
+    expect(commands.map((command) => command.name)).not.toContain("GoToReaderAnchor");
   });
 
   it("opens the other book before jumping to a note that lives in it", () => {
