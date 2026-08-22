@@ -1,44 +1,44 @@
 # Parity tests
 
-These compare the Foldkit client against the React client it replaces, by
-rendering both into jsdom and diffing what they produce. A failure prints the
-two trees side by side, so it names the element that drifted.
+These hold the Foldkit client to the interface the React client rendered, by
+rendering it into jsdom and diffing against a signature recorded from React on
+the day it was deleted. A failure prints the two trees side by side, so it names
+the element that drifted.
 
-The claim each test makes is: _this surface is the same interface in both
-clients_. `domSignature.ts` defines what "the same" means — tag, classes, and
+The claim each test makes is: _this surface still is the interface React
+shipped_ — or, once a signature has been deliberately re-recorded, the interface
+we chose instead. `domSignature.ts` defines what "the same" means — tag, classes, and
 the attributes that change what a control is or how it is announced. Ids, keys,
 inline styles, data hooks and values are a renderer's own business and are left
 out.
 
 ## Adding a surface
 
-```tsx
-const react = await renderReact(<Thing {...props} />);
+```ts
 const foldkit = await renderFoldkit({ Model, model, view });
-expectParity(react, foldkit);
+expectRecordedParity("thing-in-some-state", foldkit);
 ```
 
-React reaches most of its states by interaction where Foldkit reaches them by
-Model, so `renderReact` takes an optional callback that drives the component
-first — click the tab, type in the field — and both sides are then compared in
-the same state.
+Foldkit reaches a state by Model rather than by interaction, so a surface is
+named for the state it is in — `notes-composing`, `login-code-step` — and each
+name owns one file under `signatures/`.
 
 Where the host composes a module's view (the account page inside the settings
 modal, the invite controls inside the presence modal), render the _host's_
 composition rather than the module alone. That is what ships.
 
-## Deviations
+## Changing a surface on purpose
 
-There are **none**. Every surface matches React exactly. A difference that is
-deliberate would be written down at the call site as a `rewrite` that normalises
-both sides, with a comment saying why; anything not written down that way is a
-bug in one of the two clients.
+React is gone, so a signature can only be moved deliberately:
 
-## Surviving React
+```sh
+RECORD_PARITY=1 bun run test src/tests/parity
+```
 
-Each comparison is named, and `RECORD_PARITY=1 bun run test src/tests/parity`
-writes React's side of it to `signatures/<name>.txt`. Those files are what the
-Foldkit client is held to once React is deleted — `expectRecordedParity` checks
-the same trees against the same expectations, without needing React to render
-them. Re-record only while both clients exist; after cutover a change to a
-signature file is a change to the interface and should be reviewed as one.
+That rewrites every signature from what Foldkit renders now. It blesses whatever
+is on screen, so the review is the diff of `signatures/` — read it before
+committing, and never reach for it to turn a red test green. A signature file
+changing is the interface changing.
+
+The general and PDF settings pages have no recorded surface yet; a change to one
+of those is not covered here.

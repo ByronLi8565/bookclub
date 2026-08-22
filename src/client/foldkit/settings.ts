@@ -698,7 +698,10 @@ export const settingsView = <Message>(
     );
   };
 
-  const settingRow = (head: string, desc: string, control: Html): Html =>
+  /** A setting explains itself through its heading and its control. `desc` is
+   *  for the ones that cannot: a heading whose meaning is not obvious, or a
+   *  caveat the control does not show. */
+  const settingRow = (head: string, desc: string | null, control: Html): Html =>
     h.section(
       [h.Class("settings-item")],
       [
@@ -706,7 +709,7 @@ export const settingsView = <Message>(
           [h.Class("settings-item-text")],
           [
             h.h2([h.Class("settings-item-head")], [head]),
-            h.p([h.Class("settings-item-desc")], [desc]),
+            ...(desc === null ? [] : [h.p([h.Class("settings-item-desc")], [desc])]),
           ],
         ),
         h.div([h.Class("settings-item-control")], [control]),
@@ -751,10 +754,7 @@ export const settingsView = <Message>(
           ),
           h.div(
             [h.Class("settings-item-text")],
-            [
-              h.h2([h.Class("settings-item-head")], ["Profile picture"]),
-              h.p([h.Class("settings-item-desc")], []),
-            ],
+            [h.h2([h.Class("settings-item-head")], ["Profile picture"])],
           ),
           h.div(
             [h.Class("settings-item-control")],
@@ -856,7 +856,7 @@ export const settingsView = <Message>(
   const pdfSection = (): readonly Html[] => [
     settingRow(
       "Page layout",
-      "Show two pages side by side, book-style, when the screen is wide enough.",
+      null,
       settingDropdown(
         "pdfPageLayout",
         model.prefs.reader.pdfPageLayout,

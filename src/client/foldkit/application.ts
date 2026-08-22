@@ -2432,20 +2432,7 @@ export const accountSectionView = (model: Model, h: HtmlBuilder<Message>): Html[
   h.section(
     [h.Class("settings-item settings-item--stacked")],
     [
-      h.div(
-        [h.Class("settings-item-text")],
-        [
-          h.h2([h.Class("settings-item-head")], ["Password"]),
-          h.p(
-            [h.Class("settings-item-desc")],
-            [
-              model.hasPassword
-                ? "A password is set. Enter it at sign-in to skip the email code."
-                : "Set an optional password to sign in without an email code.",
-            ],
-          ),
-        ],
-      ),
+      h.div([h.Class("settings-item-text")], [h.h2([h.Class("settings-item-head")], ["Password"])]),
       h.form(
         [
           h.Class("account-password-form"),

@@ -14,7 +14,6 @@ div.modal-backdrop[role=presentation]
           div.settings-item-text
             h2.settings-item-head
               "Profile picture"
-            p.settings-item-desc
           div.settings-item-control
             input[type=file accept=image/jpeg,image/png,image/webp,image/gif]
             button.settings-action[type=button]

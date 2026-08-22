@@ -19,8 +19,6 @@ div.modal-backdrop[role=presentation]
           div.settings-item-text
             h2.settings-item-head
               "Password"
-            p.settings-item-desc
-              "Set an optional password to sign in without an email code."
           form.account-password-form
             input[type=password aria-label=New password placeholder=password]
             button.settings-action[type=submit title=Set password disabled]

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
@@ -11,8 +11,9 @@ export * from "./render.ts";
 const SIGNATURES = join(dirname(fileURLToPath(import.meta.url)), "signatures");
 
 /**
- * React's rendering of a surface, recorded from the React client on the day it
- * was deleted. These files are the interface the Foldkit client is held to.
+ * A surface's recorded signature. These began as React's rendering, captured on
+ * the day it was deleted, and remain the interface the Foldkit client is held
+ * to until one is re-recorded on purpose.
  */
 const pathFor = (name: string): string => join(SIGNATURES, `${name}.txt`);
 
@@ -25,17 +26,25 @@ export const recordedSignature = (name: string): string => {
 };
 
 /**
- * The assertion the whole suite is built on: the Foldkit tree and the React
- * tree describe the same interface. The diff vitest prints is the tree itself,
- * so a failure names the element that drifted.
+ * The claim the whole suite is built on: the Foldkit tree still describes the
+ * interface React rendered. The diff vitest prints is the tree itself, so a
+ * failure names the element that drifted.
+ *
+ * `RECORD_PARITY=1` rewrites the signature from what Foldkit renders now
+ * instead of asserting against it. React is gone, so this is the only way to
+ * move a baseline — which makes it a deliberate act: it blesses whatever is on
+ * screen, and the git diff of `signatures/` is the review. Use it when the
+ * interface changed on purpose, never to make a red test go green.
  */
-/** The claim the whole suite is built on: the Foldkit tree still describes the
- *  interface React rendered. The diff vitest prints is the tree itself, so a
- *  failure names the element that drifted. */
 export const expectRecordedParity = (
   name: string,
   foldkit: Element,
   options: SignatureOptions = {},
 ): void => {
-  expect(signature(foldkit, options)).toBe(recordedSignature(name));
+  const current = signature(foldkit, options);
+  if (process.env.RECORD_PARITY === "1") {
+    writeFileSync(pathFor(name), current, "utf8");
+    return;
+  }
+  expect(current).toBe(recordedSignature(name));
 };
