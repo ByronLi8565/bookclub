@@ -2,6 +2,7 @@ import { Agent } from "agents";
 import { monotonicFactory } from "ulidx";
 import { constantTimeEqual, sha256Hex } from "../../shared/crypto.ts";
 import type { StoredReadingPosition } from "../../shared/types/readingPositions.ts";
+import type { BookmarkColor, StoredBookmark } from "../../shared/types/bookmarks.ts";
 import type { PasskeyInfo } from "../../shared/types/passkeys.ts";
 import { mergeUserPrefs, type UserPrefs } from "../../shared/types/userPrefs.ts";
 import type { Env } from "../env.ts";
@@ -26,6 +27,10 @@ function positionKey(groupId: string, sourceId: string): string {
   return `${groupId}:${sourceId}`;
 }
 
+function bookmarkKey(groupId: string, sourceId: string, color: BookmarkColor): string {
+  return `${groupId}:${sourceId}:${color}`;
+}
+
 interface PendingCode {
   hash: string;
   expiresAt: number;
@@ -48,6 +53,7 @@ export interface AuthState {
   rate: RateWindow | null;
   prefs?: UserPrefs;
   readingPositions?: Record<string, StoredReadingPosition>;
+  bookmarks?: Record<string, StoredBookmark>;
   password?: PasswordHash | null;
   credentials?: StoredCredential[];
   regChallenge?: RegChallenge | null;
@@ -323,6 +329,22 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return position;
   }
 
+  getBookmarks(groupId: string, sourceId: string): StoredBookmark[] {
+    const prefix = `${groupId}:${sourceId}:`;
+    return Object.entries(this.state.bookmarks ?? {})
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, bookmark]) => bookmark);
+  }
+
+  setBookmark(bookmark: StoredBookmark): StoredBookmark[] {
+    const key = bookmarkKey(bookmark.groupId, bookmark.sourceId, bookmark.color);
+    const existing = this.state.bookmarks?.[key];
+    if (!existing || Date.parse(existing.updatedAt) <= Date.parse(bookmark.updatedAt)) {
+      this.setState({ ...this.state, bookmarks: { ...this.state.bookmarks, [key]: bookmark } });
+    }
+    return this.getBookmarks(bookmark.groupId, bookmark.sourceId);
+  }
+
   // Self-heals a missing user record from the caller's signed-session identity.
   addGroup(groupId: string, identity: { id: string; email: string; name: string }): void {
     const user = this.state.user ?? {
@@ -348,6 +370,9 @@ export class AuthAgent extends Agent<Env, AuthState> {
         Object.entries(this.state.readingPositions ?? {}).filter(
           ([key]) => !key.startsWith(prefix),
         ),
+      ),
+      bookmarks: Object.fromEntries(
+        Object.entries(this.state.bookmarks ?? {}).filter(([key]) => !key.startsWith(prefix)),
       ),
     });
   }

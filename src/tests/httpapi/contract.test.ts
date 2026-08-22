@@ -20,6 +20,8 @@ GET /me/prefs 200
 PUT /me/prefs 200
 GET /me/reading-position 200
 PUT /me/reading-position 200
+GET /me/bookmarks 200
+PUT /me/bookmarks 200
 PUT /me/avatar 201
 PUT /me/clubs/:groupRef/profile 200
 GET /users/:userId/avatar/:imageId 200
@@ -66,7 +68,7 @@ const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
 
 describe("Bookclub HttpApi contract", () => {
   it("declares every legacy method, path, and success status", () => {
-    expect(endpoints).toHaveLength(45);
+    expect(endpoints).toHaveLength(47);
     expect(
       operations
         .map(
@@ -77,7 +79,7 @@ describe("Bookclub HttpApi contract", () => {
     ).toEqual(expected.toSorted());
   });
 
-  it("generates the same 45 operations in OpenAPI", () => {
+  it("generates the same 47 operations in OpenAPI", () => {
     expect(operations.map(({ route }) => route).toSorted()).toEqual(
       expected.map((line) => line.split(" ").slice(0, 2).join(" ")).toSorted(),
     );

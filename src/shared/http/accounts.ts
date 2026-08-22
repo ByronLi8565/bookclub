@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { ClubProfile } from "../types/profiles.ts";
+import { BookmarksResponse, SetBookmarkRequest } from "../types/bookmarks.ts";
 import { ReadingPositionResponse, SetReadingPositionRequest } from "../types/readingPositions.ts";
 import { SetUserPrefsRequest, UserPrefsResponse } from "../types/userPrefs.ts";
 import { Created, StreamBytes } from "./compatibility.ts";
@@ -40,6 +41,22 @@ export const AccountsHttp = HttpApiGroup.make("accounts").add(
   HttpApiEndpoint.put("setReadingPosition", "/me/reading-position", {
     payload: SetReadingPositionRequest,
     success: ReadingPositionResponse,
+    error: [
+      BadRequestError,
+      UnauthenticatedError,
+      ForbiddenError,
+      NotFoundError,
+      InternalErrorSchema,
+    ],
+  }),
+  HttpApiEndpoint.get("bookmarks", "/me/bookmarks", {
+    query: { groupId: Schema.String, sourceId: Schema.String },
+    success: BookmarksResponse,
+    error: [UnauthenticatedError, ForbiddenError, NotFoundError, InternalErrorSchema],
+  }),
+  HttpApiEndpoint.put("setBookmark", "/me/bookmarks", {
+    payload: SetBookmarkRequest,
+    success: BookmarksResponse,
     error: [
       BadRequestError,
       UnauthenticatedError,
