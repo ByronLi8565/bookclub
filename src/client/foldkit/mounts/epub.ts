@@ -1,5 +1,5 @@
 import { Effect, Queue, Schedule, Schema, Stream } from "effect";
-import ePub, { type Book, type Contents, type Rendition } from "epubjs";
+import ePub, { EpubCFI, type Book, type Contents, type Rendition } from "epubjs";
 import type Navigation from "epubjs/types/navigation";
 import type Section from "epubjs/types/section";
 import { Mount } from "foldkit";
@@ -34,6 +34,7 @@ export type EpubPageCount = typeof EpubPageCount.Type;
 export const EpubPlace = Schema.Struct({
   spineIndex: Schema.Number,
   cfi: Schema.NullOr(Schema.String),
+  endCfi: Schema.optionalKey(Schema.String),
   page: Schema.Number,
   /** Where this place falls in the measured book. Zero pages until a
    *  pagination measurement has landed. */
@@ -42,6 +43,19 @@ export const EpubPlace = Schema.Struct({
   atEnd: Schema.Boolean,
 });
 export type EpubPlace = typeof EpubPlace.Type;
+
+const epubCfi = new EpubCFI();
+
+/** Whether a text anchor is visible in the rendition's current page or spread.
+ * CFI ordering is independent of pagination, font size, and single/double-page
+ * layout, which is why bookmarks remain stable through all three. */
+export function cfiIsVisible(anchor: string, start: string, end: string): boolean {
+  try {
+    return epubCfi.compare(start, anchor) <= 0 && epubCfi.compare(anchor, end) <= 0;
+  } catch {
+    return false;
+  }
+}
 
 export const EpubPoint = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 export type EpubPoint = typeof EpubPoint.Type;
@@ -169,13 +183,14 @@ function readPlace(rendition: Rendition, pagination: EpubPagination | null): Epu
   const location = currentLocation as
     | {
         start?: { index: number; cfi?: string; displayed?: { page: number } };
+        end?: { cfi?: string };
         atStart?: boolean;
         atEnd?: boolean;
       }
     | undefined;
   const start = location?.start;
   if (!start?.displayed) return null;
-  return {
+  const place: EpubPlace = {
     spineIndex: start.index,
     cfi: start.cfi ?? null,
     page: start.displayed.page,
@@ -183,6 +198,7 @@ function readPlace(rendition: Rendition, pagination: EpubPagination | null): Epu
     atStart: location?.atStart ?? false,
     atEnd: location?.atEnd ?? false,
   };
+  return location?.end?.cfi === undefined ? place : { ...place, endCfi: location.end.cfi };
 }
 
 function readSelection(rendition: Rendition): EpubSelectionReading | null {

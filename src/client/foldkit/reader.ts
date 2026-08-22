@@ -35,6 +35,7 @@ import {
   ClearedEpubSelection,
   ClickedEpubHighlight,
   EpubPlace,
+  cfiIsVisible,
   FailedEpubLoad,
   MovedEpub,
   OpenedEpub,
@@ -1119,15 +1120,20 @@ export const makeReaderSlice = ({
     reader.bookmarks.filter((bookmark) => bookmark.deletedAt === null);
 
   const bookmarkAtCurrentPlace = (reader: ReaderWorkspace) => {
-    if (reader.position === null) return null;
     return (
       liveBookmarks(reader).find((bookmark) => {
         const saved = bookmark.position;
         const current = reader.position;
-        if (current === null) return false;
-        if (saved.kind === "epub" && current.kind === "epub") return saved.cfi === current.cfi;
-        if (saved.kind === "pdf" && current.kind === "pdf") return saved.page === current.page;
-        return false;
+        // The rendered page arrives before the position recorder on PDFs. Use
+        // what is visibly on screen so the edit control does not briefly (or,
+        // after a cancelled recorder, permanently) describe the previous page.
+        if (saved.kind === "pdf" && reader.kind === "pdf") return saved.page === reader.page;
+        if (saved.kind !== "epub" || current?.kind !== "epub") return false;
+        if (saved.cfi === current.cfi) return true;
+        const visible = reader.epubPlace;
+        return visible?.cfi !== null && visible?.endCfi !== undefined
+          ? cfiIsVisible(saved.cfi, visible.cfi, visible.endCfi)
+          : false;
       }) ?? null
     );
   };

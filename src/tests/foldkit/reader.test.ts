@@ -200,6 +200,65 @@ describe("reader bookmarks", () => {
     expect(commandNames(removeCommands)).toEqual(["SaveReaderBookmark"]);
   });
 
+  it("recognizes an EPUB text anchor anywhere in the current page or spread", () => {
+    const anchored = {
+      ...red,
+      position: { kind: "epub" as const, cfi: "epubcfi(/6/8!/4/6)", percentage: 0.21 },
+    };
+    const bookmarked = {
+      ...placed,
+      page: 21,
+      totalPages: 100,
+      position: { kind: "epub" as const, cfi: "epubcfi(/6/8!/4/2)", percentage: 0.21 },
+      epubPlace: {
+        spineIndex: 3,
+        cfi: "epubcfi(/6/8!/4/2)",
+        endCfi: "epubcfi(/6/8!/4/8)",
+        page: 1,
+        count: { page: 21, total: 100, percentage: 0.21 },
+        atStart: false,
+        atEnd: false,
+      },
+      bookmarks: [anchored],
+    };
+
+    const [opened] = update(bookmarked, PressedBookmarkButton());
+    expect(opened.bookmarkMenuOpen).toBe(true);
+
+    const [adjacent] = update(
+      {
+        ...bookmarked,
+        epubPlace: {
+          ...bookmarked.epubPlace,
+          cfi: "epubcfi(/6/8!/4/10)",
+          endCfi: "epubcfi(/6/8!/4/14)",
+        },
+      },
+      PressedBookmarkButton(),
+    );
+    expect(adjacent.bookmarkMenuOpen).toBe(false);
+  });
+
+  it("uses the rendered PDF page while its position recorder catches up", () => {
+    const blue = {
+      groupId: "group-1",
+      sourceId: "source-1",
+      color: "blue" as const,
+      position: { kind: "pdf" as const, page: 5, scrollRatio: 0, zoom: 100, percentage: 0.4 },
+      updatedAt: "2026-08-22T12:00:00.000Z",
+      deletedAt: null,
+    };
+    const catchingUp = {
+      ...pdfReader,
+      page: 5,
+      position: { ...blue.position, page: 4 },
+      bookmarks: [blue],
+    };
+
+    const [opened] = update(catchingUp, PressedBookmarkButton());
+    expect(opened.bookmarkMenuOpen).toBe(true);
+  });
+
   it("jumps to a bookmark by color", () => {
     const bookmarked = { ...placed, bookmarks: [red], bookmarkJumpMenuOpen: true };
     const [jumped, commands] = update(bookmarked, JumpedToBookmarkColor({ color: "red" }));
