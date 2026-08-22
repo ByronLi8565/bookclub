@@ -105,7 +105,6 @@
   border: var(--line);
   background: var(--color-background);
   color: var(--color-text);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-text) 18%, transparent);
 
   & button {
     display: flex;

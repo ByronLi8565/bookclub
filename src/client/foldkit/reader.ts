@@ -200,6 +200,7 @@ export const DismissedReaderSelection = m("DismissedReaderSelection");
 export const RequestedFitToText = m("RequestedFitToText");
 export const ToggledBookMenu = m("ToggledBookMenu");
 export const ClosedBookMenu = m("ClosedBookMenu");
+export const ClosedReaderMenus = m("ClosedReaderMenus");
 export const StartedBookRename = m("StartedBookRename", { title: Schema.String });
 export const ChangedBookTitleDraft = m("ChangedBookTitleDraft", { title: Schema.String });
 export const CancelledBookRename = m("CancelledBookRename");
@@ -247,6 +248,7 @@ export const ReaderMessage = Schema.Union([
   RequestedFitToText,
   ToggledBookMenu,
   ClosedBookMenu,
+  ClosedReaderMenus,
   StartedBookRename,
   ChangedBookTitleDraft,
   CancelledBookRename,
@@ -740,21 +742,28 @@ export const makeReaderSubscriptions = <Model, Message>({
           ),
       },
     ),
-    bookMenuDismissal: entry(
+    readerMenuDismissal: entry(
       { open: Schema.Boolean },
       {
-        modelToDependencies: (model) => ({ open: modelToReader(model)?.bookMenuOpen === true }),
-        // React's dropdown closes on a press anywhere outside it, and on the
-        // window losing focus.
+        modelToDependencies: (model) => {
+          const reader = modelToReader(model);
+          return {
+            open:
+              reader?.bookMenuOpen === true ||
+              reader?.bookmarkMenuOpen === true ||
+              reader?.bookmarkJumpMenuOpen === true,
+          };
+        },
         dependenciesToStream: ({ open }) =>
           Stream.when(
             Subscription.fromEventFilterMap<PointerEvent, Message>({
               target: globalThis.document,
               type: "pointerdown",
               toMessage: (event) =>
-                event.target instanceof Element && event.target.closest(".book-menu") !== null
+                event.target instanceof Element &&
+                event.target.closest(".book-menu, .reader-bookmarks") !== null
                   ? Option.none()
-                  : Option.some(toMessage(ClosedBookMenu())),
+                  : Option.some(toMessage(ClosedReaderMenus())),
             }),
             Effect.sync(() => open),
           ),
@@ -1259,7 +1268,12 @@ export const makeReaderSlice = ({
         const current = bookmarkAtCurrentPlace(reader);
         if (current !== null) {
           return [
-            { ...reader, bookmarkMenuOpen: !reader.bookmarkMenuOpen, bookmarkJumpMenuOpen: false },
+            {
+              ...reader,
+              bookMenuOpen: false,
+              bookmarkMenuOpen: !reader.bookmarkMenuOpen,
+              bookmarkJumpMenuOpen: false,
+            },
             [],
           ];
         }
@@ -1286,6 +1300,7 @@ export const makeReaderSlice = ({
         return [
           {
             ...reader,
+            bookMenuOpen: false,
             bookmarkJumpMenuOpen: !reader.bookmarkJumpMenuOpen,
             bookmarkMenuOpen: false,
           },
@@ -1322,9 +1337,22 @@ export const makeReaderSlice = ({
               [GoToReaderAnchor({ anchor: message.anchor, kind: reader.kind })],
             ];
       case "ToggledBookMenu":
-        return [{ ...reader, bookMenuOpen: !reader.bookMenuOpen }, []];
+        return [
+          {
+            ...reader,
+            bookMenuOpen: !reader.bookMenuOpen,
+            bookmarkMenuOpen: false,
+            bookmarkJumpMenuOpen: false,
+          },
+          [],
+        ];
       case "ClosedBookMenu":
         return [{ ...reader, bookMenuOpen: false }, []];
+      case "ClosedReaderMenus":
+        return [
+          { ...reader, bookMenuOpen: false, bookmarkMenuOpen: false, bookmarkJumpMenuOpen: false },
+          [],
+        ];
       case "StartedBookRename":
         return [{ ...reader, renamingBook: true, bookTitleDraft: message.title }, []];
       case "ChangedBookTitleDraft":
@@ -1630,9 +1658,9 @@ export const makeReaderSlice = ({
       [
         bookMenu(reader, context, h),
         ...pageCount(reader, h),
-        bookmarkControls,
         h.span([h.Class("spacer")], []),
         ...readerZoom(reader, h),
+        bookmarkControls,
       ],
     );
 

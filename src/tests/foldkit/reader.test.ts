@@ -8,6 +8,7 @@ import {
   CommittedReaderSelection,
   IdentifiedReaderSession,
   ChangedBookmarkColor,
+  ClosedReaderMenus,
   JumpedToBookmarkColor,
   PressedBookmarkButton,
   RemovedBookmark,
@@ -203,6 +204,18 @@ describe("reader bookmarks", () => {
     const [jumped, commands] = update(bookmarked, JumpedToBookmarkColor({ color: "red" }));
     expect(jumped.bookmarkJumpMenuOpen).toBe(false);
     expect(commandNames(commands)).toEqual(["GoToReaderAnchor"]);
+  });
+
+  it("closes every toolbar menu on an outside press", () => {
+    const [closed] = update(
+      { ...placed, bookMenuOpen: true, bookmarkMenuOpen: true, bookmarkJumpMenuOpen: true },
+      ClosedReaderMenus(),
+    );
+    expect({
+      book: closed.bookMenuOpen,
+      edit: closed.bookmarkMenuOpen,
+      jump: closed.bookmarkJumpMenuOpen,
+    }).toEqual({ book: false, edit: false, jump: false });
   });
 });
 
