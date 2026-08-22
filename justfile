@@ -55,7 +55,7 @@ push:
 # Build and deploy to Cloudflare (predeploy backup + vite build + wrangler deploy).
 deploy:
     @echo "Deploying with bun"
-    WRANGLER_LOG=error bun run deploy
+    fnox exec -- env WRANGLER_LOG=error bun run deploy
 
 # Sync the remote dev box: fetch + rebase onto latest main (skipped if run on the box).
 sync-remote:

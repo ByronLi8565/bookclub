@@ -61,6 +61,19 @@ body {
   color: var(--color-text);
 }
 
+/* Browsers' default blue and purple are tuned for white pages. Keeping both
+   link states on the theme token makes them legible without turning history
+   into a second, clashing palette. */
+a,
+a:visited {
+  color: var(--color-link);
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.12em;
+}
+
 button {
   font: inherit;
   background: var(--color-background);
