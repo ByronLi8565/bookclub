@@ -78,7 +78,14 @@ export default defineConfig(({ command }) => ({
         })
       : cloudflare(),
     VitePWA({
-      registerType: "autoUpdate",
+      // Reader sources and render snapshots have their own IndexedDB cache. A
+      // service worker makes the application shell less reliable: Cloudflare
+      // swaps each deployment's hashed assets atomically, while an installed
+      // worker can keep an older index and delete the cache an already-open tab
+      // still needs. Keep serving a worker long enough to remove existing
+      // registrations, but never register it from a newly loaded page.
+      selfDestroying: true,
+      injectRegister: false,
       includeAssets: ["icon-192.png", "icon-512.png"],
       manifest: {
         name: "Bookclub",
@@ -93,12 +100,6 @@ export default defineConfig(({ command }) => ({
           { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
           { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
-      },
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,wasm}"],
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/(auth|groups|me|users|agents|admin)(?:\/|$)/u],
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
       devOptions: { enabled: false },
     }),

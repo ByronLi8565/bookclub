@@ -35,7 +35,7 @@ export default defineConfig({
       // agreeing, not about a rendering engine's quirks, so they run on Chromium
       // — which is also the engine that still starts in a detached session.
       name: "Desktop Chrome",
-      testMatch: ["**/foldkitApp.pw.ts"],
+      testMatch: ["**/foldkitApp.pw.ts", "**/deployment.pw.ts"],
       use: {
         browserName: "chromium",
         viewport: { width: 1280, height: 900 },

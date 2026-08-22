@@ -172,10 +172,10 @@ describe("Bookclub Worker HttpApi seam", () => {
     }
   });
 
-  it("keeps service-worker navigation fallback aligned with API prefixes", () => {
+  it("retires application-shell service workers across deployments", () => {
     const config = readFileSync(new URL("../../../vite.config.ts", import.meta.url), "utf8");
-    expect(config).toContain(
-      "navigateFallbackDenylist: [/^\\/(auth|groups|me|users|agents|admin)(?:\\/|$)/u]",
-    );
+    expect(config).toContain("selfDestroying: true");
+    expect(config).toContain("injectRegister: false");
+    expect(config).not.toContain("navigateFallback:");
   });
 });
