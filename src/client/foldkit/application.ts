@@ -1922,7 +1922,7 @@ const workspaceLayoutView = (
               ? "pager-page"
               : paneClass(
                   `split-pane split-pane--reader${
-                    activeReader.layout === "auto" ? " split-pane--reader-spread" : ""
+                    activeReader.spreadPaneExpanded ? " split-pane--reader-spread" : ""
                   }`,
                   hideReader,
                 ),

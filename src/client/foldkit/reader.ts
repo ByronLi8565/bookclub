@@ -118,6 +118,9 @@ export const ReaderWorkspace = Schema.Struct({
   atStart: Schema.Boolean,
   atEnd: Schema.Boolean,
   layout: PdfPageLayout,
+  /** Once a spread needed a wider workspace, returning to one page keeps that
+   *  room instead of making the notes jump back across the screen. */
+  spreadPaneExpanded: Schema.Boolean,
   smartArrows: SmartArrows,
   /** EPUB text size and PDF zoom are the same control to the reader, but the
    *  renderers take them differently: an EPUB restyles in place, a PDF
@@ -574,6 +577,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   atStart: true,
   atEnd: false,
   layout: "single",
+  spreadPaneExpanded: false,
   smartArrows: "instant",
   fontSizePercent: 100,
   zoomPercent: 100,
@@ -889,7 +893,10 @@ export const makeReaderSlice = ({
           ),
         ),
       dismissSelection: epubReaderMount.dismissSelection,
-      changeLayout: (reader, layout) => [{ ...reader, layout }, [SetEpubSpread({ layout })]],
+      changeLayout: (reader, layout) => [
+        { ...reader, layout, spreadPaneExpanded: reader.spreadPaneExpanded || layout === "auto" },
+        [SetEpubSpread({ layout })],
+      ],
       changeFontSize: (reader, percent) => [
         { ...reader, fontSizePercent: percent },
         [SetEpubFontSize({ percent }), MeasureEpubPagination({})],
@@ -918,7 +925,10 @@ export const makeReaderSlice = ({
       setSearchHighlight: (anchor) => pdfReaderMount.setSearchHighlight(anchor),
       syncHighlights: (highlights) => pdfReaderMount.syncHighlights(highlights),
       dismissSelection: pdfReaderMount.dismissSelection,
-      changeLayout: (reader, layout) => [{ ...reader, layout }, []],
+      changeLayout: (reader, layout) => [
+        { ...reader, layout, spreadPaneExpanded: reader.spreadPaneExpanded || layout === "auto" },
+        [],
+      ],
       changeFontSize: () => null,
       stepZoom: (reader, percent) => [
         { ...reader, zoomPercent: percent },

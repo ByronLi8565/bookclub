@@ -144,7 +144,12 @@ describe("reader annotations", () => {
   it("relayouts an EPUB in place but rebuilds a PDF through its element key", () => {
     const [epub, epubCommands] = update(epubReader, ChangedReaderLayout({ layout: "auto" }));
     expect(epub.layout).toBe("auto");
+    expect(epub.spreadPaneExpanded).toBe(true);
     expect(commandNames(epubCommands)).toEqual(["SetEpubSpread"]);
+
+    const [single] = update(epub, ChangedReaderLayout({ layout: "single" }));
+    expect(single.layout).toBe("single");
+    expect(single.spreadPaneExpanded).toBe(true);
 
     const [pdf, pdfCommands] = update(pdfReader, ChangedReaderLayout({ layout: "auto" }));
     expect(pdf.layout).toBe("auto");

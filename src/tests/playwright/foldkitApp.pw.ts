@@ -127,6 +127,15 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
     .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
   expect(initialPaneWidths[0]).toBeGreaterThanOrEqual(884);
   expect(initialPaneWidths[1]).toBeGreaterThanOrEqual(280);
+  const spreadPageCount = await page.locator(".page-count").textContent();
+  await page.keyboard.press("d");
+  await expect.poll(() => page.locator(".page-count").textContent()).not.toBe(spreadPageCount);
+  await expect(page.locator(".split-pane--reader-spread")).toBeVisible();
+  const singlePaneWidths = await page
+    .locator(".split-pane")
+    .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
+  expect(singlePaneWidths[0]).toBeGreaterThanOrEqual(884);
+  expect(singlePaneWidths[1]).toBeGreaterThanOrEqual(280);
 
   // A drag stops with both panes usable; releasing near an edge must never turn
   // resizing into an accidental pane close.
