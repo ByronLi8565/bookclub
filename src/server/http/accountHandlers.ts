@@ -15,6 +15,7 @@ import { Authentication, CurrentIdentity } from "./authentication.ts";
 import { CloudflareEnv } from "./cloudflare.ts";
 import { uploadedFile } from "./uploads.ts";
 import type { StoredReadingPosition } from "../../shared/types/readingPositions.ts";
+import type { StoredBookmark } from "../../shared/types/bookmarks.ts";
 import { MAX_DISPLAY_NAME_LENGTH } from "../../shared/types/profiles.ts";
 import { deleteImages, getImage, storeImage, validImageId } from "../services/images.ts";
 
@@ -24,6 +25,8 @@ const MigratedAccountsHttp = HttpApiGroup.make("migratedAccounts")
     AccountsHttp.endpoints.setPrefs,
     AccountsHttp.endpoints.readingPosition,
     AccountsHttp.endpoints.setReadingPosition,
+    AccountsHttp.endpoints.bookmarks,
+    AccountsHttp.endpoints.setBookmark,
     AccountsHttp.endpoints.uploadAvatar,
     AccountsHttp.endpoints.setClubProfile,
     AccountsHttp.endpoints.avatar,
@@ -101,6 +104,32 @@ export const AccountHandlers = HttpApiBuilder.group(AccountsApi, "migratedAccoun
             auth.setReadingPosition(position),
           ),
         };
+      }),
+    )
+    .handle("bookmarks", ({ query }) =>
+      Effect.gen(function* () {
+        yield* sourceKind(query.groupId, query.sourceId);
+        const env = yield* CloudflareEnv;
+        const me = yield* CurrentIdentity;
+        const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
+        return {
+          bookmarks: yield* attempt<StoredBookmark[]>(() =>
+            auth.getBookmarks(query.groupId, query.sourceId),
+          ),
+        };
+      }),
+    )
+    .handle("setBookmark", ({ payload }) =>
+      Effect.gen(function* () {
+        const { bookmark } = payload;
+        const kind = yield* sourceKind(bookmark.groupId, bookmark.sourceId);
+        if (kind !== bookmark.position.kind) {
+          return yield* new BadRequest({ error: "kind_mismatch" });
+        }
+        const env = yield* CloudflareEnv;
+        const me = yield* CurrentIdentity;
+        const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
+        return { bookmarks: yield* attempt<StoredBookmark[]>(() => auth.setBookmark(bookmark)) };
       }),
     )
     .handle("uploadAvatar", ({ payload }) =>
