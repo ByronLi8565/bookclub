@@ -426,8 +426,16 @@ export const epubJsEngine: EpubEngine = ({
     },
     async setSpread(next) {
       if (next === currentSpread) return;
-      rendition.spread(next);
       const place = readPlace(rendition, pagination);
+      // ChangedReaderLayout also changes the reader pane's minimum width. The
+      // Command can start before Foldkit's DOM patch has affected layout, so
+      // let the browser commit that geometry before epub.js measures its stage.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+      if (destroyed || !renditionState.manager) return;
+      rendition.spread(next);
+      rendition.resize(element.clientWidth, element.clientHeight);
       if (place?.cfi) await display(place.cfi);
       // The relayout rebuilds the content documents, so every annotation the
       // rendition had drawn is gone with them.

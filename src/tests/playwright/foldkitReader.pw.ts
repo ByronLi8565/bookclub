@@ -192,12 +192,23 @@ test("Foldkit EPUB: reader keys work while focus is inside the book", async ({ p
   await openBook(page, books[1].path, books[1].ready);
   const frame = page.frameLocator(".epub-container iframe").first();
   const before = await pageCount(page);
+  const isSpread = () =>
+    frame.locator("body").evaluate((body) => {
+      const rawColumnWidth = getComputedStyle(body).columnWidth;
+      const columnWidth = Number(
+        rawColumnWidth.endsWith("px") ? rawColumnWidth.slice(0, -2) : rawColumnWidth,
+      );
+      return (
+        Number.isFinite(columnWidth) && columnWidth < document.documentElement.clientWidth * 0.75
+      );
+    });
 
   await frame.locator("body").press("ArrowRight");
   await expect.poll(() => pageCount(page), { timeout: 30_000 }).not.toBe(before);
 
   await frame.locator("body").press("d");
   await expect(page.locator(".app")).toHaveAttribute("data-layout", "auto");
+  await expect.poll(isSpread).toBe(true);
 
   // A spread relayout replaces the EPUB's content document. Keyboard bridging
   // must belong to each replacement iframe, not the document epub.js happened
@@ -206,6 +217,7 @@ test("Foldkit EPUB: reader keys work while focus is inside the book", async ({ p
   await expect(page.locator(".app")).toHaveAttribute("data-layout", "single");
   await frame.locator("body").press("d");
   await expect(page.locator(".app")).toHaveAttribute("data-layout", "auto");
+  await expect.poll(isSpread).toBe(true);
 });
 
 test("Foldkit EPUB: pressing inside the book dismisses parent reader chrome", async ({ page }) => {
