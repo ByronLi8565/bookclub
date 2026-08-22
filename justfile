@@ -8,8 +8,8 @@
 
 # --- config -----------------------------------------------------------------
 
-# ssh alias / host of the remote dev box
-remote := "exe"
+# ssh host of the remote dev box
+remote := "exe.byron.land"
 # path to the repo checkout on the remote box
 remote_dir := "~/dev/bookclub"
 # hostname of the remote box (used to skip self-sync when running there)
