@@ -3,6 +3,12 @@ import { Command, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { HighlightAnchor, QuoteSelector } from "../../shared/types/notes.ts";
+import {
+  BOOKMARK_COLORS,
+  BookmarkColor,
+  StoredBookmark,
+  type BookmarkColor as BookmarkColorType,
+} from "../../shared/types/bookmarks.ts";
 import { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import {
   contentTypeFor,
@@ -19,6 +25,11 @@ import {
   noReaderPositions,
   type ReaderPositions,
 } from "./readerPositions.ts";
+import {
+  browserReaderBookmarks,
+  noReaderBookmarks,
+  type ReaderBookmarks,
+} from "./readerBookmarks.ts";
 import {
   ClearedEpubSelection,
   ClickedEpubHighlight,
@@ -82,6 +93,8 @@ export const ReaderWorkspace = Schema.Struct({
   bookMenuOpen: Schema.Boolean,
   renamingBook: Schema.Boolean,
   bookTitleDraft: Schema.String,
+  bookmarkMenuOpen: Schema.Boolean,
+  bookmarkJumpMenuOpen: Schema.Boolean,
   groupRef: Schema.String,
   sourceId: Schema.String,
   kind: SourceKind,
@@ -92,6 +105,7 @@ export const ReaderWorkspace = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   loading: Schema.Boolean,
   position: Schema.NullOr(SourceReadingPosition),
+  bookmarks: Schema.Array(StoredBookmark),
   epubPlace: Schema.NullOr(EpubPlace),
   /** The measured page count, in the units the reader shows: EPUB presses or
    *  PDF pages. Zero total means "not measured yet". */
@@ -166,6 +180,15 @@ export const RestoredReaderPosition = m("RestoredReaderPosition", {
   position: Schema.NullOr(SourceReadingPosition),
 });
 export const RequestedPositionSync = m("RequestedPositionSync");
+export const PressedBookmarkButton = m("PressedBookmarkButton");
+export const ChangedBookmarkColor = m("ChangedBookmarkColor", { color: BookmarkColor });
+export const RemovedBookmark = m("RemovedBookmark");
+export const ToggledBookmarkJumpMenu = m("ToggledBookmarkJumpMenu");
+export const JumpedToBookmarkColor = m("JumpedToBookmarkColor", { color: BookmarkColor });
+export const RestoredReaderBookmarks = m("RestoredReaderBookmarks", {
+  sourceId: Schema.String,
+  bookmarks: Schema.Array(StoredBookmark),
+});
 export const ShowedReaderSnapshot = m("ShowedReaderSnapshot", {
   sourceId: Schema.String,
   snapshot: Schema.NullOr(ReaderSnapshotImage),
@@ -212,6 +235,12 @@ export const ReaderMessage = Schema.Union([
   IdentifiedReaderSession,
   RestoredReaderPosition,
   RequestedPositionSync,
+  PressedBookmarkButton,
+  ChangedBookmarkColor,
+  RemovedBookmark,
+  ToggledBookmarkJumpMenu,
+  JumpedToBookmarkColor,
+  RestoredReaderBookmarks,
   ShowedReaderSnapshot,
   CommittedReaderSelection,
   DismissedReaderSelection,
@@ -278,6 +307,7 @@ export interface ReaderEnvironment {
   /** Where the reader's place is kept. A slice built without one opens every
    *  book at the beginning and records nothing. */
   positions?: ReaderPositions;
+  bookmarks?: ReaderBookmarks;
   /** The last rendered page for a source, used as an opening placeholder. */
   snapshotFor?: (sourceId: string) => ReaderSnapshotImage | null;
 }
@@ -285,6 +315,7 @@ export interface ReaderEnvironment {
 export const browserReaderEnvironment: ReaderEnvironment = {
   loadSource: loadBookBytes,
   positions: browserReaderPositions,
+  bookmarks: browserReaderBookmarks,
   snapshotFor: (sourceId) => {
     const snapshot = getRenderSnapshot(sourceId);
     return snapshot === null
@@ -514,6 +545,8 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   bookMenuOpen: false,
   renamingBook: false,
   bookTitleDraft: "",
+  bookmarkMenuOpen: false,
+  bookmarkJumpMenuOpen: false,
   groupRef: input.groupRef,
   sourceId: input.sourceId,
   kind: input.kind,
@@ -522,6 +555,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   title: null,
   loading: true,
   position: null,
+  bookmarks: [],
   epubPlace: null,
   page: 0,
   totalPages: 0,
@@ -788,6 +822,7 @@ export const makeReaderSubscriptions = <Model, Message>({
 export const makeReaderSlice = ({
   loadSource,
   positions = noReaderPositions,
+  bookmarks = noReaderBookmarks,
   snapshotFor = () => null,
 }: ReaderEnvironment) => {
   const epubReaderMount = makeEpubMount({ loadSource });
@@ -905,6 +940,60 @@ export const makeReaderSlice = ({
     execute: (input) => positions.sync(input).pipe(Effect.as(CompletedReaderAction())),
   });
 
+  const RestoreReaderBookmarks = Command.define("RestoreReaderBookmarks", {
+    args: { userId: Schema.String, groupId: Schema.String, sourceId: Schema.String },
+    messages: [RestoredReaderBookmarks],
+    execute: (input) =>
+      bookmarks
+        .restore(input)
+        .pipe(
+          Effect.map((stored) =>
+            RestoredReaderBookmarks({ sourceId: input.sourceId, bookmarks: stored }),
+          ),
+        ),
+  });
+
+  const SaveReaderBookmark = Command.define("SaveReaderBookmark", {
+    args: {
+      userId: Schema.String,
+      groupId: Schema.String,
+      sourceId: Schema.String,
+      position: SourceReadingPosition,
+      oldColor: Schema.NullOr(BookmarkColor),
+      newColor: Schema.NullOr(BookmarkColor),
+    },
+    messages: [RestoredReaderBookmarks],
+    execute: (input) => {
+      const remove =
+        input.oldColor === null
+          ? Effect.succeed([])
+          : bookmarks.set({ ...input, color: input.oldColor, deleted: true });
+      return remove.pipe(
+        Effect.flatMap(() =>
+          input.newColor === null
+            ? bookmarks.restore(input)
+            : bookmarks.set({ ...input, color: input.newColor, deleted: false }),
+        ),
+        Effect.map((stored) =>
+          RestoredReaderBookmarks({ sourceId: input.sourceId, bookmarks: stored }),
+        ),
+      );
+    },
+  });
+
+  const SyncReaderBookmarks = Command.define("SyncReaderBookmarks", {
+    args: { userId: Schema.String, groupId: Schema.String, sourceId: Schema.String },
+    messages: [RestoredReaderBookmarks],
+    execute: (input) =>
+      bookmarks
+        .sync(input)
+        .pipe(
+          Effect.map((stored) =>
+            RestoredReaderBookmarks({ sourceId: input.sourceId, bookmarks: stored }),
+          ),
+        ),
+  });
+
   const LoadReaderSnapshot = Command.define("LoadReaderSnapshot", {
     args: { sourceId: Schema.String },
     messages: [ShowedReaderSnapshot],
@@ -976,6 +1065,51 @@ export const makeReaderSlice = ({
         : { kind: "epub", cfi: place.cfi, percentage: place.count.percentage },
   });
 
+  /** The renderer navigates by anchor, and a stored place is one in all but
+   *  name: a CFI for an epub, a page for a PDF. */
+  const goToPlace = (reader: ReaderWorkspace, place: SourceReadingPosition | null) => {
+    if (place === null) return [];
+    const anchor: HighlightAnchor =
+      place.kind === "epub"
+        ? { kind: "epub-cfi", value: place.cfi }
+        : { kind: "pdf-text", page: place.page, rects: [] };
+    return [GoToReaderAnchor({ anchor, kind: reader.kind })];
+  };
+
+  const liveBookmarks = (reader: ReaderWorkspace) =>
+    reader.bookmarks.filter((bookmark) => bookmark.deletedAt === null);
+
+  const bookmarkAtCurrentPlace = (reader: ReaderWorkspace) => {
+    if (reader.position === null) return null;
+    return (
+      liveBookmarks(reader).find((bookmark) => {
+        const saved = bookmark.position;
+        const current = reader.position;
+        if (current === null) return false;
+        if (saved.kind === "epub" && current.kind === "epub") return saved.cfi === current.cfi;
+        if (saved.kind === "pdf" && current.kind === "pdf") return saved.page === current.page;
+        return false;
+      }) ?? null
+    );
+  };
+
+  const saveBookmark = (
+    reader: ReaderWorkspace,
+    oldColor: BookmarkColorType | null,
+    newColor: BookmarkColorType | null,
+  ) =>
+    reader.userId === null || reader.groupId === null || reader.position === null
+      ? []
+      : [
+          SaveReaderBookmark({
+            userId: reader.userId,
+            groupId: reader.groupId,
+            sourceId: reader.sourceId,
+            position: reader.position,
+            oldColor,
+            newColor,
+          }),
+        ];
   /** Recording is local and cheap, so every reported place is written; the
    *  server only hears about it on the sync tick. */
   const recordPosition = (reader: ReaderWorkspace) =>
@@ -1079,6 +1213,11 @@ export const makeReaderSlice = ({
               sourceId: reader.sourceId,
               kind: reader.kind,
             }),
+            RestoreReaderBookmarks({
+              userId: message.userId,
+              groupId: message.groupId,
+              sourceId: reader.sourceId,
+            }),
           ],
         ];
       case "RestoredReaderPosition":
@@ -1105,8 +1244,59 @@ export const makeReaderSlice = ({
                   groupId: reader.groupId,
                   sourceId: reader.sourceId,
                 }),
+                SyncReaderBookmarks({
+                  userId: reader.userId,
+                  groupId: reader.groupId,
+                  sourceId: reader.sourceId,
+                }),
               ],
             ];
+      case "RestoredReaderBookmarks":
+        return message.sourceId === reader.sourceId
+          ? [{ ...reader, bookmarks: message.bookmarks }, []]
+          : [reader, []];
+      case "PressedBookmarkButton": {
+        const current = bookmarkAtCurrentPlace(reader);
+        if (current !== null) {
+          return [
+            { ...reader, bookmarkMenuOpen: !reader.bookmarkMenuOpen, bookmarkJumpMenuOpen: false },
+            [],
+          ];
+        }
+        const used = new Set(liveBookmarks(reader).map((bookmark) => bookmark.color));
+        const color = BOOKMARK_COLORS.find((candidate) => !used.has(candidate));
+        return color === undefined ? [reader, []] : [reader, saveBookmark(reader, null, color)];
+      }
+      case "ChangedBookmarkColor": {
+        const current = bookmarkAtCurrentPlace(reader);
+        return current === null
+          ? [reader, []]
+          : [
+              { ...reader, bookmarkMenuOpen: false },
+              saveBookmark(reader, current.color, message.color),
+            ];
+      }
+      case "RemovedBookmark": {
+        const current = bookmarkAtCurrentPlace(reader);
+        return current === null
+          ? [reader, []]
+          : [{ ...reader, bookmarkMenuOpen: false }, saveBookmark(reader, current.color, null)];
+      }
+      case "ToggledBookmarkJumpMenu":
+        return [
+          {
+            ...reader,
+            bookmarkJumpMenuOpen: !reader.bookmarkJumpMenuOpen,
+            bookmarkMenuOpen: false,
+          },
+          [],
+        ];
+      case "JumpedToBookmarkColor": {
+        const bookmark = liveBookmarks(reader).find((one) => one.color === message.color);
+        return bookmark === undefined
+          ? [reader, []]
+          : [{ ...reader, bookmarkJumpMenuOpen: false }, goToPlace(reader, bookmark.position)];
+      }
       case "ShowedReaderSnapshot":
         return message.sourceId === reader.sourceId
           ? [{ ...reader, snapshot: message.snapshot }, []]
@@ -1243,6 +1433,11 @@ export const makeReaderSlice = ({
     h: HtmlBuilder<Message | ReaderMessage>,
   ): Html => {
     const searchCount = reader.searchMatches.length;
+    const currentBookmark = bookmarkAtCurrentPlace(reader);
+    const currentBookmarks = liveBookmarks(reader);
+    const usedBookmarkColors = new Set(currentBookmarks.map((bookmark) => bookmark.color));
+    const canAddBookmark =
+      reader.position !== null && currentBookmark === null && currentBookmarks.length < 5;
     const mount =
       reader.kind === "epub"
         ? epubReaderMount.Mount({
@@ -1328,11 +1523,114 @@ export const makeReaderSlice = ({
       ],
     );
 
+    const bookmarkMark = (color: BookmarkColorType | null) =>
+      h.svg(
+        [h.ViewBox("0 0 24 24"), h.AriaHidden(true)],
+        [
+          h.path([
+            h.D("M6 3h12v18l-6-4-6 4z"),
+            h.Fill(color === null ? "none" : `var(--bookmark-${color})`),
+            h.Stroke(color === null ? "currentColor" : `var(--bookmark-${color})`),
+            h.StrokeWidth("2"),
+            h.StrokeLinejoin("round"),
+          ]),
+        ],
+      );
+    const colorDot = (color: BookmarkColorType) =>
+      h.span([h.Class(`bookmark-color bookmark-color--${color}`), h.AriaHidden(true)], []);
+    const bookmarkControls = h.div(
+      [h.Class("reader-bookmarks")],
+      [
+        h.button(
+          [
+            h.Type("button"),
+            h.Class("reader-bookmark-button"),
+            h.Disabled(reader.position === null || (!canAddBookmark && currentBookmark === null)),
+            h.AriaLabel(currentBookmark === null ? "Bookmark this location" : "Edit this bookmark"),
+            h.AriaExpanded(reader.bookmarkMenuOpen),
+            h.Title(
+              currentBookmark === null
+                ? canAddBookmark
+                  ? "Bookmark this location"
+                  : "All five bookmark colors are in use"
+                : `Edit ${currentBookmark.color} bookmark`,
+            ),
+            h.OnClick(PressedBookmarkButton()),
+          ],
+          [bookmarkMark(currentBookmark?.color ?? null)],
+        ),
+        ...(reader.bookmarkMenuOpen && currentBookmark !== null
+          ? [
+              h.div(
+                [h.Class("bookmark-menu"), h.Role("menu"), h.AriaLabel("Edit bookmark")],
+                [
+                  ...BOOKMARK_COLORS.map((color) =>
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.Role("menuitemradio"),
+                        h.AriaChecked(currentBookmark.color === color),
+                        h.Disabled(
+                          usedBookmarkColors.has(color) && currentBookmark.color !== color,
+                        ),
+                        h.OnClick(ChangedBookmarkColor({ color })),
+                      ],
+                      [colorDot(color), color[0].toUpperCase() + color.slice(1)],
+                    ),
+                  ),
+                  h.button(
+                    [h.Type("button"), h.Role("menuitem"), h.OnClick(RemovedBookmark())],
+                    ["Remove bookmark"],
+                  ),
+                ],
+              ),
+            ]
+          : []),
+        h.button(
+          [
+            h.Type("button"),
+            h.Class("reader-bookmark-button"),
+            h.Disabled(currentBookmarks.length === 0),
+            h.AriaLabel("Jump to bookmark"),
+            h.AriaExpanded(reader.bookmarkJumpMenuOpen),
+            h.Title("Jump to bookmark"),
+            h.OnClick(ToggledBookmarkJumpMenu()),
+          ],
+          [bookmarkMark(null), h.span([h.Class("bookmark-jump-arrow")], ["▾"])],
+        ),
+        ...(reader.bookmarkJumpMenuOpen
+          ? [
+              h.div(
+                [h.Class("bookmark-menu bookmark-jump-menu"), h.Role("menu")],
+                currentBookmarks.map((bookmark) =>
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Role("menuitem"),
+                      h.OnClick(JumpedToBookmarkColor({ color: bookmark.color })),
+                    ],
+                    [
+                      colorDot(bookmark.color),
+                      `${bookmark.color[0].toUpperCase() + bookmark.color.slice(1)} · ${
+                        bookmark.position.kind === "pdf"
+                          ? `page ${bookmark.position.page}`
+                          : `${Math.round(bookmark.position.percentage * 100)}%`
+                      }`,
+                    ],
+                  ),
+                ),
+              ),
+            ]
+          : []),
+      ],
+    );
+
     const toolbar = h.div(
       [h.Class("reader-bar")],
       [
         bookMenu(reader, context, h),
         ...pageCount(reader, h),
+        bookmarkControls,
         h.span([h.Class("spacer")], []),
         ...readerZoom(reader, h),
       ],

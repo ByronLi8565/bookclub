@@ -7,6 +7,11 @@ import {
   ChangedReaderLayout,
   CommittedReaderSelection,
   IdentifiedReaderSession,
+  ChangedBookmarkColor,
+  JumpedToBookmarkColor,
+  PressedBookmarkButton,
+  RemovedBookmark,
+  RestoredReaderBookmarks,
   RestoredReaderPosition,
   RequestedPositionSync,
   ShowedReaderSnapshot,
@@ -154,6 +159,53 @@ describe("reader annotations", () => {
   });
 });
 
+describe("reader bookmarks", () => {
+  const placed: ReaderWorkspace = {
+    ...epubReader,
+    userId: "reader-1",
+    groupId: "group-1",
+    position: { kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.21 },
+  };
+  const red = {
+    groupId: "group-1",
+    sourceId: "source-1",
+    color: "red" as const,
+    position: placed.position!,
+    updatedAt: "2026-08-22T12:00:00.000Z",
+    deletedAt: null,
+  };
+
+  it("claims the first free color, then opens the current bookmark menu", () => {
+    const [, addCommands] = update(placed, PressedBookmarkButton());
+    expect(commandNames(addCommands)).toEqual(["SaveReaderBookmark"]);
+
+    const [restored] = update(
+      placed,
+      RestoredReaderBookmarks({ sourceId: placed.sourceId, bookmarks: [red] }),
+    );
+    const [opened, editCommands] = update(restored, PressedBookmarkButton());
+    expect(opened.bookmarkMenuOpen).toBe(true);
+    expect(editCommands).toEqual([]);
+  });
+
+  it("changes or removes the color occupying the current location", () => {
+    const bookmarked = { ...placed, bookmarks: [red], bookmarkMenuOpen: true };
+    const [changed, changeCommands] = update(bookmarked, ChangedBookmarkColor({ color: "blue" }));
+    expect(changed.bookmarkMenuOpen).toBe(false);
+    expect(commandNames(changeCommands)).toEqual(["SaveReaderBookmark"]);
+
+    const [, removeCommands] = update(bookmarked, RemovedBookmark());
+    expect(commandNames(removeCommands)).toEqual(["SaveReaderBookmark"]);
+  });
+
+  it("jumps to a bookmark by color", () => {
+    const bookmarked = { ...placed, bookmarks: [red], bookmarkJumpMenuOpen: true };
+    const [jumped, commands] = update(bookmarked, JumpedToBookmarkColor({ color: "red" }));
+    expect(jumped.bookmarkJumpMenuOpen).toBe(false);
+    expect(commandNames(commands)).toEqual(["GoToReaderAnchor"]);
+  });
+});
+
 describe("reader pagination", () => {
   it("shows the measured place once a measurement lands", () => {
     const [model] = update(
@@ -231,9 +283,12 @@ describe("reader place", () => {
       IdentifiedReaderSession({ userId: "reader-1", groupId: "group-1" }),
     );
     expect(known.userId).toBe("reader-1");
-    expect(commandNames(commands)).toEqual(["RestoreReaderPosition"]);
+    expect(commandNames(commands)).toEqual(["RestoreReaderPosition", "RestoreReaderBookmarks"]);
 
-    expect(commandNames(run(known, RequestedPositionSync())[1])).toEqual(["SyncReaderPosition"]);
+    expect(commandNames(run(known, RequestedPositionSync())[1])).toEqual([
+      "SyncReaderPosition",
+      "SyncReaderBookmarks",
+    ]);
   });
 
   it("re-seeds the Mount when a restored place arrives after the book opened", () => {
