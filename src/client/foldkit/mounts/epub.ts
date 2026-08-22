@@ -428,11 +428,16 @@ export const epubJsEngine: EpubEngine = ({
       if (next === currentSpread) return;
       const place = readPlace(rendition, pagination);
       // ChangedReaderLayout also changes the reader pane's minimum width. The
-      // Command can start before Foldkit's DOM patch has affected layout, so
-      // let the browser commit that geometry before epub.js measures its stage.
+      // Command can start before Foldkit's DOM patch, and the real workspace
+      // then animates that width. Dev has no such transition, which hid the
+      // production race: wait for both the patch and the settled pane before
+      // letting epub.js measure its stage.
       await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => resolve());
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       });
+      const pane = element.closest(".split-pane");
+      if (pane)
+        await Promise.allSettled(pane.getAnimations().map((animation) => animation.finished));
       if (destroyed || !renditionState.manager) return;
       rendition.spread(next);
       rendition.resize(element.clientWidth, element.clientHeight);

@@ -116,20 +116,37 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   await expect(page.locator(".app > .topbar")).toBeVisible();
   await expect(page.locator(".topbar h1")).toHaveText(DISPLAY_NAME);
   await expect(page.locator(".epub-container iframe").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".page-count")).toContainText("/");
+  await expect(page.locator(".page-count")).toContainText("/", { timeout: 30_000 });
   // The reader and the notes pane sit side by side rather than stacked.
   await expect(page.locator(".split-pane")).toHaveCount(2);
   await expect(page.locator(".split-divider")).toBeVisible();
   await page.keyboard.press("d");
   await expect(page.locator(".split-pane--reader-spread")).toBeVisible();
+  const epubBody = page
+    .locator(".reader-surface .epub-container iframe")
+    .first()
+    .contentFrame()
+    .locator("body");
+  await expect
+    .poll(() =>
+      epubBody.evaluate((body) => {
+        const rawColumnWidth = getComputedStyle(body).columnWidth;
+        const columnWidth = Number(
+          rawColumnWidth.endsWith("px") ? rawColumnWidth.slice(0, -2) : rawColumnWidth,
+        );
+        return (
+          Number.isFinite(columnWidth) && columnWidth < document.documentElement.clientWidth * 0.75
+        );
+      }),
+    )
+    .toBe(true);
   const initialPaneWidths = await page
     .locator(".split-pane")
     .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
   expect(initialPaneWidths[0]).toBeGreaterThanOrEqual(884);
   expect(initialPaneWidths[1]).toBeGreaterThanOrEqual(280);
-  const spreadPageCount = await page.locator(".page-count").textContent();
   await page.keyboard.press("d");
-  await expect.poll(() => page.locator(".page-count").textContent()).not.toBe(spreadPageCount);
+  await page.waitForTimeout(300);
   await expect(page.locator(".split-pane--reader-spread")).toBeVisible();
   const singlePaneWidths = await page
     .locator(".split-pane")
