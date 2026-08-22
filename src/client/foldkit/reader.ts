@@ -498,10 +498,10 @@ const FIT_TO_TEXT_PATH = "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5";
 const readerZoom = <Message>(
   reader: ReaderWorkspace,
   h: HtmlBuilder<Message | ReaderMessage>,
+  { percent, fitToText }: { percent: number; fitToText: boolean },
 ): Html[] => {
-  const percent = reader.kind === "epub" ? reader.fontSizePercent : reader.zoomPercent;
   return [
-    ...(reader.kind === "pdf"
+    ...(fitToText
       ? [
           h.button(
             [
@@ -595,6 +595,28 @@ export type ReaderUpdate = readonly [
   ReaderWorkspace,
   readonly Command.Command<ReaderMessage, never, never>[],
 ];
+
+/** The shared reader talks only to this renderer contract. EPUB and PDF keep
+ *  their imperative library handles inside their own Mounts; the backend
+ *  translates shared reader intentions into those renderer-specific actions. */
+export interface ReaderBackend<Mount> {
+  search(query: string): Effect.Effect<readonly (typeof ReaderSearchMatch.Type)[], never>;
+  turnPage(
+    direction: "next" | "previous",
+    zoomPercent: number,
+  ): Effect.Effect<void | undefined, unknown>;
+  goTo(anchor: HighlightAnchor): Effect.Effect<void | undefined, unknown>;
+  setSearchHighlight(anchor: HighlightAnchor | null): Effect.Effect<void, never>;
+  syncHighlights(highlights: readonly ReaderHighlight[]): Effect.Effect<void, never>;
+  dismissSelection: Effect.Effect<void, never>;
+  changeLayout(reader: ReaderWorkspace, layout: PdfPageLayout): ReaderUpdate;
+  changeFontSize(reader: ReaderWorkspace, percent: number): ReaderUpdate | null;
+  stepZoom(reader: ReaderWorkspace, percent: number): ReaderUpdate;
+  fitToText(reader: ReaderWorkspace): ReaderUpdate | null;
+  zoom(reader: ReaderWorkspace): { percent: number; fitToText: boolean };
+  mountKey(reader: ReaderWorkspace): string;
+  mount<Message>(reader: ReaderWorkspace, context: ReaderViewContext<Message>): Mount;
+}
 
 const PANE_SWIPE_DELTA_PX = 50;
 const CHROME_SWIPE_DELTA_PX = 80;
@@ -850,6 +872,76 @@ export const makeReaderSlice = ({
 
   const epubSpread = (layout: PdfPageLayout) => (layout === "auto" ? "auto" : "none");
 
+  type ReaderMount = ReturnType<typeof epubReaderMount.Mount> | ReturnType<typeof PdfReaderMount>;
+
+  const readerBackends = {
+    epub: {
+      search: (query) => epubReaderMount.reader.search(query),
+      turnPage: (direction) => epubReaderMount.turnPage(direction),
+      goTo: (anchor) => epubReaderMount.goTo(anchor),
+      setSearchHighlight: (anchor) => epubReaderMount.setSearchHighlight(anchor),
+      syncHighlights: (highlights) =>
+        epubReaderMount.syncHighlights(
+          highlights.flatMap((highlight) =>
+            highlight.anchor.kind === "epub-cfi"
+              ? [{ id: highlight.id, cfi: highlight.anchor.value }]
+              : [],
+          ),
+        ),
+      dismissSelection: epubReaderMount.dismissSelection,
+      changeLayout: (reader, layout) => [{ ...reader, layout }, [SetEpubSpread({ layout })]],
+      changeFontSize: (reader, percent) => [
+        { ...reader, fontSizePercent: percent },
+        [SetEpubFontSize({ percent }), MeasureEpubPagination({})],
+      ],
+      stepZoom: (reader, percent) => [
+        { ...reader, fontSizePercent: percent },
+        [SetEpubFontSize({ percent }), MeasureEpubPagination({})],
+      ],
+      fitToText: () => null,
+      zoom: (reader) => ({ percent: reader.fontSizePercent, fitToText: false }),
+      mountKey: (reader) => `epub:${reader.sourceId}`,
+      mount: (reader, context) =>
+        epubReaderMount.Mount({
+          sourceId: reader.sourceId,
+          groupRef: reader.groupRef,
+          initialCfi: reader.position?.kind === "epub" ? reader.position.cfi : null,
+          spread: epubSpread(reader.layout),
+          fontSizePercent: reader.fontSizePercent,
+          colors: context.colors,
+        }),
+    },
+    pdf: {
+      search: (query) => pdfReaderMount.search(query),
+      turnPage: (direction, zoomPercent) => pdfReaderMount.turnPage(direction, zoomPercent),
+      goTo: (anchor) => pdfReaderMount.goTo(anchor),
+      setSearchHighlight: (anchor) => pdfReaderMount.setSearchHighlight(anchor),
+      syncHighlights: (highlights) => pdfReaderMount.syncHighlights(highlights),
+      dismissSelection: pdfReaderMount.dismissSelection,
+      changeLayout: (reader, layout) => [{ ...reader, layout }, []],
+      changeFontSize: () => null,
+      stepZoom: (reader, percent) => [
+        { ...reader, zoomPercent: percent },
+        [ApplyPdfZoom({ percent })],
+      ],
+      fitToText: (reader) => [reader, [FitPdfToText({})]],
+      zoom: (reader) => ({ percent: reader.zoomPercent, fitToText: true }),
+      mountKey: (reader) => `pdf:${reader.sourceId}:${reader.layout}:${reader.smartArrows}`,
+      mount: (reader, context) =>
+        PdfReaderMount({
+          sourceId: reader.sourceId,
+          groupRef: reader.groupRef,
+          initialPage: reader.position?.kind === "pdf" ? reader.position.page : reader.page || 1,
+          zoom: reader.zoomPercent,
+          layout: reader.layout,
+          colors: { background: context.colors.background, text: context.colors.text },
+          smartArrows: reader.smartArrows,
+        }),
+    },
+  } satisfies Record<SourceKind, ReaderBackend<ReaderMount>>;
+
+  const backendFor = (kind: SourceKind): ReaderBackend<ReaderMount> => readerBackends[kind];
+
   const logCommandFailure = (error: unknown) =>
     Effect.sync(() => console.error("Reader command failed", error)).pipe(
       Effect.as(CompletedReaderAction()),
@@ -859,10 +951,12 @@ export const makeReaderSlice = ({
     args: { query: Schema.String, kind: SourceKind },
     messages: [SearchedReader, CompletedReaderAction],
     execute: ({ query, kind }) =>
-      (kind === "epub" ? epubReaderMount.reader.search(query) : pdfReaderMount.search(query)).pipe(
-        Effect.map((matches) => SearchedReader({ query, matches })),
-        Effect.catch(logCommandFailure),
-      ),
+      backendFor(kind)
+        .search(query)
+        .pipe(
+          Effect.map((matches) => SearchedReader({ query, matches })),
+          Effect.catch(logCommandFailure),
+        ),
   });
 
   const TurnReaderPage = Command.define("TurnReaderPage", {
@@ -873,61 +967,45 @@ export const makeReaderSlice = ({
     },
     messages: [CompletedReaderAction],
     execute: ({ direction, kind, zoomPercent }) =>
-      (kind === "epub"
-        ? epubReaderMount.turnPage(direction)
-        : pdfReaderMount.turnPage(direction, zoomPercent)
-      ).pipe(Effect.as(CompletedReaderAction()), Effect.catch(logCommandFailure)),
+      backendFor(kind)
+        .turnPage(direction, zoomPercent)
+        .pipe(Effect.as(CompletedReaderAction()), Effect.catch(logCommandFailure)),
   });
 
   const GoToSearchMatch = Command.define("GoToSearchMatch", {
     args: { anchor: HighlightAnchor, kind: SourceKind },
     messages: [CompletedReaderAction],
     execute: ({ anchor, kind }) =>
-      (kind === "epub" ? epubReaderMount.goTo(anchor) : pdfReaderMount.goTo(anchor)).pipe(
-        Effect.andThen(
-          kind === "epub"
-            ? epubReaderMount.setSearchHighlight(anchor)
-            : pdfReaderMount.setSearchHighlight(anchor),
+      backendFor(kind)
+        .goTo(anchor)
+        .pipe(
+          Effect.andThen(backendFor(kind).setSearchHighlight(anchor)),
+          Effect.as(CompletedReaderAction()),
+          Effect.catch(logCommandFailure),
         ),
-        Effect.as(CompletedReaderAction()),
-        Effect.catch(logCommandFailure),
-      ),
   });
 
   const GoToReaderAnchor = Command.define("GoToReaderAnchor", {
     args: { anchor: HighlightAnchor, kind: SourceKind },
     messages: [CompletedReaderAction],
     execute: ({ anchor, kind }) =>
-      (kind === "epub" ? epubReaderMount.goTo(anchor) : pdfReaderMount.goTo(anchor)).pipe(
-        Effect.as(CompletedReaderAction()),
-        Effect.catch(logCommandFailure),
-      ),
+      backendFor(kind)
+        .goTo(anchor)
+        .pipe(Effect.as(CompletedReaderAction()), Effect.catch(logCommandFailure)),
   });
 
   const ClearSearchHighlight = Command.define("ClearSearchHighlight", {
     args: { kind: SourceKind },
     messages: [CompletedReaderAction],
     execute: ({ kind }) =>
-      (kind === "epub"
-        ? epubReaderMount.setSearchHighlight(null)
-        : pdfReaderMount.setSearchHighlight(null)
-      ).pipe(Effect.as(CompletedReaderAction())),
+      backendFor(kind).setSearchHighlight(null).pipe(Effect.as(CompletedReaderAction())),
   });
 
   const PaintReaderHighlights = Command.define("PaintReaderHighlights", {
     args: { highlights: Schema.Array(ReaderHighlight), kind: SourceKind },
     messages: [CompletedReaderAction],
     execute: ({ highlights, kind }) =>
-      (kind === "epub"
-        ? epubReaderMount.syncHighlights(
-            highlights.flatMap((highlight) =>
-              highlight.anchor.kind === "epub-cfi"
-                ? [{ id: highlight.id, cfi: highlight.anchor.value }]
-                : [],
-            ),
-          )
-        : pdfReaderMount.syncHighlights(highlights)
-      ).pipe(Effect.as(CompletedReaderAction())),
+      backendFor(kind).syncHighlights(highlights).pipe(Effect.as(CompletedReaderAction())),
   });
 
   const RestoreReaderPosition = Command.define("RestoreReaderPosition", {
@@ -1056,9 +1134,7 @@ export const makeReaderSlice = ({
     args: { kind: SourceKind },
     messages: [CompletedReaderAction],
     execute: ({ kind }) =>
-      (kind === "epub" ? epubReaderMount.dismissSelection : pdfReaderMount.dismissSelection).pipe(
-        Effect.as(CompletedReaderAction()),
-      ),
+      backendFor(kind).dismissSelection.pipe(Effect.as(CompletedReaderAction())),
   });
 
   const SetEpubFontSize = Command.define("SetEpubFontSize", {
@@ -1210,31 +1286,16 @@ export const makeReaderSlice = ({
       case "ChangedReaderLayout":
         return message.layout === reader.layout
           ? [reader, []]
-          : [
-              { ...reader, layout: message.layout },
-              // A PDF re-renders through a new Mount element key; an EPUB has to
-              // be told to relayout the rendition it already owns.
-              reader.kind === "epub" ? [SetEpubSpread({ layout: message.layout })] : [],
-            ];
+          : backendFor(reader.kind).changeLayout(reader, message.layout);
       case "ChangedReaderFontSize":
-        return reader.kind === "epub"
-          ? [
-              { ...reader, fontSizePercent: message.percent },
-              [SetEpubFontSize({ percent: message.percent }), MeasureEpubPagination({})],
-            ]
-          : null;
+        return backendFor(reader.kind).changeFontSize(reader, message.percent);
       case "SteppedReaderZoom": {
         const step = message.direction === "in" ? 25 : -25;
         const next = Math.min(
           400,
-          Math.max(
-            50,
-            (reader.kind === "epub" ? reader.fontSizePercent : reader.zoomPercent) + step,
-          ),
+          Math.max(50, backendFor(reader.kind).zoom(reader).percent + step),
         );
-        return reader.kind === "epub"
-          ? updateReader(reader, ChangedReaderFontSize({ percent: next }))
-          : [{ ...reader, zoomPercent: next }, [ApplyPdfZoom({ percent: next })]];
+        return backendFor(reader.kind).stepZoom(reader, next);
       }
       case "TurnedReaderPage":
         return [
@@ -1404,7 +1465,7 @@ export const makeReaderSlice = ({
       case "CancelledBookRename":
         return [{ ...reader, renamingBook: false, bookTitleDraft: "" }, []];
       case "RequestedFitToText":
-        return reader.kind === "pdf" ? [reader, [FitPdfToText({})]] : null;
+        return backendFor(reader.kind).fitToText(reader);
       case "SetReaderZoom":
         // FitPdfToText has already applied this zoom to the live mount. This
         // message only reconciles the Model; issuing a normal zoom command
@@ -1520,25 +1581,7 @@ export const makeReaderSlice = ({
     const usedBookmarkColors = new Set(currentBookmarks.map((bookmark) => bookmark.color));
     const canAddBookmark =
       reader.position !== null && currentBookmark === null && currentBookmarks.length < 5;
-    const mount =
-      reader.kind === "epub"
-        ? epubReaderMount.Mount({
-            sourceId: reader.sourceId,
-            groupRef: reader.groupRef,
-            initialCfi: reader.position?.kind === "epub" ? reader.position.cfi : null,
-            spread: epubSpread(reader.layout),
-            fontSizePercent: reader.fontSizePercent,
-            colors: context.colors,
-          })
-        : PdfReaderMount({
-            sourceId: reader.sourceId,
-            groupRef: reader.groupRef,
-            initialPage: reader.position?.kind === "pdf" ? reader.position.page : reader.page || 1,
-            zoom: reader.zoomPercent,
-            layout: reader.layout,
-            colors: { background: context.colors.background, text: context.colors.text },
-            smartArrows: reader.smartArrows,
-          });
+    const mount = backendFor(reader.kind).mount(reader, context);
     const searchRow = h.div(
       [h.Class("reader-search")],
       [
@@ -1731,7 +1774,7 @@ export const makeReaderSlice = ({
         bookMenu(reader, context, h),
         ...pageCount(reader, h),
         h.span([h.Class("spacer")], []),
-        ...readerZoom(reader, h),
+        ...readerZoom(reader, h, backendFor(reader.kind).zoom(reader)),
         bookmarkControls,
       ],
     );
@@ -1758,11 +1801,7 @@ export const makeReaderSlice = ({
         // The Mount owns whatever the key identifies: a PDF layout or zoom
         // change rebuilds the document, an EPUB relayouts in place, and a
         // restored place re-seeds either through the generation counter.
-        h.Key(
-          reader.kind === "pdf"
-            ? `pdf:${reader.sourceId}:${reader.layout}:${reader.smartArrows}`
-            : `epub:${reader.sourceId}`,
-        ),
+        h.Key(backendFor(reader.kind).mountKey(reader)),
         h.OnMount(mount),
         h.Class("reader-surface"),
       ],
