@@ -88,6 +88,7 @@ Runtime.embed(
         [
           h.Class(model.chromeLevel >= 1 ? "app app--chrome-hidden" : "app"),
           h.DataAttribute("pane", model.pane),
+          h.DataAttribute("layout", model.layout),
         ],
         [
           // The harness opens one fixture book with no club around it, so the

@@ -55,6 +55,7 @@ import {
   makeBookclubApplication,
   update,
 } from "../../client/foldkit/application.ts";
+import { CompletedSettingsAction, LoadUserPrefs } from "../../client/foldkit/settings.ts";
 
 describe("Foldkit Bookclub boundary", () => {
   it("opens public settings without requesting private account security", () => {
@@ -68,10 +69,11 @@ describe("Foldkit Bookclub boundary", () => {
       LoadAccountSecurity.name,
     );
 
-    const [signedIn] = update(
+    const [signedIn, sessionCommands] = update(
       initial,
       LoadedSession({ user: { id: "reader-1", email: "reader@example.com", name: "Reader" } }),
     );
+    expect(sessionCommands.map((command) => command.name)).toContain(LoadUserPrefs.name);
     const [, signedInCommands] = update(signedIn, OpenedOverlay({ overlay: SettingsOverlay() }));
     expect(signedInCommands.map((command) => command.name)).toContain(LoadAccountSecurity.name);
   });
@@ -85,6 +87,7 @@ describe("Foldkit Bookclub boundary", () => {
       Story.given(initial),
       Story.message(LoadedSession({ user })),
       Story.Command.resolve(LoadGroups, LoadedGroups({ groups: [] })),
+      Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.model((model) => {
         expect(model.session._tag).toBe("AuthenticatedSession");
         expect(model.account._tag).toBe("ReadyAccount");
@@ -151,6 +154,7 @@ describe("Foldkit Bookclub boundary", () => {
         LoadedSession({ user: { id: "reader-1", email: "reader@example.com", name: "Reader" } }),
       ),
       Story.Command.resolve(LoadGroups, LoadedGroups({ groups: [] })),
+      Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.message(Navigated({ route: Home() })),
       Story.model((model) => expect(model.route).toEqual(Home())),
     );
@@ -178,6 +182,7 @@ describe("Foldkit Bookclub boundary", () => {
         LoadedSession({ user: { id: "reader-1", email: "reader@example.com", name: "Reader" } }),
       ),
       Story.Command.resolve(LoadGroups, LoadedGroups({ groups: [] })),
+      Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       // The modal says it worked before it goes away, so it is still up.
       Story.model((model) => {
         expect(model.loginStep).toBe("done");

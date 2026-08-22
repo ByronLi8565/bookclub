@@ -245,6 +245,24 @@ export const epubJsEngine: EpubEngine = ({
     flow: "paginated",
     spread,
   });
+  // Keyboard events inside the EPUB iframe do not bubble into the application
+  // document. Re-dispatch them there so the one reader keyboard contract owns
+  // arrows, layout toggles, search, and chrome regardless of where focus sits.
+  const forwardKey = (event: KeyboardEvent) => {
+    const forwarded = new KeyboardEvent("keydown", {
+      key: event.key,
+      code: event.code,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey,
+      repeat: event.repeat,
+      cancelable: true,
+      bubbles: true,
+    });
+    if (!document.dispatchEvent(forwarded)) event.preventDefault();
+  };
+  rendition.on("keydown", forwardKey);
   let destroyed = false;
   const resizeRendition = rendition.resize.bind(rendition);
   // SAFETY: epub.js's declaration omits the manager that its own resize
@@ -408,6 +426,7 @@ export const epubJsEngine: EpubEngine = ({
     },
     destroy() {
       destroyed = true;
+      rendition.off("keydown", forwardKey);
       resizeObserver?.disconnect();
       // The replacement Mount may acquire before epub.js is safe to destroy.
       // Release the old session's visible DOM immediately so two renditions

@@ -25,6 +25,7 @@ import {
   initFromUrl,
   update,
 } from "../../client/foldkit/application.ts";
+import { CompletedSettingsAction, LoadUserPrefs } from "../../client/foldkit/settings.ts";
 
 /**
  * The offline-first behaviour React had and the Foldkit client lost: a reader
@@ -173,6 +174,7 @@ describe("the club list without a connection", () => {
       // No network answer has arrived yet, and the list is already there.
       Story.model((model) => expect(model.groups).toEqual([group])),
       Story.Command.resolve(LoadGroups, FailedGroups()),
+      Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.model((model) => expect(model.groups).toEqual([group])),
     );
   });

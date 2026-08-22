@@ -1615,6 +1615,18 @@ export const makeReaderSlice = ({
           ]),
         ],
       );
+    const bookmarkList = h.svg(
+      [h.ViewBox("0 0 24 24"), h.AriaHidden(true)],
+      [
+        h.path([
+          h.D("M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"),
+          h.Fill("none"),
+          h.Stroke("currentColor"),
+          h.StrokeWidth("2"),
+          h.StrokeLinecap("round"),
+        ]),
+      ],
+    );
     const colorDot = (color: BookmarkColorType) =>
       h.span([h.Class(`bookmark-color bookmark-color--${color}`), h.AriaHidden(true)], []);
     const bookmarkControls = h.div(
@@ -1665,19 +1677,22 @@ export const makeReaderSlice = ({
               ),
             ]
           : []),
-        h.button(
-          [
-            h.Type("button"),
-            h.Class("reader-bookmark-button"),
-            h.Disabled(currentBookmarks.length === 0),
-            h.AriaLabel("Jump to bookmark"),
-            h.AriaExpanded(reader.bookmarkJumpMenuOpen),
-            h.Title("Jump to bookmark"),
-            h.OnClick(ToggledBookmarkJumpMenu()),
-          ],
-          [bookmarkMark(null), h.span([h.Class("bookmark-jump-arrow")], ["▾"])],
-        ),
-        ...(reader.bookmarkJumpMenuOpen
+        ...(currentBookmarks.length === 0
+          ? []
+          : [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("reader-bookmark-button"),
+                  h.AriaLabel("Jump to bookmark"),
+                  h.AriaExpanded(reader.bookmarkJumpMenuOpen),
+                  h.Title("Jump to bookmark"),
+                  h.OnClick(ToggledBookmarkJumpMenu()),
+                ],
+                [bookmarkList, h.span([h.Class("bookmark-jump-arrow")], ["▾"])],
+              ),
+            ]),
+        ...(reader.bookmarkJumpMenuOpen && currentBookmarks.length > 0
           ? [
               h.div(
                 [h.Class("bookmark-menu bookmark-jump-menu"), h.Role("menu")],

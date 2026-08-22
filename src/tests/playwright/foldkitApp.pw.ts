@@ -120,9 +120,16 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   // The reader and the notes pane sit side by side rather than stacked.
   await expect(page.locator(".split-pane")).toHaveCount(2);
   await expect(page.locator(".split-divider")).toBeVisible();
+  await page.keyboard.press("d");
+  await expect(page.locator(".split-pane--reader-spread")).toBeVisible();
+  const initialPaneWidths = await page
+    .locator(".split-pane")
+    .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
+  expect(initialPaneWidths[0]).toBeGreaterThanOrEqual(884);
+  expect(initialPaneWidths[1]).toBeGreaterThanOrEqual(280);
 
-  // The panes are draggable, and dragging one most of the way out expands the
-  // other: the only way to reach `split--expanded-*`.
+  // A drag stops with both panes usable; releasing near an edge must never turn
+  // resizing into an accidental pane close.
   const divider = page.locator(".split-divider");
   const box = await divider.boundingBox();
   if (box === null) throw new Error("the split divider has no box to drag");
@@ -130,7 +137,11 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   await page.mouse.down();
   await page.mouse.move(40, box.y + box.height / 2, { steps: 8 });
   await page.mouse.up();
-  await expect(page.locator(".workspace-layout.split--expanded-right")).toBeVisible();
+  await expect(page.locator(".workspace-layout")).not.toHaveClass(/split--expanded/u);
+  const paneWidths = await page
+    .locator(".split-pane")
+    .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
+  expect(Math.min(...paneWidths)).toBeGreaterThan(200);
 
   // Every overlay the workspace header opens, over the book.
   await page.getByRole("button", { name: "open info" }).click();

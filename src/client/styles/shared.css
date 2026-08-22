@@ -29,6 +29,17 @@
   flex: 1;
 }
 
+/* A two-page reader needs the same width its renderers use when deciding
+   whether a spread fits. The notes minimum is preserved whenever the desktop
+   viewport can hold both; smaller windows degrade to the available split. */
+.split-pane--reader-spread {
+  min-width: min(884px, calc(100% - 280px));
+}
+
+.split-pane--notes {
+  min-width: min(280px, 25%);
+}
+
 .split-divider {
   width: 0;
   border-left: var(--line);

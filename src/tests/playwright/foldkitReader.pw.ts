@@ -188,6 +188,18 @@ test("Foldkit reader: the chrome keys step and toggle the reader toolbar", async
   await expect(toolbar).toBeVisible();
 });
 
+test("Foldkit EPUB: reader keys work while focus is inside the book", async ({ page }) => {
+  await openBook(page, books[1].path, books[1].ready);
+  const frame = page.frameLocator(".epub-container iframe").first();
+  const before = await pageCount(page);
+
+  await frame.locator("body").press("ArrowRight");
+  await expect.poll(() => pageCount(page), { timeout: 30_000 }).not.toBe(before);
+
+  await frame.locator("body").press("d");
+  await expect(page.locator(".app")).toHaveAttribute("data-layout", "auto");
+});
+
 for (const book of books) {
   test(`Foldkit ${book.name}: the selection popup commits and dismisses`, async ({ page }) => {
     await openBook(page, book.path, book.ready);

@@ -57,6 +57,7 @@ import {
   initialSettingsModel,
   isSettingsMessage,
   ChosePdfPageLayout,
+  LoadUserPrefs,
   OpenedSettings,
   settingsPrefs,
   settingsNotice,
@@ -902,12 +903,12 @@ export const RegisterPasskey = Command.define("RegisterPasskey", {
 /**
  * Reader and notes, laid out the way the viewport asks for: side by side on a
  * wide screen, and as two pages of a swipeable track on a phone, where the
- * reader's `pane` decides which one is showing. Dragging the divider past
- * either shoulder expands the pane on the other side.
+ * reader's `pane` decides which one is showing. Desktop dragging always leaves
+ * enough of both panes to keep each usable.
  */
 const DESKTOP_READER_SHARE = 62;
 const MIN_SPLIT_SHARE = 25;
-const MAX_SPLIT_SHARE = 80;
+const MAX_SPLIT_SHARE = 75;
 
 /**
  * The first paint of whatever URL the browser opened on. Asking who is signed
@@ -1316,7 +1317,9 @@ const updateSlices = (model: Model, message: Message): Update => {
           loginPassword: "",
           loginCode: "",
         },
-        signingIn ? [LoadGroups(), CloseLoginAfterSuccess()] : [LoadGroups()],
+        signingIn
+          ? [LoadGroups(), LoadUserPrefs(), CloseLoginAfterSuccess()]
+          : [LoadGroups(), LoadUserPrefs()],
       ];
     }
     case "NoSession":
@@ -1395,20 +1398,21 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "StartedSplitDrag":
       return [{ ...model, splitDragging: true }, []];
     case "MovedSplitDivider":
-      return [{ ...model, splitShare: message.share }, []];
+      return [
+        {
+          ...model,
+          splitShare: Math.min(MAX_SPLIT_SHARE, Math.max(MIN_SPLIT_SHARE, message.share)),
+        },
+        [],
+      ];
     case "EndedSplitDrag":
-      // Dragging a pane most of the way out expands the other one outright,
-      // which is the only way to reach the expanded states.
       return [
         {
           ...model,
           splitDragging: false,
-          expandedPane:
-            model.splitShare <= MIN_SPLIT_SHARE
-              ? "right"
-              : model.splitShare >= MAX_SPLIT_SHARE
-                ? "left"
-                : null,
+          // Keyboard expansion remains available, but a pointer drag never
+          // turns a resize into the surprising disappearance of either pane.
+          expandedPane: null,
         },
         [],
       ];
@@ -1823,7 +1827,7 @@ const splitSubscriptions = Subscription.make<Model, Message>()((entry) => ({
                 const box = layout.getBoundingClientRect();
                 if (box.width === 0) return Option.none();
                 const share = ((event.clientX - box.left) / box.width) * 100;
-                return Option.some(MovedSplitDivider({ share: Math.min(100, Math.max(0, share)) }));
+                return Option.some(MovedSplitDivider({ share }));
               },
             }),
             Subscription.fromEvent<PointerEvent, Message>({
@@ -1913,7 +1917,16 @@ const workspaceLayoutView = (
       h.div(
         [
           h.Key("reader"),
-          h.Class(narrow ? "pager-page" : paneClass("split-pane", hideReader)),
+          h.Class(
+            narrow
+              ? "pager-page"
+              : paneClass(
+                  `split-pane split-pane--reader${
+                    activeReader.layout === "auto" ? " split-pane--reader-spread" : ""
+                  }`,
+                  hideReader,
+                ),
+          ),
           ...(narrow ? [] : [h.Style({ width: `${share}%` }), h.AriaHidden(hideReader)]),
         ],
         [
@@ -1949,7 +1962,11 @@ const workspaceLayoutView = (
       h.div(
         [
           h.Key("notes"),
-          h.Class(narrow ? "pager-page" : paneClass("split-pane split-pane--grow", hideNotes)),
+          h.Class(
+            narrow
+              ? "pager-page"
+              : paneClass("split-pane split-pane--notes split-pane--grow", hideNotes),
+          ),
           ...(narrow ? [] : [h.AriaHidden(hideNotes)]),
         ],
         [notes],
