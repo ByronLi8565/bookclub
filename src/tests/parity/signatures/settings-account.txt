@@ -10,16 +10,53 @@ div.modal-backdrop[role=presentation]
         section.settings-item.settings-item--stacked
           div.settings-item-text
             h2.settings-item-head
-              "Passkeys"
-            p.settings-item-desc
-              "Sign in with Face ID, Touch ID, or a security key."
-          p.settings-item-desc
-            "This browser doesn't support passkeys."
-        section.settings-item.settings-item--stacked
-          div.settings-item-text
-            h2.settings-item-head
-              "Password"
-          form.account-password-form
-            input[type=password aria-label=New password placeholder=password]
-            button.settings-action[type=submit title=Set password disabled]
-              "set password"
+              "Theme"
+          div.theme-swatch-grid[role=radiogroup aria-label=Theme]
+            button.is-active.theme-swatch[type=button role=radio title=Default]
+              span.theme-swatch-preview[aria-hidden]
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+              span.theme-swatch-label
+                "Default"
+            button.theme-swatch[type=button role=radio title=Dark]
+              span.theme-swatch-preview[aria-hidden]
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+              span.theme-swatch-label
+                "Dark"
+            button.theme-swatch[type=button role=radio title=Sepia]
+              span.theme-swatch-preview[aria-hidden]
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+              span.theme-swatch-label
+                "Sepia"
+            button.theme-swatch[type=button role=radio title=Paper]
+              span.theme-swatch-preview[aria-hidden]
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+              span.theme-swatch-label
+                "Paper"
+            button.theme-swatch[type=button role=radio title=Low contrast]
+              span.theme-swatch-preview[aria-hidden]
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+              span.theme-swatch-label
+                "Low contrast"
+            button.theme-swatch[type=button role=radio title=Custom]
+              span.theme-swatch-preview[aria-hidden]
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+                span.theme-swatch-chip
+              span.theme-swatch-label
+                "Custom"

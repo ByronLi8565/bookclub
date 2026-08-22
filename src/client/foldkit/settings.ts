@@ -21,8 +21,19 @@ import {
   UserPrefsPatch,
   mergeUserPrefs,
 } from "../../shared/types/userPrefs.ts";
+import {
+  Appearance,
+  THEME_LABELS,
+  THEME_PRESETS,
+  THEME_TOKEN_KEYS,
+  ThemeId,
+  parseThemeConfig,
+  resolveThemeTokens,
+  serializeThemeConfig,
+} from "../../shared/types/theme.ts";
 import { previewGroupBackup, saveGroupBackup } from "../logic/groups/backupAccess.ts";
 import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
+import { applyTheme } from "../logic/theme.ts";
 import { isNative } from "../logic/net/api.ts";
 import { readVersionedLocal, writeLocal } from "../logic/storage.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
@@ -45,7 +56,13 @@ export const BACKUP_INPUT_ID = "settings-backup-input";
  */
 const armedBackupFiles = new Map<"download" | "restore", File>();
 
-export const SettingsCategory = Schema.Literals(["account", "user", "general", "pdf"]);
+export const SettingsCategory = Schema.Literals([
+  "account",
+  "user",
+  "general",
+  "pdf",
+  "appearance",
+]);
 export type SettingsCategory = typeof SettingsCategory.Type;
 
 export const SettingsNotice = Schema.Struct({
@@ -72,6 +89,11 @@ export const SettingsModel = Schema.Struct({
    */
   category: Schema.NullOr(SettingsCategory),
   prefs: UserPrefs,
+  /** The custom-theme textarea's own text, edited independently of `prefs`
+   *  until it's submitted — typing shouldn't save on every keystroke, and an
+   *  in-progress line with a typo shouldn't be overwritten by a resync. */
+  customThemeDraft: Schema.String,
+  customThemeErrors: Schema.Array(Schema.String),
   /** Which settings dropdown is showing its menu, by the id the view gives it. */
   openDropdown: Schema.NullOr(Schema.String),
   /** Null while the nickname field is untouched, so it follows the club profile
@@ -108,18 +130,23 @@ const rememberUserPrefs = (prefs: UserPrefs): Effect.Effect<void> =>
     writeLocal(PREFS_KEY, prefs);
   });
 
-export const initialSettingsModel = (): SettingsModel => ({
-  category: null,
-  prefs: cachedUserPrefs(),
-  openDropdown: null,
-  displayName: null,
-  savingName: false,
-  uploadingAvatar: false,
-  backupBusy: null,
-  armedDownload: null,
-  restorePreview: null,
-  notice: null,
-});
+export const initialSettingsModel = (): SettingsModel => {
+  const prefs = cachedUserPrefs();
+  return {
+    category: null,
+    prefs,
+    customThemeDraft: serializeThemeConfig(resolveThemeTokens(prefs.appearance)),
+    customThemeErrors: [],
+    openDropdown: null,
+    displayName: null,
+    savingName: false,
+    uploadingAvatar: false,
+    backupBusy: null,
+    armedDownload: null,
+    restorePreview: null,
+    notice: null,
+  };
+};
 
 export const OpenedSettings = m("OpenedSettings");
 export const ChoseSettingsCategory = m("ChoseSettingsCategory", { category: SettingsCategory });
@@ -131,6 +158,9 @@ export const ChoseSmartArrows = m("ChoseSmartArrows", { value: SmartArrows });
 export const ToggledShowAvatars = m("ToggledShowAvatars", { value: Schema.Boolean });
 export const ToggledHashtagsAddTags = m("ToggledHashtagsAddTags", { value: Schema.Boolean });
 export const ToggledShowHashtags = m("ToggledShowHashtags", { value: Schema.Boolean });
+export const ChoseTheme = m("ChoseTheme", { themeId: ThemeId });
+export const ChangedCustomThemeConfig = m("ChangedCustomThemeConfig", { value: Schema.String });
+export const SubmittedCustomThemeConfig = m("SubmittedCustomThemeConfig");
 export const ChangedDisplayName = m("ChangedDisplayName", { value: Schema.String });
 export const SubmittedDisplayName = m("SubmittedDisplayName", {
   groupId: Schema.String,
@@ -180,6 +210,9 @@ export const SettingsMessage = Schema.Union([
   ToggledShowAvatars,
   ToggledHashtagsAddTags,
   ToggledShowHashtags,
+  ChoseTheme,
+  ChangedCustomThemeConfig,
+  SubmittedCustomThemeConfig,
   ChangedDisplayName,
   SubmittedDisplayName,
   SavedClubProfile,
@@ -214,6 +247,18 @@ export const LoadUserPrefs = Command.define("LoadUserPrefs", {
     // React keeps whatever it already had when the round trip fails, silently.
     Effect.catch(() => Effect.succeed(CompletedSettingsAction())),
   ),
+});
+
+/** Paints the theme immediately, ahead of whatever `SaveUserPrefs` round trip
+ *  is also in flight — a reader picking a preset should see it right away. */
+export const ApplyTheme = Command.define("ApplyTheme", {
+  args: { appearance: Appearance },
+  messages: [CompletedSettingsAction],
+  execute: ({ appearance }) =>
+    Effect.sync(() => {
+      applyTheme(appearance);
+      return CompletedSettingsAction();
+    }),
 });
 
 /** A run of toggles is one intent, so an older sync is interrupted rather than
@@ -406,6 +451,7 @@ export const RestoreGroupBackup = Command.define("RestoreGroupBackup", {
 export type SettingsCommand =
   | ReturnType<typeof LoadUserPrefs>
   | ReturnType<typeof SaveUserPrefs>
+  | ReturnType<typeof ApplyTheme>
   | ReturnType<typeof SaveClubProfile>
   | ReturnType<typeof UploadAvatarImage>
   | ReturnType<typeof OpenSettingsFilePicker>
@@ -426,6 +472,14 @@ const savedNotesPref = (model: SettingsModel, notes: UserPrefs["notes"]): Fold =
   return [{ ...model, prefs }, [SaveUserPrefs({ prefs })]];
 };
 
+const savedAppearance = (model: SettingsModel, appearance: UserPrefs["appearance"]): Fold => {
+  const prefs = { ...model.prefs, appearance };
+  return [
+    { ...model, prefs, customThemeDraft: serializeThemeConfig(resolveThemeTokens(appearance)) },
+    [ApplyTheme({ appearance }), SaveUserPrefs({ prefs })],
+  ];
+};
+
 const notified = (
   model: SettingsModel,
   notice: { readonly title: string; readonly body: string; readonly tone?: "info" | "error" },
@@ -441,7 +495,11 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
   switch (message._tag) {
     case "OpenedSettings":
       return [
-        { ...initialSettingsModel(), prefs: model.prefs },
+        {
+          ...initialSettingsModel(),
+          prefs: model.prefs,
+          customThemeDraft: serializeThemeConfig(resolveThemeTokens(model.prefs.appearance)),
+        },
         // React's prefs store hydrates from the server whenever it is read.
         [LoadUserPrefs()],
       ];
@@ -456,7 +514,16 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
         [],
       ];
     case "LoadedUserPrefs":
-      return [{ ...model, prefs: message.prefs }, []];
+      return [
+        {
+          ...model,
+          prefs: message.prefs,
+          customThemeDraft: serializeThemeConfig(resolveThemeTokens(message.prefs.appearance)),
+        },
+        // The server's copy may differ from what booted from cache (a theme
+        // picked on another device), so the paint has to catch up too.
+        [ApplyTheme({ appearance: message.prefs.appearance })],
+      ];
     case "ChoseOpeningPosition":
       return savedReaderPref(model, {
         ...model.prefs.reader,
@@ -472,6 +539,27 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
       return savedNotesPref(model, { ...model.prefs.notes, hashtagsAddTags: message.value });
     case "ToggledShowHashtags":
       return savedNotesPref(model, { ...model.prefs.notes, showHashtags: message.value });
+    case "ChoseTheme": {
+      if (message.themeId !== "custom") return savedAppearance(model, { themeId: message.themeId });
+      // Customizing starts from whatever's already active, not a blank slate.
+      const customColors =
+        model.prefs.appearance.customColors ?? resolveThemeTokens(model.prefs.appearance);
+      return savedAppearance(model, { themeId: "custom", customColors });
+    }
+    case "ChangedCustomThemeConfig":
+      return [{ ...model, customThemeDraft: message.value }, []];
+    case "SubmittedCustomThemeConfig": {
+      const { tokens, errors } = parseThemeConfig(
+        model.customThemeDraft,
+        resolveThemeTokens(model.prefs.appearance),
+      );
+      const appearance = { themeId: "custom" as const, customColors: tokens };
+      const prefs = { ...model.prefs, appearance };
+      return [
+        { ...model, prefs, customThemeErrors: errors },
+        [ApplyTheme({ appearance }), SaveUserPrefs({ prefs })],
+      ];
+    }
     case "ChangedDisplayName":
       return [{ ...model, displayName: message.value }, []];
     case "SubmittedDisplayName": {
@@ -619,14 +707,18 @@ const categoriesFor = (
   book: SettingsBook | null,
   signedIn: boolean,
 ): readonly { id: SettingsCategory; label: string }[] => {
+  // Appearance is neither club- nor account-specific, so it belongs wherever
+  // the reader opened settings from.
+  const appearance = { id: "appearance" as const, label: "Appearance" };
   if (book !== null) {
     return [
       { id: "user", label: "User" },
       { id: "general", label: "General" },
       { id: "pdf", label: "PDF" },
+      appearance,
     ];
   }
-  return signedIn ? [{ id: "account", label: "Account" }] : [];
+  return signedIn ? [{ id: "account", label: "Account" }, appearance] : [appearance];
 };
 
 export const settingsView = <Message>(
@@ -885,10 +977,115 @@ export const settingsView = <Message>(
     ),
   ];
 
+  const appearanceSection = (): readonly Html[] => {
+    const activeThemeId = model.prefs.appearance.themeId;
+    const swatchTokens = (themeId: ThemeId) =>
+      themeId === "custom"
+        ? (model.prefs.appearance.customColors ?? resolveThemeTokens(model.prefs.appearance))
+        : THEME_PRESETS[themeId];
+    const themeIds: readonly ThemeId[] = [
+      "default",
+      "dark",
+      "sepia",
+      "paper",
+      "low-contrast",
+      "custom",
+    ];
+    return [
+      h.section(
+        [h.Class("settings-item settings-item--stacked")],
+        [
+          h.div(
+            [h.Class("settings-item-text")],
+            [h.h2([h.Class("settings-item-head")], ["Theme"])],
+          ),
+          h.div(
+            [h.Class("theme-swatch-grid"), h.Role("radiogroup"), h.AriaLabel("Theme")],
+            themeIds.map((themeId) => {
+              const tokens = swatchTokens(themeId);
+              const active = themeId === activeThemeId;
+              return h.button(
+                [
+                  h.Key(themeId),
+                  h.Type("button"),
+                  h.Class(active ? "theme-swatch is-active" : "theme-swatch"),
+                  h.Role("radio"),
+                  h.AriaChecked(active),
+                  h.Title(THEME_LABELS[themeId]),
+                  h.OnClick(ChoseTheme({ themeId })),
+                ],
+                [
+                  h.span(
+                    [h.Class("theme-swatch-preview"), h.AriaHidden(true)],
+                    [
+                      h.span([
+                        h.Class("theme-swatch-chip"),
+                        h.Style({ background: tokens.background }),
+                      ]),
+                      h.span([h.Class("theme-swatch-chip"), h.Style({ background: tokens.text })]),
+                      h.span([h.Class("theme-swatch-chip"), h.Style({ background: tokens.link })]),
+                      h.span([
+                        h.Class("theme-swatch-chip"),
+                        h.Style({ background: tokens.highlight }),
+                      ]),
+                    ],
+                  ),
+                  h.span([h.Class("theme-swatch-label")], [THEME_LABELS[themeId]]),
+                ],
+              );
+            }),
+          ),
+        ],
+      ),
+      ...(activeThemeId === "custom"
+        ? [
+            h.section(
+              [h.Class("settings-item settings-item--stacked")],
+              [
+                h.div(
+                  [h.Class("settings-item-text")],
+                  [
+                    h.h2([h.Class("settings-item-head")], ["Custom colors"]),
+                    h.p(
+                      [h.Class("settings-item-desc")],
+                      ['One color per line, as "name: #hexvalue".'],
+                    ),
+                  ],
+                ),
+                h.textarea(
+                  [
+                    h.Class("theme-config-input"),
+                    h.Rows(THEME_TOKEN_KEYS.length),
+                    h.Spellcheck(false),
+                    h.AriaLabel("Custom theme configuration"),
+                    h.Value(model.customThemeDraft),
+                    h.OnInput((value) => ChangedCustomThemeConfig({ value })),
+                    h.OnBlur(SubmittedCustomThemeConfig()),
+                  ],
+                  [],
+                ),
+                ...(model.customThemeErrors.length === 0
+                  ? []
+                  : [
+                      h.ul(
+                        [h.Class("theme-config-errors"), h.Role("alert")],
+                        model.customThemeErrors.map((error, index) =>
+                          h.li([h.Key(String(index))], [error]),
+                        ),
+                      ),
+                    ]),
+              ],
+            ),
+          ]
+        : []),
+    ];
+  };
+
   const body = (): readonly Html[] => {
     if (category === "account") return accountSection ?? [];
     if (category === "user") return book === null ? [] : userSection(book);
     if (category === "general") return book === null ? [] : generalSection();
+    if (category === "appearance") return appearanceSection();
     return pdfSection();
   };
 

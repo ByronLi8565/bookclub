@@ -7,6 +7,7 @@ import { Story } from "foldkit/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_USER_PREFS } from "../../shared/types/userPrefs.ts";
 import {
+  ApplyTheme,
   ArmedBackupDownloadMessage,
   AVATAR_INPUT_ID,
   BACKUP_INPUT_ID,
@@ -132,9 +133,11 @@ describe("Foldkit settings stories", () => {
               pdfPageLayout: "auto",
             },
             notes: { showAvatars: false, hashtagsAddTags: true, showHashtags: false },
+            appearance: { themeId: "default" },
           },
         }),
       ),
+      Story.Command.resolve(ApplyTheme, CompletedSettingsAction()),
       Story.model((model) => {
         expect(settingsPrefs(model).reader.smartArrows).toBe("off");
         expect(Schema.decodeUnknownSync(SettingsModel)(JSON.parse(JSON.stringify(model)))).toEqual(
@@ -330,15 +333,27 @@ describe("the Foldkit settings modal", () => {
     expect(tree.querySelector(".modal-inner > .modal-head strong")?.textContent).toBe("settings");
     expect(tree.querySelector(".modal-inner > .modal-body.settings-body")).not.toBeNull();
     const tabs = tree.querySelectorAll(".pager-tabs.settings-tabs button");
-    expect([...tabs].map((tab) => tab.textContent)).toEqual(["User", "General", "PDF"]);
+    expect([...tabs].map((tab) => tab.textContent)).toEqual([
+      "User",
+      "General",
+      "PDF",
+      "Appearance",
+    ]);
     expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
     expect(tabs[1]?.getAttribute("title")).toBe("General settings");
   });
 
-  it("titles the account modal differently and shows no tab row for one page", async () => {
+  it("titles the account modal differently and always offers Appearance alongside it", async () => {
     const tree = await renderSettings(initialSettingsModel(), { book: null });
 
     expect(tree.querySelector(".modal-head strong")?.textContent).toBe("account settings");
+    const tabs = tree.querySelectorAll(".pager-tabs.settings-tabs button");
+    expect([...tabs].map((tab) => tab.textContent)).toEqual(["Account", "Appearance"]);
+  });
+
+  it("shows no tab row for a signed-out reader with no book, past Appearance", async () => {
+    const tree = await renderSettings(initialSettingsModel(), { book: null, signedIn: false });
+
     expect(tree.querySelector(".pager-tabs")).toBeNull();
   });
 
@@ -440,10 +455,11 @@ describe("the Foldkit settings modal", () => {
     expect(tree.querySelector(".settings-body")?.children).toHaveLength(0);
   });
 
-  it("renders nothing at all for a signed-out reader with no book", async () => {
+  it("still offers Appearance, with no tab row, for a signed-out reader with no book", async () => {
     const tree = await renderSettings(initialSettingsModel(), { book: null, signedIn: false });
 
-    expect(tree.querySelector(".settings-body")?.children).toHaveLength(0);
+    expect(tree.querySelector(".settings-body")?.children.length).toBeGreaterThan(0);
+    expect(tree.querySelector(".theme-swatch-grid")).not.toBeNull();
     expect(tree.querySelector(".pager-tabs")).toBeNull();
   });
 

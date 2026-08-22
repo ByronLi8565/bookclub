@@ -42,8 +42,8 @@
     align-self: stretch;
     min-width: 34px;
     padding: 0 6px;
-    background: var(--white);
-    color: var(--black);
+    background: var(--color-background);
+    color: var(--color-text);
     font-weight: 700;
     border-right: var(--line);
   }
@@ -148,7 +148,7 @@
 .note-filter-chip {
   display: inline-flex;
   border: var(--line-thin);
-  background: var(--white);
+  background: var(--color-background);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -189,16 +189,16 @@
   padding: 0;
   border: var(--line-thin) !important;
   border-left: 0 !important;
-  background: var(--white) !important;
-  color: var(--black) !important;
+  background: var(--color-background) !important;
+  color: var(--color-text) !important;
   font-size: 12px;
   line-height: 1;
 }
 
 .note-tag .note-tag-remove:hover,
 .note-tag .note-tag-remove:focus-visible {
-  background: var(--black) !important;
-  color: var(--white) !important;
+  background: var(--color-text) !important;
+  color: var(--color-background) !important;
 }
 
 .note-filter-entry {
@@ -224,7 +224,7 @@
   overflow-y: auto;
   flex-direction: column;
   border: var(--line);
-  background: var(--white);
+  background: var(--color-background);
   box-shadow: var(--shadow-popover);
 }
 
@@ -305,8 +305,8 @@
 }
 
 .note-scope button.active {
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
 }
 
 .note-filter-chip.excluded {
@@ -381,8 +381,8 @@
   width: 40px;
   height: 40px;
   border: var(--line);
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   font-weight: 700;
   font-size: 15px;
   overflow: hidden;
@@ -411,7 +411,7 @@
   min-width: 168px;
   padding: 12px;
   border: var(--line);
-  background: var(--white);
+  background: var(--color-background);
   box-shadow: var(--shadow-popover);
   text-align: center;
 
@@ -454,7 +454,7 @@
     width: 100%;
     max-height: 320px;
     object-fit: contain;
-    background: color-mix(in srgb, var(--white) 90%, var(--black));
+    background: color-mix(in srgb, var(--color-background) 90%, var(--color-text));
   }
 
   & .note-editor-image-missing {
@@ -494,8 +494,8 @@
   height: 26px;
   padding: 0;
   border: var(--line-thin);
-  background: var(--white);
-  color: var(--black);
+  background: var(--color-background);
+  color: var(--color-text);
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
@@ -532,8 +532,8 @@
   bottom: 3px;
   width: 9px;
   height: 9px;
-  border-right: 3px solid var(--black);
-  border-bottom: 3px solid var(--black);
+  border-right: 3px solid var(--color-text);
+  border-bottom: 3px solid var(--color-text);
 }
 
 .note-editor-image:hover .note-editor-image-resize,
@@ -546,8 +546,8 @@
   right: 32px;
   bottom: 6px;
   padding: 2px 5px;
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   font-size: 0.7rem;
   line-height: 1;
   pointer-events: none;
@@ -580,7 +580,7 @@
   & blockquote {
     margin: 0 0 8px;
     padding-left: 10px;
-    border-left: 3px solid var(--black);
+    border-left: 3px solid var(--color-border);
     opacity: 0.8;
   }
 
@@ -596,15 +596,15 @@
     display: block;
     max-width: 100%;
     height: auto;
-    background: var(--white);
+    background: var(--color-background);
   }
 }
 
 .note-mark {
   display: inline-block;
   padding: 0 4px;
-  background: var(--highlight);
-  color: var(--black);
+  background: var(--color-highlight);
+  color: var(--color-text);
   font-weight: 700;
 }
 
@@ -617,8 +617,8 @@
   padding: 0 0.55em;
   border: var(--line);
   border-radius: 8px;
-  background: var(--white);
-  box-shadow: 2px 2px 0 var(--black);
+  background: var(--color-background);
+  box-shadow: 2px 2px 0 var(--color-text);
   font: inherit;
   font-weight: 700;
   line-height: 1;
@@ -628,7 +628,7 @@
 .note-code {
   padding: 0 4px;
   border: var(--line-thin);
-  background: var(--white);
+  background: var(--color-background);
   font-family: inherit;
   font-weight: 700;
 }
@@ -655,7 +655,7 @@
   padding: 0 4px;
   border: var(--line-thin);
   border-radius: 4px;
-  background: var(--white);
+  background: var(--color-background);
   font: inherit;
   font-weight: 700;
   line-height: 1.2;
@@ -664,8 +664,8 @@
 }
 
 .note-ref:hover {
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
 }
 
 .note-editor {
@@ -688,14 +688,14 @@
   & .bc-highlight {
     display: inline-block;
     padding: 0 4px;
-    background: var(--highlight);
-    color: var(--black);
+    background: var(--color-highlight);
+    color: var(--color-text);
     font-weight: 700;
   }
 
   & .bc-quote {
     padding-left: 10px;
-    border-left: 3px solid var(--black);
+    border-left: 3px solid var(--color-border);
     opacity: 0.8;
   }
 }
@@ -717,7 +717,7 @@
   padding: 4px 8px 6px;
   font-size: 0.75rem;
   font-style: italic;
-  color: var(--muted, #888);
+  color: var(--color-muted);
 }
 
 .note-sync {
@@ -729,10 +729,10 @@
 }
 
 .note-sync--pending {
-  color: var(--muted, #888);
+  color: var(--color-muted);
 }
 
 .note-sync--failed {
-  color: #b4541b;
+  color: var(--color-danger);
   font-weight: 600;
 }

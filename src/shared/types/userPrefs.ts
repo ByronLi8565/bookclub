@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { Appearance, DEFAULT_APPEARANCE, ThemeId, ThemeTokens } from "./theme.ts";
 
 type SchemaType<S extends Schema.Top> = S["Type"];
 
@@ -29,7 +30,11 @@ const NotesPrefs = Schema.Struct({
   showHashtags: Schema.Boolean,
 });
 
-export const UserPrefs = Schema.Struct({ reader: ReaderPrefs, notes: NotesPrefs });
+export const UserPrefs = Schema.Struct({
+  reader: ReaderPrefs,
+  notes: NotesPrefs,
+  appearance: Appearance,
+});
 
 export const UserPrefsPatch = Schema.Struct({
   reader: Schema.optionalKey(
@@ -44,6 +49,12 @@ export const UserPrefsPatch = Schema.Struct({
       showAvatars: Schema.optionalKey(Schema.Boolean),
       hashtagsAddTags: Schema.optionalKey(Schema.Boolean),
       showHashtags: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+  appearance: Schema.optionalKey(
+    Schema.Struct({
+      themeId: Schema.optionalKey(ThemeId),
+      customColors: Schema.optionalKey(ThemeTokens),
     }),
   ),
 });
@@ -64,11 +75,15 @@ export const DEFAULT_USER_PREFS: UserPrefs = {
     pdfPageLayout: "single",
   },
   notes: { showAvatars: true, hashtagsAddTags: true, showHashtags: true },
+  appearance: DEFAULT_APPEARANCE,
 };
 
 export function mergeUserPrefs(raw: UserPrefsPatch | null | undefined): UserPrefs {
   return {
     reader: { ...DEFAULT_USER_PREFS.reader, ...raw?.reader },
     notes: { ...DEFAULT_USER_PREFS.notes, ...raw?.notes },
+    appearance: { ...DEFAULT_USER_PREFS.appearance, ...raw?.appearance },
   };
 }
+
+export { THEME_LABELS, THEME_PRESETS, ThemeId, ThemeTokens, resolveThemeTokens } from "./theme.ts";

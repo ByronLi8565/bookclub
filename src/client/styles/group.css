@@ -10,7 +10,7 @@
     font-size: var(--font-xs);
     border: var(--line);
     padding: 4px 8px;
-    background: var(--white);
+    background: var(--color-background);
   }
 }
 
@@ -55,8 +55,8 @@
   height: 28px;
   flex: 0 0 auto;
   border: var(--line);
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   font-weight: 700;
   font-size: 13px;
 
@@ -74,16 +74,16 @@
   bottom: -4px;
   width: 10px;
   height: 10px;
-  border: 2px solid var(--white);
+  border: 2px solid var(--color-background);
   border-radius: 50%;
 }
 
 .presence-pip--on {
-  background: var(--green);
+  background: var(--color-success);
 }
 
 .presence-pip--off {
-  background: var(--gray);
+  background: var(--color-muted);
 }
 
 .invite-person-text {
@@ -163,7 +163,7 @@
   margin: 0;
   border: var(--line);
   padding: 12px;
-  background: var(--white);
+  background: var(--color-background);
   box-shadow: var(--shadow-md);
 
   & p {
@@ -201,8 +201,8 @@
 }
 
 .settings-backup-restore {
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
 }
 
 .group-books-list {
@@ -289,15 +289,15 @@
   & button {
     border: var(--line);
     padding: 7px 10px;
-    background: var(--white);
+    background: var(--color-background);
     font: inherit;
     font-weight: 700;
     cursor: pointer;
   }
 
   & button:last-child:not(:disabled) {
-    background: var(--black);
-    color: var(--white);
+    background: var(--color-text);
+    color: var(--color-background);
   }
 
   & button:disabled {
@@ -314,7 +314,7 @@
   border: var(--line);
   padding: 0;
   place-items: center;
-  background: var(--white);
+  background: var(--color-background);
   cursor: pointer;
 
   & img {
@@ -458,7 +458,7 @@
     font: inherit;
     border: var(--line);
     padding: 2px 8px;
-    background: var(--white);
+    background: var(--color-background);
   }
 }
 

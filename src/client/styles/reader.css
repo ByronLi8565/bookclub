@@ -96,7 +96,7 @@
   font-weight: 700;
   border: var(--line-thin);
   padding: 1px 4px;
-  background: var(--white);
+  background: var(--color-background);
 }
 
 .book-menu-arrow {
@@ -124,8 +124,8 @@
   padding: 4px;
   min-width: max(220px, 100%);
   list-style: none;
-  background: var(--white);
-  color: var(--black);
+  background: var(--color-background);
+  color: var(--color-text);
   border: var(--line);
 }
 
@@ -145,8 +145,8 @@
 
   &:hover,
   &:focus {
-    background: var(--black);
-    color: var(--white);
+    background: var(--color-text);
+    color: var(--color-background);
   }
 
   &:focus {
@@ -169,8 +169,8 @@
   min-width: 0;
   font: inherit;
   padding: 4px 8px;
-  background: var(--white);
-  color: var(--black);
+  background: var(--color-background);
+  color: var(--color-text);
   border: var(--line);
 
   &:focus {
@@ -215,7 +215,7 @@
   display: grid;
   place-items: start center;
   overflow: hidden;
-  background: var(--white);
+  background: var(--color-background);
   pointer-events: none;
 
   & img {
@@ -277,22 +277,22 @@
 }
 
 .bc-highlight {
-  fill: var(--highlight);
+  fill: var(--color-highlight);
   fill-opacity: var(--highlight-opacity);
 
   mix-blend-mode: multiply;
 }
 
 .bc-search {
-  fill: var(--red);
+  fill: var(--color-danger);
   fill-opacity: 0.32;
   mix-blend-mode: multiply;
 }
 
 .bc-jump-flash {
   animation: reader-jump-flash var(--reader-jump-flash-duration) linear;
-  background: var(--highlight);
-  fill: var(--highlight);
+  background: var(--color-highlight);
+  fill: var(--color-highlight);
   mix-blend-mode: multiply;
   pointer-events: none;
 }
@@ -438,13 +438,13 @@
 
 .pdf-highlights .bc-highlight,
 .pdf-selection .bc-selection {
-  background: var(--highlight);
+  background: var(--color-highlight);
 
   mix-blend-mode: normal;
 }
 
 .pdf-underlines .bc-search {
-  background: var(--red);
+  background: var(--color-danger);
   opacity: 0.32;
   mix-blend-mode: multiply;
 }
@@ -465,7 +465,7 @@
   font-size: var(--font-xs);
   min-height: var(--control-min);
   padding: 0 16px;
-  background: var(--white);
+  background: var(--color-background);
   border: var(--line);
   touch-action: manipulation;
 }

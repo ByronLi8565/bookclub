@@ -17,7 +17,7 @@
   flex-direction: column;
   max-width: 100%;
   border: var(--line);
-  background: var(--white);
+  background: var(--color-background);
   box-shadow: var(--shadow-md);
   animation: toast-fade var(--toast-duration) linear forwards;
   pointer-events: auto;
@@ -67,16 +67,16 @@
 }
 
 .toast--error .toast-head {
-  background: var(--red);
-  color: var(--white);
+  background: var(--color-danger);
+  color: var(--color-background);
 
   & button {
-    background: var(--red);
-    color: var(--white);
+    background: var(--color-danger);
+    color: var(--color-background);
 
     &:hover {
-      background: var(--white);
-      color: var(--red);
+      background: var(--color-background);
+      color: var(--color-danger);
     }
   }
 }

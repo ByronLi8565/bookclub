@@ -9,17 +9,17 @@
   position: relative;
   width: min(900px, 92vw);
   height: min(560px, 82vh);
-  background: var(--white);
+  background: var(--color-background);
   border: var(--line);
 
   box-shadow:
-    5px 5px 0 0 var(--white),
-    5px 5px 0 3px var(--black),
-    10px 10px 0 0 var(--white),
-    10px 10px 0 3px var(--black),
-    15px 15px 0 0 var(--white),
-    15px 15px 0 3px var(--black),
-    20px 20px 0 0 var(--black);
+    5px 5px 0 0 var(--color-background),
+    5px 5px 0 3px var(--color-text),
+    10px 10px 0 0 var(--color-background),
+    10px 10px 0 3px var(--color-text),
+    15px 15px 0 0 var(--color-background),
+    15px 15px 0 3px var(--color-text),
+    20px 20px 0 0 var(--color-text);
 
   &::before {
     content: "";
@@ -38,7 +38,7 @@
     left: 90%;
     width: 36px;
     height: 70px;
-    background: var(--red);
+    background: var(--color-danger);
     border: var(--line);
     border-radius: 4px 4px 8px 8px;
     z-index: -1;
@@ -134,20 +134,20 @@
   font-weight: 700;
   line-height: 1;
   text-decoration: none;
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   border: var(--line);
 
   &:hover {
-    background: var(--white);
-    color: var(--black);
+    background: var(--color-background);
+    color: var(--color-text);
   }
 }
 
 .home-upload-link {
   align-self: flex-start;
   font-size: 15px;
-  color: var(--link);
+  color: var(--color-link);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -162,13 +162,13 @@
     border-radius: 0;
     outline: none;
     padding: 4px 10px;
-    background: var(--white);
+    background: var(--color-background);
   }
 }
 
 .home-create-confirm {
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   font-weight: 700;
   line-height: 1;
   width: 34px;
@@ -180,14 +180,14 @@
   justify-content: center;
 
   &:hover {
-    background: var(--white);
-    color: var(--black);
+    background: var(--color-background);
+    color: var(--color-text);
   }
 
   &:disabled,
   &:disabled:hover {
-    background: var(--black);
-    color: var(--white);
+    background: var(--color-text);
+    color: var(--color-background);
   }
 }
 

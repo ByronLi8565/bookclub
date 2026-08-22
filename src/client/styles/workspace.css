@@ -79,12 +79,12 @@
   margin: 0;
   padding: 0;
   border: var(--line);
-  background: var(--white);
+  background: var(--color-background);
   cursor: pointer;
 }
 
 .settings-item--checkbox .settings-checkbox:checked {
-  background: var(--black);
+  background: var(--color-text);
 }
 
 .settings-user-profile {
@@ -105,8 +105,8 @@
   flex: 0 0 72px;
   overflow: hidden;
   border: var(--line);
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   font-size: 28px;
   font-weight: 700;
 
@@ -139,8 +139,8 @@
   place-items: center;
   border: var(--line);
   border-left: 0;
-  background: var(--black);
-  color: var(--white);
+  background: var(--color-text);
+  color: var(--color-background);
   font-size: 22px;
   text-align: center;
 }
@@ -218,7 +218,7 @@
   margin: 0;
   font-size: var(--font-xs);
   font-style: italic;
-  color: var(--gray);
+  color: var(--color-muted);
 }
 
 .settings-action {
@@ -226,8 +226,8 @@
   font: inherit;
   font-size: var(--font-xs);
   text-align: left;
-  background: var(--white);
-  color: var(--black);
+  background: var(--color-background);
+  color: var(--color-text);
   border: var(--line);
   padding: 5px 8px;
   cursor: pointer;
@@ -294,7 +294,7 @@
   letter-spacing: 2px;
   border: var(--line);
   padding: 0 6px;
-  background: var(--white);
+  background: var(--color-background);
 }
 
 .presence-indicator {
@@ -304,7 +304,7 @@
   gap: 8px;
   border: var(--line);
   padding: 4px 10px;
-  background: var(--white);
+  background: var(--color-background);
   cursor: pointer;
 }
 
@@ -316,9 +316,9 @@
 .presence-dot {
   width: 12px;
   height: 12px;
-  border: 2px solid var(--black);
+  border: 2px solid var(--color-border);
   border-radius: 50%;
-  background: var(--green);
+  background: var(--color-success);
 }
 
 .topbar-home {
