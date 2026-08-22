@@ -1,4 +1,20 @@
+# Secrets for the deployed Worker, encrypted at rest with age so the values can
+# live in the repo. The private identity does not: it sits at
+# ~/.config/fnox/age.txt (mode 600) and is the only thing that can read these.
+#
+# Add a secret:   fnox set NAME            (prompts, or reads stdin)
+# Read one:       fnox get NAME
+# Push to prod:   bun run secrets:sync     (== fnox exec -- bash scripts/sync-secrets.sh)
+#
+# SESSION_HMAC_SECRET is deliberately absent. It is already set on the Worker,
+# nothing local needs it, and rotating it invalidates every session cookie —
+# which signs out every reader at once. Add it here only if it is ever rotated
+# on purpose.
+[providers.local]
+type = "age"
+recipients = ["age13lgmwnjmr3qm37ffgxd45l97rycwhdrv3zdguxqjra7tu6c2e5lq2retzv"]
+key_file = "~/.config/fnox/age.txt"
+
 [secrets]
-SESSION_HMAC_SECRET = { provider = "keychain", value = "SESSION_HMAC_SECRET" }
-EMAIL_FROM = { provider = "keychain", value = "EMAIL_FROM" }
-ADMIN_API_TOKEN = { provider = "keychain", value = "ADMIN_API_TOKEN" }
+ADMIN_API_TOKEN= { provider = "local", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBmamxDWTg3ZTNTRDIzTnpCSktxdEFjd2RBVkQ1WjVQSUYrL21tL242aEUwCnJ1NHVaSnB5RTB0TWdjTThHT3FnUlJNQlA3SEV0UG5PWXZtazFCcEh4UlkKLT4gRXlUanJuLWdyZWFzZSBnUwovQjh6WFFuRGZMRTNNeGljVTNvRDh4cjBtd0JaNkxhSDVmVC83azlFTmFnK2JtcTlHbTQ1NStKVXc5Q21OMTVuCnUzdEIvTW1KODd2aU00Z0UKLS0tIFM2aXppQ3FoUmZ2Rk9DNHY1b3V6b2dyNko3bzJKRm5ZcTJwODNZdU9SdkUK+df9XUeKA/AYTZAGeC5cGvjnqE22SN9SnruklnwjIrSwKXqO34L75FSIf1CYfBAE/pLYuqGVG9wF8DFDaVL5PrSFfbbtV7cksbFU" }
+EMAIL_FROM= { provider = "local", value = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBwamtWeXhMbXNOU0JEQis2ZE9FQjVnYUVUWkJySUM0QVBxdmxTS0NmdmxZCkdFdUlJOXVDT2x6QUk1cVN0d3kvOE9FRmtaVURxNnlNeThsK3FHSTY0ZzgKLT4gLTlBLWdyZWFzZSBRWHxiZDsgNjJPCjVOWXNxZUw0VnBDczlURWJSQUx4L2cwNm1Yc0N6OGdMSXlvVnJLcGM5NG1kYUExOUdZakhidVNVMnE4WVphS0IKNDl5T0YvdjFvZXovK0kySlY1UEJMTkJ1bjh0a2Ryd20wMEh0Nm11MERONFlSeUx2Ci0tLSBRYm1IWFZTdGU1T2lxaGloWWpFRXBtNWJXMVZyMEhVdDhBRkhIYVdFS0VJCtxLlBqqoZ/FKB0AJ/BQcqKtKFxR2koRT396whT/719fyiT2eCKgeYQ3aUJdIU777cBZLA==" }
