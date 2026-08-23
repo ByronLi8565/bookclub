@@ -1750,6 +1750,10 @@ const paneKeySubscriptions = Subscription.make<Model, Message>()((entry) => ({
           Subscription.fromEventFilterMap<KeyboardEvent, Message>({
             target: globalThis.document,
             type: "keydown",
+            // Notes editors may consume Shift+Arrow for text selection before
+            // a bubbling document listener sees it. Pane navigation is a
+            // workspace command, so claim it on the way down instead.
+            options: { capture: true },
             toMessage: (event) => {
               if (!event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
                 return Option.none();

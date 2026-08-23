@@ -172,7 +172,21 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
       page.locator(".split-pane--reader").evaluate((pane) => pane.getBoundingClientRect().width),
     )
     .toBe(0);
-  await page.keyboard.press("Shift+ArrowRight");
+  const notesFilter = page.getByRole("textbox", { name: "Filter notes" });
+  await notesFilter.evaluate((input) => {
+    input.addEventListener("keydown", (event) => event.stopPropagation());
+  });
+  await notesFilter.press("Shift+ArrowRight");
+  await expect(page.locator(".workspace-layout")).not.toHaveClass(/split--expanded/u);
+  await expect
+    .poll(() =>
+      page
+        .locator(".split-pane")
+        .evaluateAll((panes) =>
+          Math.min(...panes.map((pane) => pane.getBoundingClientRect().width)),
+        ),
+    )
+    .toBeGreaterThan(200);
 
   // A drag stops with both panes usable; releasing near an edge must never turn
   // resizing into an accidental pane close.
