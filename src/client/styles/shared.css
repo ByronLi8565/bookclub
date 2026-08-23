@@ -25,6 +25,17 @@
   pointer-events: none;
 }
 
+/* Keyboard expansion is an explicit request to remove the other pane. It must
+   outrank both the spread reader's sticky minimum and the notes pane's flex;
+   pointer dragging still uses the clamped split-share path instead. */
+.split--expanded-left .split-pane--notes,
+.split--expanded-right .split-pane--reader {
+  flex: 0 0 0;
+  width: 0 !important;
+  min-width: 0;
+  visibility: hidden;
+}
+
 .split-pane--grow {
   flex: 1;
 }

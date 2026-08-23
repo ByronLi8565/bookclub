@@ -154,6 +154,26 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   expect(singlePaneWidths[0]).toBeGreaterThanOrEqual(884);
   expect(singlePaneWidths[1]).toBeGreaterThanOrEqual(280);
 
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-left/u);
+  await expect
+    .poll(() =>
+      page.locator(".split-pane--notes").evaluate((pane) => pane.getBoundingClientRect().width),
+    )
+    .toBe(0);
+
+  // The first press crosses the normal split; the second reaches the opposite
+  // endpoint and removes the reader despite its sticky spread width.
+  await page.keyboard.press("Shift+ArrowLeft");
+  await page.keyboard.press("Shift+ArrowLeft");
+  await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-right/u);
+  await expect
+    .poll(() =>
+      page.locator(".split-pane--reader").evaluate((pane) => pane.getBoundingClientRect().width),
+    )
+    .toBe(0);
+  await page.keyboard.press("Shift+ArrowRight");
+
   // A drag stops with both panes usable; releasing near an edge must never turn
   // resizing into an accidental pane close.
   const divider = page.locator(".split-divider");
