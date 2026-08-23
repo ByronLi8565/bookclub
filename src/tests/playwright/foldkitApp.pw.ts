@@ -168,6 +168,17 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   await page.keyboard.press("Shift+ArrowLeft");
   await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-right/u);
   await expect
+    .poll(
+      () =>
+        page
+          .locator(".split-pane--reader")
+          .evaluate((pane) =>
+            pane.getAnimations().some((animation) => animation.playState === "running"),
+          ),
+      { timeout: 250 },
+    )
+    .toBe(true);
+  await expect
     .poll(() =>
       page.locator(".split-pane--reader").evaluate((pane) => pane.getBoundingClientRect().width),
     )

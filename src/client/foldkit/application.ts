@@ -1966,12 +1966,8 @@ const workspaceLayoutView = (
       h.div(
         [
           h.Key("notes"),
-          h.Class(
-            narrow
-              ? "pager-page"
-              : paneClass("split-pane split-pane--notes split-pane--grow", hideNotes),
-          ),
-          ...(narrow ? [] : [h.AriaHidden(hideNotes)]),
+          h.Class(narrow ? "pager-page" : paneClass("split-pane split-pane--notes", hideNotes)),
+          ...(narrow ? [] : [h.Style({ width: `${100 - share}%` }), h.AriaHidden(hideNotes)]),
         ],
         [notes],
       ),
