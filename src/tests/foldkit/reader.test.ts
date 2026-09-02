@@ -158,10 +158,10 @@ describe("reader annotations", () => {
 
   it("zooms a PDF through the Model the Mount key is built from", () => {
     const [zoomed] = update(pdfReader, SteppedReaderZoom({ direction: "in" }));
-    expect(zoomed.zoomPercent).toBeGreaterThan(pdfReader.zoomPercent);
+    expect(zoomed.zoomPercent).toBe(pdfReader.zoomPercent + 25);
 
     const [sized, commands] = update(epubReader, SteppedReaderZoom({ direction: "in" }));
-    expect(sized.fontSizePercent).toBeGreaterThan(epubReader.fontSizePercent);
+    expect(sized.fontSizePoints).toBe(epubReader.fontSizePoints + 2);
     expect(commandNames(commands)).toEqual(["SetEpubFontSize", "MeasureEpubPagination"]);
   });
 });

@@ -107,7 +107,7 @@ export interface EpubSession {
   onMoved(handler: () => void): () => void;
   turnPage(direction: "next" | "previous"): Promise<void>;
   goTo(cfi: string): Promise<void>;
-  setFontSize(percent: number): void;
+  setFontSize(points: number): void;
   setColors(colors: EpubColors): void;
   clearSelection(): void;
   /** Paint the given highlights and erase every other painted one. epub.js
@@ -144,7 +144,7 @@ export interface EpubColors {
 export interface EpubSessionOptions {
   element: Element;
   spread: EpubSpread;
-  fontSizePercent: number;
+  fontSizePoints: number;
   colors: EpubColors;
   onHighlightClick: (id: string) => void;
 }
@@ -250,7 +250,7 @@ function applyEpubTheme(rendition: Rendition, colors: EpubColors): void {
 export const epubJsEngine: EpubEngine = ({
   element,
   spread,
-  fontSizePercent,
+  fontSizePoints,
   colors,
   onHighlightClick,
 }) => {
@@ -319,9 +319,9 @@ export const epubJsEngine: EpubEngine = ({
   let searchCfi: string | null = null;
   let pagination: EpubPagination | null = null;
   let currentSpread: EpubSpread = spread;
-  let currentFontSize = fontSizePercent;
+  let currentFontSize = fontSizePoints;
   applyEpubTheme(rendition, colors);
-  rendition.themes.fontSize(`${fontSizePercent}%`);
+  rendition.themes.override("font-size", `${fontSizePoints}pt`, true);
 
   // SAFETY: bound because epub.js reads `this.displaying` inside `display`, and
   // its public declaration accepts the same optional string target.
@@ -382,9 +382,11 @@ export const epubJsEngine: EpubEngine = ({
       await (direction === "next" ? rendition.next() : rendition.prev());
     },
     goTo: (cfi) => display(linearSpineTarget(book, cfi) ?? firstLinearSpineTarget(book)),
-    setFontSize(percent) {
-      currentFontSize = percent;
-      rendition.themes.fontSize(`${percent}%`);
+    setFontSize(points) {
+      currentFontSize = points;
+      // Publisher styles commonly mark their body font size important. This is
+      // a reader preference, so it must outrank the book's presentation.
+      rendition.themes.override("font-size", `${points}pt`, true);
     },
     setColors(next) {
       applyEpubTheme(rendition, next);
@@ -579,7 +581,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
       groupRef: Schema.String,
       initialCfi: Schema.NullOr(Schema.String),
       spread: EpubSpread,
-      fontSizePercent: Schema.Number,
+      fontSizePoints: Schema.Number,
       colors: Schema.Struct({
         background: Schema.String,
         text: Schema.String,
@@ -593,7 +595,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     ClickedEpubHighlight,
     FailedEpubLoad,
   )(
-    ({ sourceId, groupRef, initialCfi, spread, fontSizePercent, colors }) =>
+    ({ sourceId, groupRef, initialCfi, spread, fontSizePoints, colors }) =>
       (element) =>
         Stream.callback<EpubMountMessage>((queue) =>
           Effect.gen(function* () {
@@ -607,7 +609,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
                 const created = engine({
                   element,
                   spread,
-                  fontSizePercent,
+                  fontSizePoints,
                   colors,
                   onHighlightClick: (highlightId) =>
                     emit(ClickedEpubHighlight({ sourceId, highlightId })),
@@ -683,9 +685,9 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
       anchor.kind === "epub-cfi"
         ? onLiveSession(undefined, (session) => session.goTo(anchor.value))
         : Effect.void,
-    setFontSize: (percent: number) =>
+    setFontSize: (points: number) =>
       Effect.sync(() => {
-        live?.setFontSize(percent);
+        live?.setFontSize(points);
       }),
     setColors: (colors: EpubColors) =>
       Effect.sync(() => {

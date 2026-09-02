@@ -202,7 +202,7 @@ function startReader(adapter: ReturnType<typeof makeEpubMount>, initialSourceId:
                           groupRef: "club-abc123",
                           initialCfi: null,
                           spread: "auto",
-                          fontSizePercent: 100,
+                          fontSizePoints: 16,
                           colors: { background: "#fff", text: "#000", link: "#00e" },
                         }),
                       ),
@@ -524,7 +524,7 @@ describe("EPUB Foldkit Mount", () => {
     const session = epubJsEngine({
       element,
       spread: "auto",
-      fontSizePercent: 100,
+      fontSizePoints: 16,
       colors: { background: "#fff", text: "#000", link: "#00f" },
       onHighlightClick: () => {},
     });
@@ -559,7 +559,7 @@ describe("EPUB Foldkit Mount", () => {
     const session = epubJsEngine({
       element,
       spread: "auto",
-      fontSizePercent: 100,
+      fontSizePoints: 16,
       colors: { background: "#fff", text: "#000", link: "#00f" },
       onHighlightClick: () => {},
     });

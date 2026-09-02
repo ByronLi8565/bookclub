@@ -35,7 +35,7 @@ export async function measureEpubPagination(
   book: Book,
   width: number,
   height: number,
-  fontSizePct: number,
+  fontSizePoints: number,
   spread: string,
   isCancelled: () => boolean,
 ): Promise<EpubPagination | null> {
@@ -47,7 +47,7 @@ export async function measureEpubPagination(
   document.body.appendChild(host);
 
   const probe = book.renderTo(host, { width, height, spread, flow: "paginated" });
-  probe.themes.fontSize(`${fontSizePct}%`);
+  probe.themes.override("font-size", `${fontSizePoints}pt`, true);
   try {
     const bookSpine: unknown = book.spine;
     // SAFETY: epub.js populates spineItems after the book has opened, but its published type omits it.

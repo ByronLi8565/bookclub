@@ -122,10 +122,9 @@ export const ReaderWorkspace = Schema.Struct({
    *  room instead of making the notes jump back across the screen. */
   spreadPaneExpanded: Schema.Boolean,
   smartArrows: SmartArrows,
-  /** EPUB text size and PDF zoom are the same control to the reader, but the
-   *  renderers take them differently: an EPUB restyles in place, a PDF
-   *  re-rasterizes through the live Mount. */
-  fontSizePercent: Schema.Number,
+  /** EPUB text size restyles the live rendition in points; PDF zoom remains a
+   *  percentage that re-rasterizes through its Mount. */
+  fontSizePoints: Schema.Number,
   zoomPercent: Schema.Number,
   searchOpen: Schema.Boolean,
   searchQuery: Schema.String,
@@ -163,7 +162,7 @@ export const SearchedReader = m("SearchedReader", {
 export const SelectedSearchMatch = m("SelectedSearchMatch", { index: Schema.Number });
 export const ChangedReaderLayout = m("ChangedReaderLayout", { layout: PdfPageLayout });
 export const ToggledReaderLayout = m("ToggledReaderLayout");
-export const ChangedReaderFontSize = m("ChangedReaderFontSize", { percent: Schema.Number });
+export const ChangedReaderFontSize = m("ChangedReaderFontSize", { points: Schema.Number });
 export const SteppedReaderZoom = m("SteppedReaderZoom", {
   direction: Schema.Literals(["in", "out"]),
 });
@@ -501,7 +500,7 @@ const FIT_TO_TEXT_PATH = "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5";
 const readerZoom = <Message>(
   reader: ReaderWorkspace,
   h: HtmlBuilder<Message | ReaderMessage>,
-  { percent, fitToText }: { percent: number; fitToText: boolean },
+  { value, unit, fitToText }: { value: number; unit: "%" | " pt"; fitToText: boolean },
 ): Html[] => {
   return [
     ...(fitToText
@@ -537,17 +536,17 @@ const readerZoom = <Message>(
       [
         h.Type("button"),
         h.Disabled(reader.loading),
-        h.Title("Decrease text size"),
+        h.Title(unit === " pt" ? "Decrease text size" : "Zoom out"),
         h.OnClick(SteppedReaderZoom({ direction: "out" })),
       ],
       ["\u2212"],
     ),
-    h.span([h.Class("font-size")], [`${percent}%`]),
+    h.span([h.Class("font-size")], [`${value}${unit}`]),
     h.button(
       [
         h.Type("button"),
         h.Disabled(reader.loading),
-        h.Title("Increase text size"),
+        h.Title(unit === " pt" ? "Increase text size" : "Zoom in"),
         h.OnClick(SteppedReaderZoom({ direction: "in" })),
       ],
       ["+"],
@@ -579,7 +578,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   layout: "single",
   spreadPaneExpanded: false,
   smartArrows: "instant",
-  fontSizePercent: 100,
+  fontSizePoints: 16,
   zoomPercent: 100,
   searchOpen: false,
   searchQuery: "",
@@ -614,10 +613,10 @@ export interface ReaderBackend<Mount> {
   syncHighlights(highlights: readonly ReaderHighlight[]): Effect.Effect<void, never>;
   dismissSelection: Effect.Effect<void, never>;
   changeLayout(reader: ReaderWorkspace, layout: PdfPageLayout): ReaderUpdate;
-  changeFontSize(reader: ReaderWorkspace, percent: number): ReaderUpdate | null;
-  stepZoom(reader: ReaderWorkspace, percent: number): ReaderUpdate;
+  changeFontSize(reader: ReaderWorkspace, value: number): ReaderUpdate | null;
+  stepZoom(reader: ReaderWorkspace, value: number): ReaderUpdate;
   fitToText(reader: ReaderWorkspace): ReaderUpdate | null;
-  zoom(reader: ReaderWorkspace): { percent: number; fitToText: boolean };
+  zoom(reader: ReaderWorkspace): { value: number; unit: "%" | " pt"; fitToText: boolean };
   mountKey(reader: ReaderWorkspace): string;
   mount<Message>(reader: ReaderWorkspace, context: ReaderViewContext<Message>): Mount;
 }
@@ -897,16 +896,16 @@ export const makeReaderSlice = ({
         { ...reader, layout, spreadPaneExpanded: reader.spreadPaneExpanded || layout === "auto" },
         [SetEpubSpread({ layout })],
       ],
-      changeFontSize: (reader, percent) => [
-        { ...reader, fontSizePercent: percent },
-        [SetEpubFontSize({ percent }), MeasureEpubPagination({})],
+      changeFontSize: (reader, points) => [
+        { ...reader, fontSizePoints: points },
+        [SetEpubFontSize({ points }), MeasureEpubPagination({})],
       ],
-      stepZoom: (reader, percent) => [
-        { ...reader, fontSizePercent: percent },
-        [SetEpubFontSize({ percent }), MeasureEpubPagination({})],
+      stepZoom: (reader, points) => [
+        { ...reader, fontSizePoints: points },
+        [SetEpubFontSize({ points }), MeasureEpubPagination({})],
       ],
       fitToText: () => null,
-      zoom: (reader) => ({ percent: reader.fontSizePercent, fitToText: false }),
+      zoom: (reader) => ({ value: reader.fontSizePoints, unit: " pt", fitToText: false }),
       mountKey: (reader) => `epub:${reader.sourceId}`,
       mount: (reader, context) =>
         epubReaderMount.Mount({
@@ -914,7 +913,7 @@ export const makeReaderSlice = ({
           groupRef: reader.groupRef,
           initialCfi: reader.position?.kind === "epub" ? reader.position.cfi : null,
           spread: epubSpread(reader.layout),
-          fontSizePercent: reader.fontSizePercent,
+          fontSizePoints: reader.fontSizePoints,
           colors: context.colors,
         }),
     },
@@ -935,7 +934,7 @@ export const makeReaderSlice = ({
         [ApplyPdfZoom({ percent })],
       ],
       fitToText: (reader) => [reader, [FitPdfToText({})]],
-      zoom: (reader) => ({ percent: reader.zoomPercent, fitToText: true }),
+      zoom: (reader) => ({ value: reader.zoomPercent, unit: "%", fitToText: true }),
       mountKey: (reader) => `pdf:${reader.sourceId}:${reader.layout}:${reader.smartArrows}`,
       mount: (reader, context) =>
         PdfReaderMount({
@@ -1148,10 +1147,10 @@ export const makeReaderSlice = ({
   });
 
   const SetEpubFontSize = Command.define("SetEpubFontSize", {
-    args: { percent: Schema.Number },
+    args: { points: Schema.Number },
     messages: [CompletedReaderAction],
-    execute: ({ percent }) =>
-      epubReaderMount.setFontSize(percent).pipe(Effect.as(CompletedReaderAction())),
+    execute: ({ points }) =>
+      epubReaderMount.setFontSize(points).pipe(Effect.as(CompletedReaderAction())),
   });
 
   /** An EPUB relayouts in place rather than remounting, so the reader keeps its
@@ -1298,12 +1297,20 @@ export const makeReaderSlice = ({
           ? [reader, []]
           : backendFor(reader.kind).changeLayout(reader, message.layout);
       case "ChangedReaderFontSize":
-        return backendFor(reader.kind).changeFontSize(reader, message.percent);
+        return backendFor(reader.kind).changeFontSize(reader, message.points);
       case "SteppedReaderZoom": {
-        const step = message.direction === "in" ? 25 : -25;
+        const zoom = backendFor(reader.kind).zoom(reader);
+        const step =
+          message.direction === "in"
+            ? reader.kind === "epub"
+              ? 2
+              : 25
+            : reader.kind === "epub"
+              ? -2
+              : -25;
         const next = Math.min(
-          400,
-          Math.max(50, backendFor(reader.kind).zoom(reader).percent + step),
+          reader.kind === "epub" ? 48 : 400,
+          Math.max(reader.kind === "epub" ? 8 : 50, zoom.value + step),
         );
         return backendFor(reader.kind).stepZoom(reader, next);
       }

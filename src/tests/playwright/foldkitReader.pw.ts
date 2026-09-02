@@ -220,6 +220,26 @@ test("Foldkit EPUB: reader keys work while focus is inside the book", async ({ p
   await expect.poll(isSpread).toBe(true);
 });
 
+test("Foldkit EPUB: text size changes in two-point steps", async ({ page }) => {
+  await openBook(page, books[1].path, books[1].ready);
+  const frame = await epubFrame(page);
+  const bodyFontSize = () =>
+    frame.locator("body").evaluate((body) => Number(getComputedStyle(body).fontSize.slice(0, -2)));
+  await frame.locator("body").evaluate((body) => {
+    const publisherStyles = body.ownerDocument.createElement("style");
+    publisherStyles.textContent = "body { font-size: 7px !important; }";
+    body.ownerDocument.head.appendChild(publisherStyles);
+  });
+
+  await expect(page.locator(".font-size")).toHaveText("16 pt");
+  await expect.poll(bodyFontSize).toBeCloseTo(16 * (4 / 3), 4);
+
+  await page.getByTitle("Increase text size").click();
+
+  await expect(page.locator(".font-size")).toHaveText("18 pt");
+  await expect.poll(bodyFontSize).toBeCloseTo(24, 4);
+});
+
 test("Foldkit EPUB: pressing inside the book dismisses parent reader chrome", async ({ page }) => {
   await openBook(page, books[1].path, books[1].ready);
   const frame = await epubFrame(page);
