@@ -1,4 +1,3 @@
-import { Schema } from "effect";
 import { Story } from "foldkit/test";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -23,7 +22,6 @@ import {
   ConfirmedNoteDelete,
   DismissedNoteDelete,
   FollowedNoteReference,
-  NotesModel,
   RemovedNoteDraftTag,
   RemovedNoteFilterTerm,
   StartedNote,
@@ -527,23 +525,5 @@ describe("Foldkit notes stories", () => {
       Story.message(RemovedNoteDraftTag({ tag: "theme" })),
       Story.model((model) => expect(model.draftTags).toEqual(["question"])),
     );
-  });
-
-  it("keeps the panel's own state serializable", () => {
-    const model: NotesModel = {
-      ...initialNotesModel(),
-      notes: [note],
-      composing: true,
-      replyingToNoteId: note.id,
-      confirmingDeleteNoteId: note.id,
-      scope: "all-books",
-      filterMode: "any",
-      filterInput: "the",
-      filterTerms: [
-        { kind: "tag", value: "theme", negated: true },
-        { kind: "property", property: "author", value: "reader-1", negated: false },
-      ],
-    };
-    expect(Schema.decodeUnknownSync(NotesModel)(JSON.parse(JSON.stringify(model)))).toEqual(model);
   });
 });

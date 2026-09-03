@@ -36,8 +36,6 @@ export interface NoteFilterSuggestion {
   count: number;
 }
 
-export const EMPTY_NOTE_QUERY: NoteQuery = { terms: [], mode: "all" };
-
 function matchesPositiveTerm(note: Note, term: NoteFilterTerm): boolean {
   if (term.kind === "tag") {
     const tag = normalizeTag(term.value);

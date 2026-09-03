@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test e2e/browser/commonPaths.pw.ts --project=\"Desktop Safari\" --workers=1",
+    "perf:reader": "PLAYWRIGHT_BASE_URL=http://127.0.0.1:5199 READER_PERF=1 playwright test src/tests/playwright/foldkitReader.perf.pw.ts --project=\"Desktop Safari\" --workers=1",
     "e2e": "vitest run --config e2e/vitest.config.ts",
     "e2e:watch": "vitest --config e2e/vitest.config.ts",
     "info:template": "node scripts/new-info-card.mjs",

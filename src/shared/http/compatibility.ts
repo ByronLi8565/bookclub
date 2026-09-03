@@ -13,10 +13,6 @@ export const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
 
 export const Created = <S extends Schema.Top>(schema: S) => schema.pipe(HttpApiSchema.status(201));
 
-export const Bytes = Schema.Uint8Array.pipe(
-  HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" }),
-);
-
 export const StreamBytes = HttpApiSchema.StreamUint8Array({
   contentType: "application/octet-stream",
 });

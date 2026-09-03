@@ -1,5 +1,5 @@
 import { monotonicFactory } from "ulidx";
-import type { Highlight, HighlightAnchor, NoteOp } from "../../../shared/types/notes.ts";
+import type { Highlight, NoteOp } from "../../../shared/types/notes.ts";
 
 const ulid = monotonicFactory();
 
@@ -62,8 +62,4 @@ export function editNoteOp(
 
 export function removeNoteOp(noteId: string): NoteOp {
   return { opId: ulid(), kind: "remove", noteId, at: now() };
-}
-
-export function rebindOp(noteId: string, highlightId: string, anchor: HighlightAnchor): NoteOp {
-  return { opId: ulid(), kind: "rebind", noteId, highlightId, anchor };
 }

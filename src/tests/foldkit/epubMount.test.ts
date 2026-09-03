@@ -521,7 +521,8 @@ describe("EPUB Foldkit Mount", () => {
 
     const element = document.createElement("div");
     document.body.appendChild(element);
-    const session = epubJsEngine({
+    const session = await epubJsEngine({
+      sourceId: "teardown-test",
       element,
       spread: "auto",
       fontSizePoints: 16,
@@ -556,7 +557,8 @@ describe("EPUB Foldkit Mount", () => {
   it("ignores a page turn before epub.js has installed its manager", async () => {
     const element = document.createElement("div");
     document.body.appendChild(element);
-    const session = epubJsEngine({
+    const session = await epubJsEngine({
+      sourceId: "early-turn-test",
       element,
       spread: "auto",
       fontSizePoints: 16,

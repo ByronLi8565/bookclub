@@ -24,6 +24,7 @@ import {
   loadPdf,
   loadTextLayerBuilderCtor,
   pageGeometry,
+  preparePdfRuntime,
   rectsForRange,
   type PageGeometry,
   type PDFDocumentProxy,
@@ -166,6 +167,7 @@ export function recolorPdfCanvas(
  *  and the Mount owns whatever it produces for the element's lifetime. */
 export interface PdfMountEnvironment {
   readonly loadSource: (sourceId: string, groupRef: string) => Promise<ArrayBuffer>;
+  readonly prepareDocument: () => Promise<void>;
   readonly loadDocument: (bytes: ArrayBuffer) => Promise<PDFDocumentProxy>;
   readonly rasterize: (request: PdfRasterizeRequest) => PdfRenderTask;
   readonly loadTextLayerBuilder: (() => Promise<typeof TextLayerBuilder>) | null;
@@ -218,6 +220,7 @@ export const browserPdfMountEnvironment = (
   overrides: Partial<PdfMountEnvironment> = {},
 ): PdfMountEnvironment => ({
   loadSource,
+  prepareDocument: preparePdfRuntime,
   loadDocument: loadPdf,
   rasterize: canvasRasterizer,
   loadTextLayerBuilder: loadTextLayerBuilderCtor,
@@ -495,8 +498,10 @@ async function computeFitZoomAt(
 const computeFitZoom = (session: Session): Promise<number | null> =>
   computeFitZoomAt(session, session.page, session.spread);
 
-function documentCacheKey(environment: PdfMountEnvironment, sourceId: string, bytes: number) {
-  return environment.cacheDocumentsAcrossMounts ? `${sourceId}:${bytes}` : null;
+function documentCacheKey(environment: PdfMountEnvironment, sourceId: string) {
+  // Source ids are SHA-256 content hashes, so the id itself fully identifies
+  // the parsed document and can be checked before its bytes are read again.
+  return environment.cacheDocumentsAcrossMounts ? sourceId : null;
 }
 
 function openSession(
@@ -586,6 +591,33 @@ function openSession(
     observer.observe(scroller);
     session.teardown.push(() => observer.disconnect());
   }
+
+  let resumeFrame: number | null = null;
+  const resume = () => {
+    if (session.released || document.visibilityState !== "visible" || session.document === null) {
+      return;
+    }
+    if (resumeFrame !== null) cancelAnimationFrame(resumeFrame);
+    resumeFrame = requestAnimationFrame(() => {
+      resumeFrame = requestAnimationFrame(() => {
+        resumeFrame = null;
+        if (session.released || session.document === null) return;
+        cancelPrefetch(session);
+        session.rasterCache.clear();
+        session.scroller.dataset.prefetchedPages = "";
+        void (
+          session.fitToPage ? fitSession(session, environment) : renderSpread(session, environment)
+        ).catch((error: unknown) => console.error("PDF resume render failed", error));
+      });
+    });
+  };
+  document.addEventListener("visibilitychange", resume);
+  window.addEventListener("pageshow", resume);
+  session.teardown.push(() => {
+    if (resumeFrame !== null) cancelAnimationFrame(resumeFrame);
+    document.removeEventListener("visibilitychange", resume);
+    window.removeEventListener("pageshow", resume);
+  });
 
   return session;
 }
@@ -892,24 +924,27 @@ async function prefetchPage(
   const task = environment.rasterize({ page, canvas, viewport, dpr, colors: session.colors });
   session.renderTasks.add(task);
   session.prefetchTasks.set(key, task);
+  const completed = task.promise.then(() => {
+    if (session.released) return;
+    session.rasterCache.put(key, canvas);
+    const ready = new Set([
+      ...(session.scroller.dataset.prefetchedPages ?? "")
+        .split(",")
+        .filter((value) => value !== ""),
+      String(pageNumber),
+    ]);
+    session.scroller.dataset.prefetchedPages = [...ready].join(",");
+  });
+  session.prefetchPromises.set(key, completed);
   try {
-    await task.promise;
-    if (!session.released) {
-      session.rasterCache.put(key, canvas);
-      const ready = new Set([
-        ...(session.scroller.dataset.prefetchedPages ?? "")
-          .split(",")
-          .filter((value) => value !== ""),
-        String(pageNumber),
-      ]);
-      session.scroller.dataset.prefetchedPages = [...ready].join(",");
-    }
+    await completed;
   } catch {
     // Prefetch is speculative; the foreground render remains the recovery path.
   } finally {
     if (session.prefetchTasks.get(key) === task) {
       session.renderTasks.delete(task);
       session.prefetchTasks.delete(key);
+      session.prefetchPromises.delete(key);
       session.prefetching.delete(key);
     }
   }
@@ -1104,11 +1139,21 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
 
 async function startSession(session: Session, environment: PdfMountEnvironment): Promise<void> {
   try {
-    const bytes = await environment.loadSource(session.sourceId, session.groupRef);
-    const key = documentCacheKey(environment, session.sourceId, bytes.byteLength);
+    const key = documentCacheKey(environment, session.sourceId);
     session.documentCacheKey = key;
     const cached = key === null ? null : getCachedPdfDocument(key);
-    const doc = cached ?? (await environment.loadDocument(bytes));
+    let bytesLength = 0;
+    let doc: PDFDocumentProxy;
+    if (cached === null) {
+      const [bytes] = await Promise.all([
+        environment.loadSource(session.sourceId, session.groupRef),
+        environment.prepareDocument(),
+      ]);
+      bytesLength = bytes.byteLength;
+      doc = await environment.loadDocument(bytes);
+    } else {
+      doc = cached;
+    }
     // The release may have run while the document was still parsing: an Effect
     // interruption does not cancel the underlying promise, so the handle only
     // becomes reachable here and must be disposed of on the spot.
@@ -1116,16 +1161,18 @@ async function startSession(session: Session, environment: PdfMountEnvironment):
       if (!cached) void destroyPdf(doc);
       return;
     }
-    if (key !== null && !cached) putCachedPdfDocument(key, doc, bytes.byteLength);
+    if (key !== null && cached === null) putCachedPdfDocument(key, doc, bytesLength);
     session.document = doc;
     session.page = clamp(session.page, 1, Math.max(1, doc.numPages));
 
-    const metadata = await doc.getMetadata().catch(() => null);
+    const [metadata, fitZoom] = await Promise.all([
+      doc.getMetadata().catch(() => null),
+      computeFitZoom(session),
+    ]);
     // SAFETY: pdf.js metadata info is an optional string-keyed dictionary.
     const info = metadata?.info as { Title?: string } | undefined;
     if (session.released) return;
     session.spread = spreadFits(session.layout, doc.numPages, session.scroller.clientWidth);
-    const fitZoom = await computeFitZoom(session);
     if (fitZoom !== null) session.zoom = fitZoom;
     session.emit(
       PdfDocumentReady({
@@ -1167,20 +1214,6 @@ async function fitSession(
   publishPosition(session);
   return zoom;
 }
-
-/**
- * The PDF.js Mount. One element, one open document: the Mount owns the
- * document handle, page render tasks, canvases, text-layer builders, the
- * resize observer, and the selection listener, and publishes only domain
- * events back into the Message loop.
- *
- * Args are captured at mount, so a source, layout, or zoom change is expressed
- * as a new element key in the view. That destroys this element — cancelling
- * in-flight render tasks and destroying the document — before the replacement
- * acquires, which is what makes source switching deterministic.
- */
-export const makePdfDocumentMount = (environment: PdfMountEnvironment) =>
-  makePdfMount(environment).Mount;
 
 /**
  * The PDF.js adapter: the Mount plus the imperative operations the reader's

@@ -10,7 +10,11 @@ import {
 import { formatBytes } from "../../shared/format.ts";
 import { groupUrlName } from "../../shared/groupUrls.ts";
 import { UPLOAD_FILE_FIELD } from "../../shared/http/uploads.ts";
-import { ClubProfile, MAX_DISPLAY_NAME_LENGTH } from "../../shared/types/profiles.ts";
+import {
+  avatarImagePath,
+  ClubProfile,
+  MAX_DISPLAY_NAME_LENGTH,
+} from "../../shared/types/profiles.ts";
 import { decode } from "../../shared/schema.ts";
 import {
   DEFAULT_USER_PREFS,
@@ -32,12 +36,12 @@ import {
   serializeThemeConfig,
 } from "../../shared/types/theme.ts";
 import { previewGroupBackup, saveGroupBackup } from "../logic/groups/backupAccess.ts";
-import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
 import { applyTheme } from "../logic/theme.ts";
 import { isNative } from "../logic/net/api.ts";
 import { readVersionedLocal, writeLocal } from "../logic/storage.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { modalTabsView, modalView } from "./modal.ts";
+import { radioMenuView, type RadioMenuOption } from "./radioMenu.ts";
 
 /**
  * React reaches its hidden file inputs through refs, which a Foldkit view has
@@ -115,8 +119,7 @@ const LEGACY_PREFS_KEY = "bookclub.userPrefs";
  */
 export const cachedUserPrefs = (): UserPrefs =>
   mergeUserPrefs(
-    decode(UserPrefsPatch, readVersionedLocal<unknown>(PREFS_KEY, LEGACY_PREFS_KEY)) ??
-      DEFAULT_USER_PREFS,
+    decode(UserPrefsPatch, readVersionedLocal(PREFS_KEY, LEGACY_PREFS_KEY)) ?? DEFAULT_USER_PREFS,
   );
 
 const rememberUserPrefs = (prefs: UserPrefs): Effect.Effect<void> =>
@@ -690,11 +693,6 @@ export interface SettingsViewContext<Message = never> {
   readonly accountSection?: readonly Html[];
 }
 
-interface DropdownOption<T extends string> {
-  readonly value: T;
-  readonly label: string;
-}
-
 // Account security is global and belongs on the homepage. Reader settings mix
 // a club-specific profile with controls for the currently open book.
 const categoriesFor = (
@@ -722,60 +720,18 @@ export const settingsView = <Message>(
   const settingDropdown = <T extends string>(
     dropdown: string,
     value: T,
-    options: readonly DropdownOption<T>[],
+    options: readonly RadioMenuOption<T>[],
     ariaLabel: string,
     toMessage: (value: T) => SettingsMessage,
-  ): Html => {
-    const open = model.openDropdown === dropdown;
-    const active = options.find((option) => option.value === value);
-    return h.div(
-      [h.Class("book-menu settings-dropdown")],
-      [
-        h.button(
-          [
-            h.Type("button"),
-            h.Class("settings-action settings-dropdown-trigger"),
-            h.AriaHasPopup("menu"),
-            h.AriaExpanded(open),
-            h.AriaLabel(ariaLabel),
-            h.Title(ariaLabel),
-            h.OnClick(ToggledSettingsDropdown({ dropdown })),
-          ],
-          [
-            h.span([], [active?.label ?? value]),
-            h.span([h.Class("book-menu-arrow"), h.AriaHidden(true)], ["▾"]),
-          ],
-        ),
-        ...(open
-          ? [
-              h.ul(
-                [h.Class("book-menu-list"), h.Role("menu")],
-                options.map((option) =>
-                  h.li(
-                    [h.Key(option.value), h.Role("none")],
-                    [
-                      h.button(
-                        [
-                          h.Type("button"),
-                          h.Role("menuitemradio"),
-                          h.AriaChecked(option.value === value),
-                          h.Class(
-                            option.value === value ? "book-menu-item is-active" : "book-menu-item",
-                          ),
-                          h.Title(option.label),
-                          h.OnClick(toMessage(option.value)),
-                        ],
-                        [option.label],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ]
-          : []),
-      ],
-    );
-  };
+  ): Html =>
+    radioMenuView(h, {
+      value,
+      options,
+      open: model.openDropdown === dropdown,
+      label: ariaLabel,
+      onToggle: ToggledSettingsDropdown({ dropdown }),
+      onSelect: toMessage,
+    });
 
   /** A setting explains itself through its heading and its control. `desc` is
    *  for the ones that cannot: a heading whose meaning is not obvious, or a
@@ -828,7 +784,7 @@ export const settingsView = <Message>(
           h.div(
             [h.Class("settings-user-avatar"), h.AriaLabel("Profile picture")],
             avatarUrl === null
-              ? [h.span([], [avatarInitial(profile.displayName)])]
+              ? [h.span([], [profile.displayName.slice(0, 1).toUpperCase()])]
               : [h.img([h.Src(avatarUrl), h.Alt("")])],
           ),
           h.div(

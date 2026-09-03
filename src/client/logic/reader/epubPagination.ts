@@ -1,4 +1,5 @@
 import type { Book } from "epubjs";
+import { makeEpubFontSize } from "./epubFontSize.ts";
 
 /** The book measured as arrow-key presses to the end. `offsetByIndex` maps a
  *  spine index to the number of presses that precede that section. */
@@ -47,7 +48,7 @@ export async function measureEpubPagination(
   document.body.appendChild(host);
 
   const probe = book.renderTo(host, { width, height, spread, flow: "paginated" });
-  probe.themes.override("font-size", `${fontSizePoints}pt`, true);
+  const fontSize = makeEpubFontSize(probe, fontSizePoints);
   try {
     const bookSpine: unknown = book.spine;
     // SAFETY: epub.js populates spineItems after the book has opened, but its published type omits it.
@@ -76,6 +77,7 @@ export async function measureEpubPagination(
     }
     return { total, divisor, offsetByIndex };
   } finally {
+    fontSize.destroy();
     probe.destroy();
     host.remove();
   }

@@ -12,13 +12,14 @@ import {
   type SourceMeta,
 } from "../../shared/types/groups.ts";
 import { contentTypeFor, extensionFor, type SourceKind } from "../../shared/types/sources.ts";
-import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
+import { avatarImagePath } from "../../shared/types/profiles.ts";
 import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts";
 import { downloadFile } from "../logic/files/browserDownload.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { isNative } from "../logic/net/api.ts";
 import { toolIconView, trashIconView } from "./icons.ts";
 import { modalTabsView, modalView } from "./modal.ts";
+import { radioMenuView } from "./radioMenu.ts";
 import { ChangedNoteAgentPresence } from "./resources/noteAgent.ts";
 
 const OnlinePeers = ChangedNoteAgentPresence.fields.peers;
@@ -633,61 +634,26 @@ const roleControlView = <Message>(
   const roles = assignableRoles(viewerRole, person.role);
   if (roles.length === 0) return h.span([h.Class("invite-person-role label")], [person.role]);
 
-  const open = model.openRoleMenuId === person.id;
   const pending = model.pendingRoleMemberId === person.id ? model.pendingRole : null;
-  const triggerLabel = `Change role for ${person.name}`;
 
   return h.div(
     [h.Class("invite-person-role-control")],
     [
-      h.div(
-        [h.Class("book-menu settings-dropdown invite-person-role-dropdown")],
-        [
-          h.button(
-            [
-              h.Type("button"),
-              h.Class("settings-action settings-dropdown-trigger invite-person-role label"),
-              h.AriaHasPopup("menu"),
-              h.AriaExpanded(open),
-              h.AriaLabel(triggerLabel),
-              h.Title(triggerLabel),
-              h.Disabled(model.savingRole),
-              h.OnClick(ToggledRoleMenu({ memberId: person.id })),
-            ],
-            [
-              h.span([], [person.role]),
-              h.span([h.Class("book-menu-arrow"), h.AriaHidden(true)], ["▾"]),
-            ],
-          ),
-          ...(open
-            ? [
-                h.ul(
-                  [h.Class("book-menu-list"), h.Role("menu")],
-                  roles.map((role) =>
-                    h.li(
-                      [h.Key(role), h.Role("none")],
-                      [
-                        h.button(
-                          [
-                            h.Type("button"),
-                            h.Role("menuitemradio"),
-                            h.AriaChecked(role === person.role),
-                            h.Class(
-                              role === person.role ? "book-menu-item is-active" : "book-menu-item",
-                            ),
-                            h.Title(`Change role to ${role}`),
-                            h.OnClick(ChoseMemberRole({ memberId: person.id, role })),
-                          ],
-                          [role],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ]
-            : []),
-        ],
-      ),
+      radioMenuView(h, {
+        value: person.role,
+        options: roles.map((role) => ({
+          value: role,
+          label: role,
+          title: `Change role to ${role}`,
+        })),
+        open: model.openRoleMenuId === person.id,
+        label: `Change role for ${person.name}`,
+        className: "invite-person-role-dropdown",
+        triggerClassName: "invite-person-role label",
+        disabled: model.savingRole,
+        onToggle: ToggledRoleMenu({ memberId: person.id }),
+        onSelect: (role) => ChoseMemberRole({ memberId: person.id, role }),
+      }),
       ...(pending === null || pending === person.role
         ? []
         : [
@@ -734,7 +700,7 @@ export const presencePeopleView = <Message>(
                 [h.Class("invite-avatar")],
                 [
                   person.avatarImageId === undefined
-                    ? avatarInitial(person.name)
+                    ? person.name.slice(0, 1).toUpperCase()
                     : h.img([h.Src(avatarImagePath(person.id, person.avatarImageId)), h.Alt("")]),
                   h.span(
                     [h.Class(`presence-pip presence-pip--${person.isOnline ? "on" : "off"}`)],

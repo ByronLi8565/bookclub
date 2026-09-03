@@ -27,13 +27,13 @@ import {
   type GroupAction as GroupActionType,
 } from "../../shared/groupPermissions.ts";
 import { currentSource, sourceById } from "../../shared/sources.ts";
-import { getSource, storeSource } from "../services/sources.ts";
+import { storeSource } from "../services/sources.ts";
 import {
   deleteImages,
   getImage,
   imageKey,
   listImages,
-  restoreImage,
+  putImage,
   storeImage,
   validImageId,
 } from "../services/images.ts";
@@ -119,7 +119,7 @@ export const GroupDataHandlers = HttpApiBuilder.group(
             ? sourceById(summary, query.sourceId)
             : currentSource(summary);
           if (!source) return yield* new NotFound({ error: "no_book" });
-          const object = yield* attempt(() => getSource(env, source.id));
+          const object = yield* attempt(() => env.BOOKS.get(source.id));
           if (!object) return yield* new NotFound({ error: "no_book" });
           return HttpServerResponse.raw(object.body, {
             headers: { "content-type": source.contentType, "x-source-id": source.id },
@@ -278,7 +278,7 @@ export const GroupDataHandlers = HttpApiBuilder.group(
           const existing = yield* attempt(() => listImages(env, summary.groupId));
           yield* Effect.forEach(backup.images, (image) =>
             attempt(() =>
-              restoreImage(
+              putImage(
                 env,
                 summary.groupId,
                 image.id,

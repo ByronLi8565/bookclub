@@ -9,6 +9,8 @@ import { defineConfig, devices } from "@playwright/test";
 // in a normal terminal, where multi-process is faster and closer to production.
 const detachedSession = !!process.env.PW_DETACHED_SESSION;
 const chromiumLaunch = detachedSession ? { args: ["--single-process", "--no-zygote"] } : {};
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+const testServer = new URL(baseURL);
 
 export default defineConfig({
   testDir: ".",
@@ -18,7 +20,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: [["list"]],
-  use: { baseURL: "http://localhost:5173", trace: "on-first-retry" },
+  use: { baseURL, trace: "on-first-retry" },
   projects: [
     {
       name: "Mobile Safari",
@@ -27,7 +29,12 @@ export default defineConfig({
     },
     {
       name: "Desktop Safari",
-      testMatch: ["**/foldkitReader.pw.ts", "**/foldkitComposer.pw.ts", "e2e/browser/**/*.pw.ts"],
+      testMatch: [
+        "**/foldkitReader.pw.ts",
+        "**/foldkitReader.perf.pw.ts",
+        "**/foldkitComposer.pw.ts",
+        "e2e/browser/**/*.pw.ts",
+      ],
       use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
     },
     {
@@ -44,8 +51,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "vite --port 5173 --strictPort",
-    url: "http://localhost:5173",
+    command: `vite --host ${testServer.hostname} --port ${testServer.port} --strictPort`,
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

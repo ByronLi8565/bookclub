@@ -19,10 +19,6 @@ export const GroupRoleSchema = Schema.Union([
   Schema.Literal(GroupRole.Visitor),
 ]);
 
-export function isGroupRole(value: unknown): value is GroupRole {
-  return Schema.is(GroupRoleSchema)(value);
-}
-
 export const GroupFailureReason = {
   Exists: "exists",
   NotMember: "not_member",

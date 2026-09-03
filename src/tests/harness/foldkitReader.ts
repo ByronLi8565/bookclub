@@ -11,6 +11,7 @@ import {
 } from "../../client/foldkit/reader.ts";
 import "../../client/index.css";
 import { getRenderSnapshot } from "../../client/logic/reader/renderSnapshot.ts";
+import { contentTypeFor, type SourceKind, type SourceSummary } from "../../shared/types/sources.ts";
 
 // The Foldkit counterpart of TestHarness.tsx: it drives the reader slice alone
 // against a fixture book, so the browser suite can run the same reading
@@ -22,8 +23,44 @@ import { getRenderSnapshot } from "../../client/logic/reader/renderSnapshot.ts";
 // which is exactly what makes that substitution possible.
 const params = new URLSearchParams(window.location.search);
 const book = params.get("book") ?? "/fixtures/moby-dick.pdf";
-const kind = params.get("kind") === "epub" ? "epub" : "pdf";
-const harnessSourceId = `harness-${kind}`;
+const kind: SourceKind = params.get("kind") === "epub" ? "epub" : "pdf";
+const switching = params.get("switching") === "true";
+
+interface FixtureSource extends SourceSummary {
+  readonly path: string;
+}
+
+const oneSource: FixtureSource = {
+  id: `harness-${kind}`,
+  kind,
+  contentType: contentTypeFor(kind),
+  size: 0,
+  title: null,
+  path: book,
+};
+const switchSources: readonly FixtureSource[] = [
+  {
+    id: "harness-pdf",
+    kind: "pdf",
+    contentType: contentTypeFor("pdf"),
+    size: 1_544_566,
+    title: "Performance PDF",
+    path: params.get("pdfBook") ?? "/fixtures/moby-dick.pdf",
+  },
+  {
+    id: "harness-epub",
+    kind: "epub",
+    contentType: contentTypeFor("epub"),
+    size: 556_798,
+    title: "Performance EPUB",
+    path: params.get("epubBook") ?? "/fixtures/dorian.epub",
+  },
+];
+const sources = switching ? switchSources : [oneSource];
+const initialSource = switching
+  ? (sources.find((source) => source.kind === kind) ?? sources[0]!)
+  : oneSource;
+const sourceById = new Map(sources.map((source) => [source.id, source]));
 const colors =
   params.get("theme") === "dark"
     ? { background: "#242424", text: "#f2f2f2", link: "#8ab4ff" }
@@ -35,9 +72,11 @@ const subscriptions = makeReaderSubscriptions<ReaderWorkspace, ReaderMessage>({
 });
 
 const reader = makeReaderSlice({
-  loadSource: async () => {
-    const response = await fetch(book);
-    if (!response.ok) throw new Error(`fixture ${book} is unavailable`);
+  loadSource: async (sourceId) => {
+    const source = sourceById.get(sourceId);
+    if (source === undefined) throw new Error(`fixture source ${sourceId} is unavailable`);
+    const response = await fetch(source.path);
+    if (!response.ok) throw new Error(`fixture ${source.path} is unavailable`);
     return response.arrayBuffer();
   },
   snapshotFor: async (sourceId) => {
@@ -57,8 +96,8 @@ Runtime.embed(
     init: () => {
       const selected = SelectedReaderSource({
         groupRef: "harness",
-        sourceId: harnessSourceId,
-        kind,
+        sourceId: initialSource.id,
+        kind: initialSource.kind,
       });
       return reader.update(openReader(selected), selected) ?? [openReader(selected), []];
     },
@@ -93,14 +132,24 @@ Runtime.embed(
         [
           // The harness opens one fixture book with no club around it, so the
           // bar has nothing to switch to, rename, or add.
-          reader.view(
+          reader.view<ReaderMessage>(
             model,
             {
-              books: [],
+              books: switching ? sources : [],
               title: null,
-              onSelectBook: () => ClosedBookMenu(),
+              onSelectBook: (sourceId) => {
+                const source = sourceById.get(sourceId);
+                return source === undefined
+                  ? ClosedBookMenu()
+                  : SelectedReaderSource({
+                      groupRef: "harness",
+                      sourceId: source.id,
+                      kind: source.kind,
+                    });
+              },
               onRenameBook: null,
               onAddBook: null,
+              readerOnlyControl: null,
               colors,
             },
             h,

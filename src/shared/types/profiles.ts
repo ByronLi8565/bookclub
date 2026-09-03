@@ -11,3 +11,7 @@ export const ClubProfile = Schema.Struct({
 });
 
 export interface ClubProfile extends SchemaType<typeof ClubProfile> {}
+
+export function avatarImagePath(userId: string, imageId: string): string {
+  return `/users/${encodeURIComponent(userId)}/avatar/${encodeURIComponent(imageId)}`;
+}

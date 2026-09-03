@@ -22,7 +22,6 @@ import {
   UploadedBook,
   canUploadBook,
   initialUploadModel,
-  isUploadMessage,
   updateUpload,
   uploadView,
   type InspectedBook,
@@ -110,11 +109,6 @@ const render = async (model: UploadModel): Promise<HTMLElement> => {
 };
 
 describe("Foldkit upload stories", () => {
-  it("recognises only its own messages", () => {
-    expect(isUploadMessage(LeftBookDrop())).toBe(true);
-    expect(isUploadMessage({ _tag: "ChangedNoteComposer" })).toBe(false);
-  });
-
   it("inspects a chosen book and keeps the file out of the Model", () => {
     Story.story(
       updateUpload,

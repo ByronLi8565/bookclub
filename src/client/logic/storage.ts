@@ -1,8 +1,8 @@
-export function readLocal<T>(key: string): T | null {
+export function readLocal(key: string) {
   try {
     const raw = localStorage.getItem(key);
-    // SAFETY: callers own the key and type pair; values are round-tripped by setStored below.
-    return raw ? (JSON.parse(raw) as T) : null;
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    return value;
   } catch {
     localStorage.removeItem(key);
     return null;
@@ -17,10 +17,10 @@ export function removeLocal(key: string): void {
   localStorage.removeItem(key);
 }
 
-export function readVersionedLocal<T>(key: string, legacyKey: string): T | null {
-  const current = readLocal<T>(key);
+export function readVersionedLocal(key: string, legacyKey: string) {
+  const current = readLocal(key);
   if (current !== null) return current;
-  const legacy = readLocal<T>(legacyKey);
+  const legacy = readLocal(legacyKey);
   if (legacy === null) return null;
   writeLocal(key, legacy);
   removeLocal(legacyKey);

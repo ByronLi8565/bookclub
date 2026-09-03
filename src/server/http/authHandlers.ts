@@ -20,7 +20,6 @@ import { normalizeEmail } from "../../shared/email.ts";
 import { challengeCookie, readChallenge } from "../auth/challenge.ts";
 import { clearedCookie, publicUser, sessionCredentials } from "../auth/cookies.ts";
 import { RP_NAME, rpConfig, toStoredCredential, toWebAuthnCredential } from "../auth/webauthn.ts";
-import { isDevAuth } from "../auth/devAuth.ts";
 import { CurrentIdentity } from "../../shared/http/middleware.ts";
 import { CloudflareEnv, CloudflareRequest } from "./cloudflare.ts";
 
@@ -43,7 +42,7 @@ export const AuthHandlers = HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
         const email = normalizeEmail(payload.email);
         if (!email) return yield* new BadRequest({ error: "invalid_email" });
         const auth = yield* attempt(() => getAgentByName(env.AuthAgent, email));
-        if (isDevAuth(env)) {
+        if (env.DEV_AUTH === "true") {
           const user = yield* attempt(() => auth.devLogin(email));
           const { cookie, token } = yield* attempt(() => sessionCredentials(env, user));
           return HttpApiSchema.withHeaders({

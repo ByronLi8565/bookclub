@@ -74,57 +74,30 @@ function rangeText(range: Range): string {
   return text;
 }
 
-function deriveQuote(range: Range): QuoteSelector {
-  const doc = range.startContainer.ownerDocument;
-  const root = doc?.body;
-  if (!root) {
-    return { type: "TextQuoteSelector", exact: range.toString(), prefix: "", suffix: "" };
-  }
-
-  const before = doc.createRange();
-  before.setStart(root, 0);
-  before.setEnd(range.startContainer, range.startOffset);
-
-  const after = doc.createRange();
-  after.setStart(range.endContainer, range.endOffset);
-  after.setEnd(root, root.childNodes.length);
-
-  return {
-    type: "TextQuoteSelector",
-    exact: range.toString(),
-    prefix: before.toString().slice(-CONTEXT),
-    suffix: after.toString().slice(0, CONTEXT),
-  };
-}
-
-function derivePdfQuote(range: Range): QuoteSelector {
-  const doc = range.startContainer.ownerDocument;
-  const root = doc?.body;
-  if (!root) {
-    return { type: "TextQuoteSelector", exact: rangeText(range), prefix: "", suffix: "" };
-  }
-
-  const before = doc.createRange();
-  before.setStart(root, 0);
-  before.setEnd(range.startContainer, range.startOffset);
-
-  const after = doc.createRange();
-  after.setStart(range.endContainer, range.endOffset);
-  after.setEnd(root, root.childNodes.length);
-
-  return {
-    type: "TextQuoteSelector",
-    exact: rangeText(range),
-    prefix: rangeText(before).slice(-CONTEXT),
-    suffix: rangeText(after).slice(0, CONTEXT),
-  };
-}
-
-/** The quote a range stands for, with the surrounding context that lets a
- *  highlight be found again after the text reflows. PDF text runs are
- *  positioned rather than laid out, so they need their own derivation. */
+/** Surrounding text lets a highlight be found again after reflow. PDF spans
+ * need spaces inserted between positioned text runs. */
 export function quoteForRange(range: Range, kind: HighlightAnchor["kind"]): QuoteSelector {
-  return kind === "pdf-text" ? derivePdfQuote(range) : deriveQuote(range);
+  const text = kind === "pdf-text" ? rangeText : (value: Range) => value.toString();
+  const doc = range.startContainer.ownerDocument;
+  const root = doc?.body;
+  if (!root) {
+    return { type: "TextQuoteSelector", exact: text(range), prefix: "", suffix: "" };
+  }
+
+  const before = doc.createRange();
+  before.setStart(root, 0);
+  before.setEnd(range.startContainer, range.startOffset);
+
+  const after = doc.createRange();
+  after.setStart(range.endContainer, range.endOffset);
+  after.setEnd(root, root.childNodes.length);
+
+  return {
+    type: "TextQuoteSelector",
+    exact: text(range),
+    prefix: text(before).slice(-CONTEXT),
+    suffix: text(after).slice(0, CONTEXT),
+  };
 }
 
 export function captureHighlight(

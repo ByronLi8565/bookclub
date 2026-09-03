@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
-import { Schema } from "effect";
 import { Runtime } from "foldkit";
 import { Story } from "foldkit/test";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AskToDeleteImage,
   CancelledBookDelete,
@@ -79,7 +78,11 @@ const roster: PresenceRosterContext = { members, peers, viewerRole: GroupRole.Ow
  * rendered tree lands in `document.body` and is captured before `dispose` tears
  * it back down.
  */
-const render = async (model: PresenceModel): Promise<HTMLElement> => {
+const render = async (
+  model: PresenceModel,
+  inspect?: (tree: HTMLElement, messages: PresenceMessage[]) => Promise<void>,
+): Promise<HTMLElement> => {
+  const messages: PresenceMessage[] = [];
   const container = document.createElement("div");
   container.id = "presence-view-test";
   document.body.appendChild(container);
@@ -88,7 +91,10 @@ const render = async (model: PresenceModel): Promise<HTMLElement> => {
       Model: PresenceModel,
       container,
       init: () => [model, []],
-      update: (current) => [current, []],
+      update: (current, message) => {
+        messages.push(message);
+        return [current, []];
+      },
       view: (current, h) => {
         // `application.ts` nests the roster inside the invite slice's controls
         // and hands the settings slice's backup controls over; the stubs stand
@@ -114,6 +120,7 @@ const render = async (model: PresenceModel): Promise<HTMLElement> => {
   await new Promise((resolve) => {
     setTimeout(resolve, 200);
   });
+  await inspect?.(document.body, messages);
   const html = document.body.innerHTML;
   handle.dispose();
   const holder = document.createElement("div");
@@ -122,13 +129,6 @@ const render = async (model: PresenceModel): Promise<HTMLElement> => {
 };
 
 describe("Foldkit presence stories", () => {
-  it("survives a round trip through its own Schema", () => {
-    const model = opened();
-    expect(Schema.decodeUnknownSync(PresenceModel)(JSON.parse(JSON.stringify(model)))).toEqual(
-      model,
-    );
-  });
-
   it("starts every field over when a club's modal opens", () => {
     Story.story(
       updatePresence,
@@ -304,7 +304,25 @@ describe("Foldkit presence view", () => {
   });
 
   it("offers the role dropdown to whoever may reassign, and a bare label otherwise", async () => {
-    const tree = await render({ ...opened(), openRoleMenuId: "reader-2" });
+    const tree = await render(
+      { ...opened(), openRoleMenuId: "reader-2" },
+      async (menu, messages) => {
+        const options = menu.querySelectorAll<HTMLButtonElement>('button[role="menuitemradio"]');
+        expect(
+          [...options].map((option) => [option.title, option.getAttribute("aria-checked")]),
+        ).toEqual([
+          ["Change role to visitor", "false"],
+          ["Change role to member", "true"],
+          ["Change role to admin", "false"],
+        ]);
+        options[2]?.click();
+        await vi.waitFor(() =>
+          expect(messages).toContainEqual(
+            ChoseMemberRole({ memberId: "reader-2", role: GroupRole.Admin }),
+          ),
+        );
+      },
+    );
     const rows = tree.querySelectorAll(".invite-people-list > li");
 
     const control = rows[0]?.querySelector(".invite-person-role-control");

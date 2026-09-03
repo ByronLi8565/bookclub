@@ -6,7 +6,6 @@ import {
 } from "../../../shared/backups/bookclubArchive.ts";
 import { isNative } from "../net/api.ts";
 import { downloadFile } from "../files/browserDownload.ts";
-import type { ApiResult } from "./groupClient.ts";
 
 function base64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -19,7 +18,9 @@ function base64(file: File): Promise<string> {
   });
 }
 
-export async function saveGroupBackup(file: File): Promise<ApiResult<{ name: string }>> {
+export async function saveGroupBackup(
+  file: File,
+): Promise<{ ok: true; value: { name: string } } | { ok: false; error: "save_failed" }> {
   if (isNative) {
     try {
       await Filesystem.writeFile({

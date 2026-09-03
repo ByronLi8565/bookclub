@@ -29,15 +29,3 @@ export const TooLargeError = TooLarge.pipe(HttpApiSchema.status(413));
 export const RateLimitedError = RateLimited.pipe(HttpApiSchema.status(429));
 export const InternalErrorSchema = InternalError.pipe(HttpApiSchema.status(500));
 export const ServiceUnavailableError = ServiceUnavailable.pipe(HttpApiSchema.status(503));
-
-export const WorkflowErrors = [
-  BadRequestError,
-  UnauthenticatedError,
-  ForbiddenError,
-  NotFoundError,
-  ConflictError,
-  TooLargeError,
-  RateLimitedError,
-  InternalErrorSchema,
-  ServiceUnavailableError,
-] as const;

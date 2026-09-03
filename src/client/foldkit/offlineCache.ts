@@ -25,7 +25,7 @@ const groupViewKey = (userId: string, groupRef: string): string =>
 export type CachedUser = typeof PublicUser.Type;
 
 export const cachedSessionUser = (): CachedUser | null =>
-  decode(PublicUser, readLocal<unknown>(SESSION_KEY));
+  decode(PublicUser, readLocal(SESSION_KEY));
 
 export const rememberSessionUser = (user: CachedUser): void => {
   writeLocal(SESSION_KEY, user);
@@ -38,7 +38,7 @@ export const forgetSessionUser = (): void => {
 const CachedGroups = Schema.Array(GroupSummary);
 
 export const cachedGroups = (userId: string): readonly GroupSummary[] =>
-  decode(CachedGroups, readLocal<unknown>(groupsKey(userId))) ?? [];
+  decode(CachedGroups, readLocal(groupsKey(userId))) ?? [];
 
 export const rememberGroups = (userId: string, groups: readonly GroupSummary[]): void => {
   writeLocal(groupsKey(userId), groups);
@@ -52,7 +52,7 @@ export const CachedGroupView = Schema.Struct({
 export type CachedGroupView = typeof CachedGroupView.Type;
 
 export const cachedGroupView = (userId: string, groupRef: string): CachedGroupView | null =>
-  decode(CachedGroupView, readLocal<unknown>(groupViewKey(userId, groupRef)));
+  decode(CachedGroupView, readLocal(groupViewKey(userId, groupRef)));
 
 export const rememberGroupView = (
   userId: string,

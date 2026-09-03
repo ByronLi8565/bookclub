@@ -36,7 +36,3 @@ export async function storeSource(
     source: { id, kind, contentType: contentTypeFor(kind), size: bytes.byteLength },
   };
 }
-
-export function getSource(env: Env, id: string): Promise<R2ObjectBody | null> {
-  return env.BOOKS.get(id);
-}

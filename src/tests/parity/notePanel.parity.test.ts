@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 import { blockquote } from "../../client/logic/notes/format.ts";
 import {
   FocusedNoteHighlight,
@@ -17,6 +17,7 @@ const groupRef = "club-alpha";
 const bookTitles = new Map([[sourceId, "The Book"]]);
 
 const ready: NotesModel = { ...initialNotesModel(), ready: true, status: "online", notes };
+const originalTimezone = process.env.TZ;
 
 const foldkitPanel = (model: NotesModel) =>
   renderFoldkit<NotesModel, NotesMessage>({
@@ -38,6 +39,12 @@ const foldkitPanel = (model: NotesModel) =>
   });
 
 describe("note panel parity", () => {
+  beforeAll(() => {
+    process.env.TZ = "America/Chicago";
+  });
+  afterAll(() => {
+    process.env.TZ = originalTimezone;
+  });
   beforeEach(stubAnimationFrame);
 
   it("renders the thread React rendered", async () => {

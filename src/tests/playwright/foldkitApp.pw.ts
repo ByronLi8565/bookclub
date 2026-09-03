@@ -154,6 +154,15 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   expect(singlePaneWidths[0]).toBeGreaterThanOrEqual(884);
   expect(singlePaneWidths[1]).toBeGreaterThanOrEqual(280);
 
+  const readerOnly = page.getByRole("button", { name: "Show reader only" });
+  await expect(readerOnly).toHaveText("→");
+  await readerOnly.click();
+  await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-left/u);
+  const splitView = page.getByRole("button", { name: "Show split view" });
+  await expect(splitView).toHaveText("←");
+  await splitView.click();
+  await expect(page.locator(".workspace-layout")).not.toHaveClass(/split--expanded/u);
+
   await page.keyboard.press("Shift+ArrowRight");
   await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-left/u);
   await expect

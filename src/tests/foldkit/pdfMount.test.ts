@@ -93,6 +93,7 @@ const pendingTask = (): PendingTask => {
 
 const testEnvironment = (overrides: Partial<PdfMountEnvironment> = {}): PdfMountEnvironment => ({
   loadSource: mobyDickBytes,
+  prepareDocument: () => Promise.resolve(),
   loadDocument: loadRealDocument,
   rasterize: settledTask,
   loadTextLayerBuilder: null,
@@ -110,7 +111,7 @@ type Message = PdfMountMessage | typeof OpenedSource.Type;
 
 // One reader element per source: the keyed element makes a source switch a
 // destroy/insert, which is what releases the prior Mount's live resources.
-function runReader(environment: PdfMountEnvironment) {
+function runReader(environment: PdfMountEnvironment, initialSourceId = "source-a") {
   const received: Message[] = [];
   const container = document.createElement("div");
   container.id = "foldkit-pdf-mount-test";
@@ -122,7 +123,7 @@ function runReader(environment: PdfMountEnvironment) {
     Runtime.makeElement<Model, Message>({
       Model,
       container,
-      init: () => [{ sourceId: "source-a", page: 1 }, []],
+      init: () => [{ sourceId: initialSourceId, page: 1 }, []],
       update: (model, message) => {
         received.push(message);
         return [
@@ -201,6 +202,27 @@ describe("PDF Foldkit Mount", () => {
     await vi.waitFor(() => expect(document.querySelector(".pdf-scroller")).toBeNull());
   }, 30_000);
 
+  it("rerenders the current page when a backgrounded tab becomes visible", async () => {
+    const rasterized: number[] = [];
+    const { handle, received } = runReader(
+      testEnvironment({
+        rasterize: ({ page }) => {
+          rasterized.push(page.pageNumber);
+          return settledTask();
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(1), {
+      timeout: 20_000,
+    });
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => expect(rasterized.filter((page) => page === 1)).toHaveLength(2));
+    expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2);
+    handle.dispose();
+  }, 30_000);
+
   it("turns to a prefetched page without rasterizing it again", async () => {
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
       configurable: true,
@@ -222,6 +244,46 @@ describe("PDF Foldkit Mount", () => {
     await vi.waitFor(() => expect(rasterized).toContain(2), { timeout: 20_000 });
     expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
     await Effect.runPromise(adapter.turnPage("next"));
+    await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2));
+    expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
+
+    handle.dispose();
+  }, 30_000);
+
+  it("adopts an in-flight prefetch when its page is requested", async () => {
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => ({ setTransform: () => {}, drawImage: () => {} }),
+    });
+    let finishPrefetch!: () => void;
+    const rasterized: number[] = [];
+    const { adapter, handle, received } = runReader(
+      testEnvironment({
+        prefetchAdjacentPages: true,
+        rasterize: ({ page, canvas }) => {
+          canvas.width = 100;
+          canvas.height = 120;
+          rasterized.push(page.pageNumber);
+          return page.pageNumber === 2
+            ? {
+                promise: new Promise<void>((resolve) => {
+                  finishPrefetch = resolve;
+                }),
+                cancel: () => {},
+              }
+            : settledTask();
+        },
+      }),
+    );
+
+    await vi.waitFor(() => expect(finishPrefetch).toBeDefined(), { timeout: 20_000 });
+    const turned = Effect.runPromise(adapter.turnPage("next"));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
+    finishPrefetch();
+    await turned;
     await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2));
     expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
 
@@ -326,6 +388,34 @@ describe("PDF Foldkit Mount", () => {
     // handle only becomes reachable after release and must still be destroyed.
     deliver(late);
     await vi.waitFor(() => expect(late.loadingTask.destroyed).toBe(true));
+  }, 30_000);
+
+  it("reopens an immutable source without reading or parsing its bytes again", async () => {
+    let sourceLoads = 0;
+    let documentLoads = 0;
+    const environment = testEnvironment({
+      cacheDocumentsAcrossMounts: true,
+      loadSource: () => {
+        sourceLoads += 1;
+        return mobyDickBytes();
+      },
+      loadDocument: (bytes) => {
+        documentLoads += 1;
+        return loadRealDocument(bytes);
+      },
+    });
+
+    const first = runReader(environment, "cached-content-hash");
+    await vi.waitFor(() => expect(messagesOf(first.received, "PdfSpreadRendered")).toHaveLength(1));
+    first.handle.dispose();
+    const second = runReader(environment, "cached-content-hash");
+    await vi.waitFor(() =>
+      expect(messagesOf(second.received, "PdfSpreadRendered")).toHaveLength(1),
+    );
+
+    expect(sourceLoads).toBe(1);
+    expect(documentLoads).toBe(1);
+    second.handle.dispose();
   }, 30_000);
 
   it("resolves in-page search against captured geometry without touching the DOM", async () => {

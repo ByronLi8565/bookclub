@@ -16,7 +16,7 @@ const keyFor = (userId: string, groupId: string, sourceId: string): string =>
   `${userId}:${groupId}:${sourceId}`;
 
 const loadAll = (): Record<string, StoredBookmarkType[]> =>
-  decode(BookmarkCache, readLocal<unknown>(STORAGE_KEY)) ?? {};
+  decode(BookmarkCache, readLocal(STORAGE_KEY)) ?? {};
 
 const saveAll = (bookmarks: Record<string, StoredBookmarkType[]>): void =>
   writeLocal(STORAGE_KEY, bookmarks);

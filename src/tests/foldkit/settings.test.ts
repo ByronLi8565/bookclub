@@ -69,7 +69,9 @@ const groupRef = "parity-club-abc123";
 const renderTree = async (
   view: (h: HtmlBuilder<SettingsMessage>) => Html,
   id: string,
+  inspect?: (tree: HTMLElement, messages: SettingsMessage[]) => Promise<void>,
 ): Promise<HTMLElement> => {
+  const messages: SettingsMessage[] = [];
   const container = document.createElement("div");
   container.id = id;
   document.body.appendChild(container);
@@ -78,7 +80,10 @@ const renderTree = async (
       Model: SettingsModel,
       container,
       init: () => [initialSettingsModel(), []],
-      update: (current) => [current, []],
+      update: (current, message) => {
+        messages.push(message);
+        return [current, []];
+      },
       view: (_current, h) => view(h),
       devTools: false,
       slow: false,
@@ -87,6 +92,7 @@ const renderTree = async (
   await new Promise((resolve) => {
     setTimeout(resolve, 200);
   });
+  await inspect?.(document.body, messages);
   const html = document.body.innerHTML;
   handle.dispose();
   document.body.replaceChildren();
@@ -98,6 +104,7 @@ const renderTree = async (
 const renderSettings = (
   model: SettingsModel,
   context: { book: SettingsBook | null; signedIn?: boolean },
+  inspect?: (tree: HTMLElement, messages: SettingsMessage[]) => Promise<void>,
 ): Promise<HTMLElement> =>
   renderTree(
     (h) =>
@@ -111,6 +118,7 @@ const renderSettings = (
         h,
       ),
     "settings-view-test",
+    inspect,
   );
 
 const renderBackup = (model: SettingsModel): Promise<HTMLElement> =>
@@ -418,6 +426,19 @@ describe("the Foldkit settings modal", () => {
     const tree = await renderSettings(
       { ...initialSettingsModel(), category: "general", openDropdown: "readingPositionOpenPolicy" },
       { book },
+      async (menu, messages) => {
+        const options = menu.querySelectorAll<HTMLButtonElement>('button[role="menuitemradio"]');
+        expect(
+          [...options].map((option) => [option.title, option.getAttribute("aria-checked")]),
+        ).toEqual([
+          ["Sync", "true"],
+          ["Local", "false"],
+        ]);
+        options[1]?.click();
+        await vi.waitFor(() =>
+          expect(messages).toContainEqual(ChoseOpeningPosition({ value: "prefer-local" })),
+        );
+      },
     );
 
     const items = tree.querySelectorAll('ul.book-menu-list[role="menu"] > li[role="none"]');

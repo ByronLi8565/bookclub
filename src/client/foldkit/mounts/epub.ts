@@ -1,5 +1,6 @@
 import { Effect, Queue, Schedule, Schema, Stream } from "effect";
-import ePub, { EpubCFI, type Book, type Contents, type Rendition } from "epubjs";
+import type { Book, Contents, Rendition } from "epubjs";
+import EpubCFI from "epubjs/src/epubcfi.js";
 import type Navigation from "epubjs/types/navigation";
 import type Section from "epubjs/types/section";
 import { Mount } from "foldkit";
@@ -17,7 +18,18 @@ import {
   measureEpubPagination,
   type EpubPagination,
 } from "../../logic/reader/epubPagination.ts";
+import { makeEpubFontSize } from "../../logic/reader/epubFontSize.ts";
+import {
+  getCachedEpubPagination,
+  putCachedEpubPagination,
+} from "../../logic/reader/epubPaginationCache.ts";
 import { makeEpubReader } from "../../logic/reader/epubReader.ts";
+
+declare module "epubjs/types/utils/queue" {
+  export default interface Queue {
+    tick: (callback: () => void) => void;
+  }
+}
 
 export const EpubSpread = Schema.Literals(["auto", "none"]);
 export type EpubSpread = typeof EpubSpread.Type;
@@ -142,6 +154,7 @@ export interface EpubColors {
 }
 
 export interface EpubSessionOptions {
+  sourceId: string;
   element: Element;
   spread: EpubSpread;
   fontSizePoints: number;
@@ -149,10 +162,9 @@ export interface EpubSessionOptions {
   onHighlightClick: (id: string) => void;
 }
 
-// Constructing a session must be synchronous: the Mount registers teardown
-// before it awaits the book bytes, so a load that fails or is interrupted still
-// destroys the rendition it already created.
-export type EpubEngine = (options: EpubSessionOptions) => EpubSession;
+// Test engines are synchronous; the browser engine loads epub.js on demand.
+// The Mount awaits either form before opening bytes and owns teardown from then on.
+export type EpubEngine = (options: EpubSessionOptions) => EpubSession | Promise<EpubSession>;
 
 const SELECTION_POLL = Schedule.spaced("300 millis");
 
@@ -247,13 +259,15 @@ function applyEpubTheme(rendition: Rendition, colors: EpubColors): void {
   });
 }
 
-export const epubJsEngine: EpubEngine = ({
+export const epubJsEngine = async ({
+  sourceId,
   element,
   spread,
   fontSizePoints,
   colors,
   onHighlightClick,
-}) => {
+}: EpubSessionOptions): Promise<EpubSession> => {
+  const { default: ePub } = await import("epubjs");
   const book = ePub();
   const rendition = book.renderTo(element, {
     width: "100%",
@@ -261,6 +275,9 @@ export const epubJsEngine: EpubEngine = ({
     flow: "paginated",
     spread,
   });
+  // epub.js already waits for a frame before reporting the final location.
+  // Its command queue can advance as soon as the preceding task completes.
+  rendition.q.tick = queueMicrotask;
   // Keyboard events inside the EPUB iframe do not bubble into the application
   // document. Re-dispatch them there so the one reader keyboard contract owns
   // arrows, layout toggles, search, and chrome regardless of where focus sits.
@@ -321,7 +338,7 @@ export const epubJsEngine: EpubEngine = ({
   let currentSpread: EpubSpread = spread;
   let currentFontSize = fontSizePoints;
   applyEpubTheme(rendition, colors);
-  rendition.themes.override("font-size", `${fontSizePoints}pt`, true);
+  const fontSize = makeEpubFontSize(rendition, fontSizePoints);
 
   // SAFETY: bound because epub.js reads `this.displaying` inside `display`, and
   // its public declaration accepts the same optional string target.
@@ -329,6 +346,67 @@ export const epubJsEngine: EpubEngine = ({
 
   let opening: Promise<unknown> | null = null;
   let ready: Promise<void> | null = null;
+  let lastTarget: string | null = null;
+  let resumeFrame: number | null = null;
+
+  const resume = () => {
+    if (destroyed || document.visibilityState !== "visible" || ready === null) return;
+    if (resumeFrame !== null) cancelAnimationFrame(resumeFrame);
+    resumeFrame = requestAnimationFrame(() => {
+      resumeFrame = requestAnimationFrame(() => {
+        resumeFrame = null;
+        void ready
+          ?.then(async () => {
+            if (destroyed || !renditionState.manager) return;
+            const width = element.clientWidth;
+            const height = element.clientHeight;
+            if (width <= 0 || height <= 0) return;
+            const target = readPlace(rendition, pagination)?.cfi ?? lastTarget;
+            rendition.resize(width, height);
+            if (target) await display(target);
+          })
+          .catch(() => {});
+      });
+    });
+  };
+  document.addEventListener("visibilitychange", resume);
+  window.addEventListener("pageshow", resume);
+
+  const syncHighlights = (highlights: readonly PaintedHighlight[]): void => {
+    const wanted = new Map(highlights.map((highlight) => [highlight.id, highlight.cfi]));
+    for (const [id, cfi] of drawn) {
+      if (wanted.get(id) === cfi) continue;
+      rendition.annotations.remove(cfi, "highlight");
+      drawn.delete(id);
+    }
+    for (const [id, cfi] of wanted) {
+      if (drawn.has(id)) continue;
+      rendition.annotations.highlight(cfi, { id }, () => onHighlightClick(id), HIGHLIGHT_CLASS);
+      drawn.set(id, cfi);
+    }
+  };
+
+  const setSearchHighlight = (cfi: string | null): void => {
+    if (searchCfi !== null && searchCfi !== cfi) {
+      rendition.annotations.remove(searchCfi, "highlight");
+      // Removing by CFI takes the committed annotation with it when both sit
+      // on the same passage, so that one is drawn again.
+      const committed = [...drawn].find(([, drawnCfi]) => drawnCfi === searchCfi);
+      if (committed) {
+        const [id, drawnCfi] = committed;
+        rendition.annotations.highlight(
+          drawnCfi,
+          { id },
+          () => onHighlightClick(id),
+          HIGHLIGHT_CLASS,
+        );
+      }
+    }
+    searchCfi = cfi;
+    if (cfi !== null) {
+      rendition.annotations.highlight(cfi, {}, () => {}, SEARCH_HIGHLIGHT_CLASS);
+    }
+  };
 
   return {
     book,
@@ -351,6 +429,7 @@ export const epubJsEngine: EpubEngine = ({
         for (const target of candidates) {
           try {
             await display(target);
+            lastTarget = readPlace(rendition, pagination)?.cfi ?? target;
             return metadata?.title?.trim() || null;
           } catch {
             continue;
@@ -364,8 +443,12 @@ export const epubJsEngine: EpubEngine = ({
     place: () => readPlace(rendition, pagination),
     selection: () => readSelection(rendition),
     onMoved(handler) {
-      rendition.on("relocated", handler);
-      return () => rendition.off("relocated", handler);
+      const moved = () => {
+        lastTarget = readPlace(rendition, pagination)?.cfi ?? lastTarget;
+        handler();
+      };
+      rendition.on("relocated", moved);
+      return () => rendition.off("relocated", moved);
     },
     async turnPage(direction) {
       const started = ready;
@@ -384,48 +467,14 @@ export const epubJsEngine: EpubEngine = ({
     goTo: (cfi) => display(linearSpineTarget(book, cfi) ?? firstLinearSpineTarget(book)),
     setFontSize(points) {
       currentFontSize = points;
-      // Publisher styles commonly mark their body font size important. This is
-      // a reader preference, so it must outrank the book's presentation.
-      rendition.themes.override("font-size", `${points}pt`, true);
+      fontSize.set(points);
     },
     setColors(next) {
       applyEpubTheme(rendition, next);
     },
     clearSelection: () => clearContentSelections(rendition),
-    syncHighlights(highlights) {
-      const wanted = new Map(highlights.map((highlight) => [highlight.id, highlight.cfi]));
-      for (const [id, cfi] of drawn) {
-        if (wanted.get(id) === cfi) continue;
-        rendition.annotations.remove(cfi, "highlight");
-        drawn.delete(id);
-      }
-      for (const [id, cfi] of wanted) {
-        if (drawn.has(id)) continue;
-        rendition.annotations.highlight(cfi, { id }, () => onHighlightClick(id), HIGHLIGHT_CLASS);
-        drawn.set(id, cfi);
-      }
-    },
-    setSearchHighlight(cfi) {
-      if (searchCfi !== null && searchCfi !== cfi) {
-        rendition.annotations.remove(searchCfi, "highlight");
-        // Removing by CFI takes the committed annotation with it when both sit
-        // on the same passage, so that one is drawn again.
-        const committed = [...drawn].find(([, drawnCfi]) => drawnCfi === searchCfi);
-        if (committed) {
-          const [id, drawnCfi] = committed;
-          rendition.annotations.highlight(
-            drawnCfi,
-            { id },
-            () => onHighlightClick(id),
-            HIGHLIGHT_CLASS,
-          );
-        }
-      }
-      searchCfi = cfi;
-      if (cfi !== null) {
-        rendition.annotations.highlight(cfi, {}, () => {}, SEARCH_HIGHLIGHT_CLASS);
-      }
-    },
+    syncHighlights,
+    setSearchHighlight,
     async setSpread(next) {
       if (next === currentSpread) return;
       const place = readPlace(rendition, pagination);
@@ -450,28 +499,41 @@ export const epubJsEngine: EpubEngine = ({
       drawn.clear();
       const search = searchCfi;
       searchCfi = null;
-      this.syncHighlights(painted);
-      this.setSearchHighlight(search);
+      syncHighlights(painted);
+      setSearchHighlight(search);
       // A failed redisplay must remain retryable: the model already records
       // the requested layout, so only commit the imperative state once the
       // replacement content and its annotations are ready.
       currentSpread = next;
     },
     async measurePagination(isCancelled) {
+      const width = element.clientWidth;
+      const height = element.clientHeight;
+      const key = `${sourceId}:${Math.round(width)}x${Math.round(height)}:${currentFontSize}:${currentSpread}`;
+      const cached = getCachedEpubPagination(key);
+      if (cached !== null) {
+        pagination = cached;
+        return true;
+      }
       const measured = await measureEpubPagination(
         book,
-        element.clientWidth,
-        element.clientHeight,
+        width,
+        height,
         currentFontSize,
         currentSpread,
         isCancelled,
       );
       if (measured === null || isCancelled()) return false;
       pagination = measured;
+      putCachedEpubPagination(key, measured);
       return true;
     },
     destroy() {
       destroyed = true;
+      if (resumeFrame !== null) cancelAnimationFrame(resumeFrame);
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pageshow", resume);
+      fontSize.destroy();
       rendition.hooks.content.deregister(bridgeContent);
       for (const document of bridgedDocuments) {
         document.removeEventListener("keydown", forwardKey);
@@ -603,10 +665,19 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
               Queue.offerUnsafe(queue, message);
             };
 
+            // Source I/O and the on-demand epub.js chunk are independent. Start
+            // the bytes first so neither network request sits behind the other.
+            const sourceBytes = yield* Effect.sync(() => {
+              const pending = loadSource(sourceId, groupRef);
+              void pending.catch(() => {});
+              return pending;
+            });
+
             const session = yield* Effect.acquireRelease(
-              Effect.sync(() => {
+              Effect.promise(async () => {
                 requestedSpread = spread;
-                const created = engine({
+                const created = await engine({
+                  sourceId,
                   element,
                   spread,
                   fontSizePoints,
@@ -635,8 +706,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
             );
 
             const opened = yield* Effect.tryPromise({
-              try: () =>
-                loadSource(sourceId, groupRef).then((bytes) => session.load(bytes, initialCfi)),
+              try: () => sourceBytes.then((bytes) => session.load(bytes, initialCfi)),
               // Keep the rejection itself, so what the reader is told is what
               // actually went wrong with the book.
               catch: (cause) => cause,

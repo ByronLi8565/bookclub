@@ -1,5 +1,5 @@
 import { Effect, Option, Queue, Schedule, Schema, Stream } from "effect";
-import { Command, Subscription } from "foldkit";
+import { Command, Mount, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { HighlightAnchor, QuoteSelector } from "../../shared/types/notes.ts";
@@ -223,6 +223,28 @@ export const JumpedToHighlight = m("JumpedToHighlight", PendingJump.fields);
 export const SetReaderZoom = m("SetReaderZoom", { percent: Schema.Number });
 export const CompletedReaderAction = m("CompletedReaderAction");
 
+const RevealActiveSearchResult = Mount.define(
+  "RevealActiveSearchResult",
+  CompletedReaderAction,
+)((element) =>
+  Effect.sync(() => {
+    element.scrollIntoView({ block: "nearest" });
+    return CompletedReaderAction();
+  }),
+);
+
+const FocusReaderSearch = Mount.define(
+  "FocusReaderSearch",
+  CompletedReaderAction,
+)((element) =>
+  Effect.sync(() => {
+    if (element instanceof HTMLInputElement) {
+      element.focus();
+      element.select();
+    }
+  }).pipe(Effect.andThen(Effect.never)),
+);
+
 export const ReaderMessage = Schema.Union([
   SelectedReaderSource,
   ChangedReaderSearch,
@@ -341,6 +363,7 @@ export interface ReaderViewContext<Message> {
   readonly onSelectBook: (sourceId: string) => Message;
   readonly onRenameBook: ((sourceId: string, title: string) => Message) | null;
   readonly onAddBook: Message | null;
+  readonly readerOnlyControl: { readonly expanded: boolean; readonly onToggle: Message } | null;
   /** Only an EPUB session needs this at mount time — its content lives in an
    *  iframe the app's `:root` custom properties can't reach. A later theme
    *  change is pushed in through `ApplyReaderColors` instead of a remount. */
@@ -701,6 +724,37 @@ export const readerKeyMessage = (
   }
 };
 
+const refocusOpenReaderSearch = (event: KeyboardEvent, searchOpen: boolean): boolean => {
+  if (!searchOpen || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") {
+    return false;
+  }
+  const input = document.querySelector<HTMLInputElement>(".reader-search-input");
+  if (input === null) return false;
+  event.preventDefault();
+  input.focus();
+  input.select();
+  const value = input.value;
+  let activeInput = input;
+  let frames = 4;
+  const preserveSelectionThroughPendingRender = () => {
+    // A PDF render can replace the search row. Follow that replacement, but
+    // stop if the still-connected input lost focus through an actual action.
+    if (activeInput.isConnected && document.activeElement !== activeInput) return;
+    const current = document.querySelector<HTMLInputElement>(".reader-search-input");
+    if (current === null || current.value !== value) return;
+    current.focus();
+    current.select();
+    activeInput = current;
+    frames -= 1;
+    if (frames > 0) requestAnimationFrame(preserveSelectionThroughPendingRender);
+  };
+  // A clicked PDF result can still publish render state after this keydown.
+  // Preserve the selection across those pending patches, but stop immediately
+  // once the reader types so a new query is never re-selected underneath them.
+  requestAnimationFrame(preserveSelectionThroughPendingRender);
+  return true;
+};
+
 interface SwipeStart {
   x: number;
   y: number;
@@ -785,7 +839,11 @@ export const makeReaderSubscriptions = <Model, Message>({
               target: globalThis.document,
               type: "keydown",
               toMessage: (event) =>
-                Option.map(readerKeyMessage(event, searchOpen), (message) => toMessage(message)),
+                refocusOpenReaderSearch(event, searchOpen)
+                  ? Option.none()
+                  : Option.map(readerKeyMessage(event, searchOpen), (message) =>
+                      toMessage(message),
+                    ),
             }),
             Effect.sync(() => open),
           ),
@@ -1274,7 +1332,10 @@ export const makeReaderSlice = ({
       case "SelectedReaderSource":
         return [openReader(message), [LoadReaderSnapshot({ sourceId: message.sourceId })]];
       case "ChangedReaderSearch":
-        return [{ ...reader, searchQuery: message.query }, []];
+        return [
+          { ...reader, searchQuery: message.query, searchMatches: [], activeSearchMatch: 0 },
+          [ClearSearchHighlight({ kind: reader.kind })],
+        ];
       case "OpenedReaderSearch":
         return [{ ...reader, searchOpen: true }, []];
       case "ClosedReaderSearch":
@@ -1285,9 +1346,13 @@ export const makeReaderSlice = ({
       case "RequestedReaderSearch":
         return [reader, [SearchReader({ query: reader.searchQuery, kind: reader.kind })]];
       case "SearchedReader":
-        return reader.searchQuery === message.query
-          ? [{ ...reader, searchMatches: message.matches, activeSearchMatch: 0 }, []]
-          : [reader, []];
+        if (reader.searchQuery !== message.query) return [reader, []];
+        return message.matches[0] === undefined
+          ? [{ ...reader, searchMatches: [], activeSearchMatch: 0 }, []]
+          : [
+              { ...reader, searchMatches: message.matches, activeSearchMatch: 0 },
+              [GoToSearchMatch({ anchor: message.matches[0].anchor, kind: reader.kind })],
+            ];
       case "SelectedSearchMatch": {
         if (reader.searchMatches.length === 0) return [reader, []];
         const activeSearchMatch =
@@ -1553,7 +1618,6 @@ export const makeReaderSlice = ({
           ? [
               {
                 ...reader,
-                loading: false,
                 title: message.title,
                 totalPages: message.totalPages,
                 zoomPercent: message.zoom,
@@ -1567,6 +1631,7 @@ export const makeReaderSlice = ({
           ? [
               {
                 ...reader,
+                loading: false,
                 page: message.pages[0] ?? 1,
                 totalPages: message.total,
                 percentage: message.percentage,
@@ -1618,6 +1683,7 @@ export const makeReaderSlice = ({
       [
         h.input([
           h.Class("reader-search-input"),
+          h.OnMount(FocusReaderSearch()),
           h.Type("text"),
           h.AriaLabel("Find in book"),
           h.Placeholder("Find in book"),
@@ -1627,15 +1693,17 @@ export const makeReaderSlice = ({
           h.OnKeyDownPreventDefault((key, modifiers) =>
             key === "Enter"
               ? Option.some(
-                  modifiers.shiftKey
-                    ? SelectedSearchMatch({ index: reader.activeSearchMatch - 1 })
-                    : RequestedReaderSearch(),
+                  searchCount === 0
+                    ? RequestedReaderSearch()
+                    : SelectedSearchMatch({
+                        index: reader.activeSearchMatch + (modifiers.shiftKey ? -1 : 1),
+                      }),
                 )
               : key === "Escape"
                 ? Option.some(ClosedReaderSearch())
-                : key === "ArrowRight" && searchCount > 0
+                : key === "ArrowDown" && searchCount > 0
                   ? Option.some(SelectedSearchMatch({ index: reader.activeSearchMatch + 1 }))
-                  : key === "ArrowLeft" && searchCount > 0
+                  : key === "ArrowUp" && searchCount > 0
                     ? Option.some(SelectedSearchMatch({ index: reader.activeSearchMatch - 1 }))
                     : Option.none(),
           ),
@@ -1695,6 +1763,7 @@ export const makeReaderSlice = ({
                 ? "reader-search-result is-active"
                 : "reader-search-result",
             ),
+            ...(index === reader.activeSearchMatch ? [h.OnMount(RevealActiveSearchResult())] : []),
             h.OnClick(SelectedSearchMatch({ index })),
           ],
           [
@@ -1833,6 +1902,23 @@ export const makeReaderSlice = ({
         h.span([h.Class("spacer")], []),
         ...readerZoom(reader, h, backendFor(reader.kind).zoom(reader)),
         bookmarkControls,
+        ...(context.readerOnlyControl === null
+          ? []
+          : [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.AriaLabel(
+                    context.readerOnlyControl.expanded ? "Show split view" : "Show reader only",
+                  ),
+                  h.Title(
+                    context.readerOnlyControl.expanded ? "Show split view" : "Show reader only",
+                  ),
+                  h.OnClick(context.readerOnlyControl.onToggle),
+                ],
+                [context.readerOnlyControl.expanded ? "←" : "→"],
+              ),
+            ]),
       ],
     );
 

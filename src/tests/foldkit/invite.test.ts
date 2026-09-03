@@ -22,7 +22,6 @@ import {
   SubmittedInvite,
   initialInviteModel,
   inviteView,
-  isInviteMessage,
   updateInvite,
   type InviteMessage,
 } from "../../client/foldkit/invite.ts";
@@ -71,11 +70,6 @@ const render = async (model: InviteModel): Promise<HTMLElement> => {
 };
 
 describe("Foldkit invite stories", () => {
-  it("recognises only its own messages", () => {
-    expect(isInviteMessage(FailedInvite())).toBe(true);
-    expect(isInviteMessage({ _tag: "ChangedNoteComposer" })).toBe(false);
-  });
-
   it("asks for the club's link when the modal opens", () => {
     Story.story(
       updateInvite,

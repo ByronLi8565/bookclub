@@ -26,15 +26,12 @@ import {
   Club,
   Home,
   LoadGroups,
-  LoadInvite,
   LoadedSession,
   LoadedGroups,
-  LoadedInvite,
   Model,
   Navigated,
   PasswordLogin,
   RequestedDeleteGroup,
-  RequestedInvite,
   RequestedSignOut,
   SignOut,
   SignedOut,
@@ -111,16 +108,13 @@ describe("Foldkit Bookclub boundary", () => {
     expect(makeBookclubApplication(container).runtimeId).toBe(FOLDKIT_RUNTIME_ID);
   });
 
-  it("drives invite, deletion, and signout as explicit control-plane Commands", () => {
+  it("drives deletion and signout as explicit control-plane Commands", () => {
     const [initial] = init();
 
     const groupId = "group-1";
     Story.story(
       update,
       Story.given({ ...initial, route: Club({ groupRef: "club-ref" }) }),
-      Story.message(RequestedInvite({ groupRef: "club-ref" })),
-      Story.Command.resolve(LoadInvite, LoadedInvite({ token: "invite-token" })),
-      Story.model((model) => expect(model.inviteToken).toBe("invite-token")),
       Story.message(RequestedDeleteGroup({ groupRef: "club-ref", groupId })),
       Story.Command.resolve(DeleteGroup, DeletedGroup({ groupId })),
       // Deleting a club navigates by URL rather than by assignment, so the

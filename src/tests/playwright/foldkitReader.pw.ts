@@ -111,6 +111,7 @@ for (const book of books) {
     await expect.poll(() => pageCount(page), { timeout: 30_000 }).toBe(first);
 
     await page.keyboard.press("Meta+f");
+    await expect(page.getByLabel("Find in book")).toBeFocused();
     await page.getByLabel("Find in book").fill("the");
     await page.getByLabel("Find in book").press("Enter");
     const results = page.getByRole("option");
@@ -121,6 +122,19 @@ for (const book of books) {
     await expect(page.locator(".reader-search-results")).toHaveCSS("overflow-y", "auto");
     await results.nth(1).click();
     await expect(results.nth(1)).toHaveAttribute("aria-selected", "true");
+
+    await page.keyboard.press("Meta+f");
+    await expect(page.getByLabel("Find in book")).toBeFocused();
+    await expect
+      .poll(() =>
+        page.getByLabel("Find in book").evaluate((input) => {
+          if (!(input instanceof HTMLInputElement)) throw new Error("Find control is not an input");
+          return [input.selectionStart, input.selectionEnd, input.value.length];
+        }),
+      )
+      .toEqual([0, 3, 3]);
+    await page.getByLabel("Find in book").press("Enter");
+    await expect(results.nth(2)).toHaveAttribute("aria-selected", "true");
 
     await page.getByLabel("Next match").click();
     await expect
@@ -232,19 +246,26 @@ test("Foldkit EPUB: text size changes in two-point steps", async ({ page }) => {
   const frame = await epubFrame(page);
   const bodyFontSize = () =>
     frame.locator("body").evaluate((body) => Number(getComputedStyle(body).fontSize.slice(0, -2)));
+  const paragraphFontSize = () =>
+    frame
+      .locator("p")
+      .first()
+      .evaluate((paragraph) => Number(getComputedStyle(paragraph).fontSize.slice(0, -2)));
   await frame.locator("body").evaluate((body) => {
     const publisherStyles = body.ownerDocument.createElement("style");
-    publisherStyles.textContent = "body { font-size: 7px !important; }";
+    publisherStyles.textContent = "body { font-size: 7px !important; } p { font-size: small; }";
     body.ownerDocument.head.appendChild(publisherStyles);
   });
 
   await expect(page.locator(".font-size")).toHaveText("16 pt");
   await expect.poll(bodyFontSize).toBeCloseTo(16 * (4 / 3), 4);
+  const paragraphAtSixteen = await paragraphFontSize();
 
   await page.getByTitle("Increase text size").click();
 
   await expect(page.locator(".font-size")).toHaveText("18 pt");
   await expect.poll(bodyFontSize).toBeCloseTo(24, 4);
+  await expect.poll(paragraphFontSize).toBeCloseTo(paragraphAtSixteen * (18 / 16), 4);
 });
 
 test("Foldkit EPUB: pressing inside the book dismisses parent reader chrome", async ({ page }) => {
@@ -351,7 +372,7 @@ test("Foldkit reader: F fits the PDF text to the viewport", async ({ page }) => 
     .first()
     .evaluate((canvas) => canvas.getBoundingClientRect().width);
   const fittedZoomLabel = await page.locator(".font-size").textContent();
-  await page.getByTitle("Increase text size").click();
+  await page.getByTitle("Zoom in").click();
   await expect(page.locator(".font-size")).not.toHaveText(fittedZoomLabel ?? "");
   const manualZoom = await page.locator(".font-size").textContent();
   const manualPage = await pageCount(page);
@@ -432,7 +453,7 @@ test("Foldkit reader: EPUB stays inside a resized one- or two-page viewport", as
 test("Foldkit reader: a PDF page turn does not inherit horizontal panning", async ({ page }) => {
   await openBook(page, books[0].path, books[0].ready);
   const scroller = page.locator(".pdf-scroller");
-  for (let step = 0; step < 3; step++) await page.getByTitle("Increase text size").click();
+  for (let step = 0; step < 3; step++) await page.getByTitle("Zoom in").click();
   await scroller.evaluate((element) => {
     element.scrollLeft = 120;
     element.scrollTop = element.scrollHeight;

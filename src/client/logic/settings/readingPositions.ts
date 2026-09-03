@@ -24,7 +24,7 @@ function samePosition(a: StoredReadingPosition | null, b: StoredReadingPosition 
 }
 
 function loadAll(): Record<string, ReadingPositionRecord> {
-  const stored = readVersionedLocal<unknown>(STORAGE_KEY, LEGACY_STORAGE_KEY);
+  const stored = readVersionedLocal(STORAGE_KEY, LEGACY_STORAGE_KEY);
   return decode(ReadingPositionCache, stored) ?? {};
 }
 
@@ -215,9 +215,6 @@ export const syncReadingPositionWith = Effect.fn("ReadingPositions.syncWith")(fu
   mergeServerReadingPosition(userId, result);
   return true;
 });
-
-export const fetchServerReadingPosition = (userId: string, groupId: string, sourceId: string) =>
-  fetchReadingPositionWith(requestTransport, userId, groupId, sourceId);
 
 export const syncReadingPosition = (
   userId: string,

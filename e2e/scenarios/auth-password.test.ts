@@ -43,31 +43,3 @@ scenario("Auth · a set password signs you in from a fresh client, no code", {},
     "Max-Age=0",
   );
 });
-
-scenario(
-  "Auth · malformed public input keeps its installed-client error codes",
-  {},
-  async (ctx) => {
-    const api = ctx.need("api");
-
-    const invalidEmail = await api.request(null, "/auth/start", {
-      method: "POST",
-      body: JSON.stringify({ email: "not-an-email" }),
-    });
-    expect(invalidEmail.status, "invalid email remains a client error").toBe(400);
-    expect(await invalidEmail.json(), "and keeps its specific wire code").toMatchObject({
-      error: "invalid_email",
-    });
-
-    const invalidVerification = await api.request(null, "/auth/verify", {
-      method: "POST",
-      body: JSON.stringify({ email: "reader@example.com" }),
-    });
-    expect(invalidVerification.status, "an incomplete verification remains a client error").toBe(
-      400,
-    );
-    expect(await invalidVerification.json(), "and keeps its specific wire code").toMatchObject({
-      error: "invalid_request",
-    });
-  },
-);

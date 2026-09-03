@@ -72,6 +72,11 @@ function pdfjsLib(): Promise<typeof PdfjsModule> {
   return pdfjsPromise;
 }
 
+/** Start fetching the parser chunk while the source bytes are still loading. */
+export async function preparePdfRuntime(): Promise<void> {
+  await pdfjsLib();
+}
+
 // TextLayerBuilder reads pdfjsLib from globalThis at import time.
 export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilder> {
   const lib = await pdfjsLib();

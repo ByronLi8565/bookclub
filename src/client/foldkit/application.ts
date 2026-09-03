@@ -3,12 +3,7 @@ import { Command, Navigation, Runtime, Subscription } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { ts } from "foldkit/schema";
-import {
-  GroupRoleSchema,
-  GroupSummary,
-  Membership,
-  RosterEntry,
-} from "../../shared/types/groups.ts";
+import { GroupSummary, Membership, RosterEntry } from "../../shared/types/groups.ts";
 import { PasskeyInfo } from "../../shared/types/passkeys.ts";
 import { groupUrlName } from "../../shared/groupUrls.ts";
 import {
@@ -39,7 +34,7 @@ import {
 import { loadingView } from "./loading.ts";
 import { escapeKeyStream, modalView, pressOutsideModalStream } from "./modal.ts";
 import { settingsIconView } from "./icons.ts";
-import { avatarImagePath, avatarInitial } from "../logic/groups/groupClient.ts";
+import { avatarImagePath } from "../../shared/types/profiles.ts";
 import { books } from "../../shared/sources.ts";
 import { GroupAction, permits } from "../../shared/groupPermissions.ts";
 import { stepExpandedPane } from "../logic/visibility.ts";
@@ -257,18 +252,15 @@ export const Model = Schema.Struct({
   /** Why the club on screen could not be opened, when it could not be. Held on
    *  the Model rather than raised as a toast because each answer is a page. */
   clubError: Schema.NullOr(Schema.Literals(["notfound", "offline"])),
-  joinGroupRef: Schema.String,
   /** The token an invite link arrived with, held until the club reports whether
    *  this reader is already a member. */
   pendingInvite: Schema.NullOr(Schema.String),
-  inviteToken: Schema.String,
   accountPasskeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
   passkeyLabel: Schema.String,
   currentPassword: Schema.String,
   newPassword: Schema.String,
   accountBusy: Schema.Boolean,
-  selectedSourceId: Schema.NullOr(Schema.String),
   /** A jump waiting on the book it points into. Clicking a note about another
    *  book opens that book, and the anchor can only be applied once it is. */
   pendingJump: Schema.NullOr(PendingJump),
@@ -354,9 +346,6 @@ export const LoadedAccountSecurity = m("LoadedAccountSecurity", {
   passkeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
 });
-export const LoadedInvite = m("LoadedInvite", { token: Schema.String });
-export const ChangedInviteToken = m("ChangedInviteToken", { token: Schema.String });
-export const ChangedJoinGroupRef = m("ChangedJoinGroupRef", { groupRef: Schema.String });
 export const CompletedAccountAction = m("CompletedAccountAction", {
   title: Schema.String,
   message: Schema.String,
@@ -386,17 +375,6 @@ export const RequestedRemovePassword = m("RequestedRemovePassword", {
   currentPassword: Schema.String,
 });
 export const RequestedRemovePasskey = m("RequestedRemovePasskey", { id: Schema.String });
-export const RequestedInvite = m("RequestedInvite", { groupRef: Schema.String });
-export const RequestedJoin = m("RequestedJoin", { groupRef: Schema.String, token: Schema.String });
-export const RequestedRenameGroup = m("RequestedRenameGroup", {
-  groupRef: Schema.String,
-  title: Schema.String,
-});
-export const RequestedMemberRole = m("RequestedMemberRole", {
-  groupRef: Schema.String,
-  memberId: Schema.String,
-  role: GroupRoleSchema,
-});
 export const RequestedDeleteGroup = m("RequestedDeleteGroup", {
   groupRef: Schema.String,
   groupId: Schema.String,
@@ -457,9 +435,6 @@ export type Message =
   | typeof MissingGroup.Type
   | typeof UnreachableGroup.Type
   | typeof LoadedAccountSecurity.Type
-  | typeof LoadedInvite.Type
-  | typeof ChangedInviteToken.Type
-  | typeof ChangedJoinGroupRef.Type
   | typeof CompletedAccountAction.Type
   | typeof FailedAccountAction.Type
   | typeof ChangedPasskeyLabel.Type
@@ -476,10 +451,6 @@ export type Message =
   | typeof RequestedSetPassword.Type
   | typeof RequestedRemovePassword.Type
   | typeof RequestedRemovePasskey.Type
-  | typeof RequestedInvite.Type
-  | typeof RequestedJoin.Type
-  | typeof RequestedRenameGroup.Type
-  | typeof RequestedMemberRole.Type
   | typeof RequestedDeleteGroup.Type
   | typeof FailedClientCommand.Type
   | typeof RequestedPasskeyRegistration.Type
@@ -826,17 +797,6 @@ export const RenameGroup = Command.define("RenameGroup", {
     ),
 });
 
-export const LoadInvite = Command.define("LoadInvite", {
-  args: { groupRef: Schema.String },
-  messages: [LoadedInvite, FailedClientCommand],
-  execute: ({ groupRef }) =>
-    bookclubClient.pipe(
-      Effect.flatMap((client) => client.groups.inviteLink({ params: { groupRef }, query: {} })),
-      Effect.map(({ token }) => LoadedInvite({ token })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
-    ),
-});
-
 export const JoinGroup = Command.define("JoinGroup", {
   args: { groupRef: Schema.String, token: Schema.String },
   messages: [JoinedGroup, FailedJoin],
@@ -845,21 +805,6 @@ export const JoinGroup = Command.define("JoinGroup", {
       Effect.flatMap((client) => client.groups.join({ params: { groupRef }, payload: { token } })),
       Effect.map(({ group }) => JoinedGroup({ group })),
       Effect.catch(() => Effect.succeed(FailedJoin())),
-    ),
-});
-
-export const SetMemberRole = Command.define("SetMemberRole", {
-  args: { groupRef: Schema.String, memberId: Schema.String, role: GroupRoleSchema },
-  messages: [CompletedAccountAction, FailedClientCommand],
-  execute: ({ groupRef, memberId, role }) =>
-    bookclubClient.pipe(
-      Effect.flatMap((client) =>
-        client.groups.setMemberRole({ params: { groupRef, memberId }, payload: { role } }),
-      ),
-      Effect.as(CompletedAccountAction({ title: "Role changed", message: `Now a ${role}.` })),
-      Effect.catch(() =>
-        Effect.succeed(FailedClientCommand({ message: "Couldn't change that member's role." })),
-      ),
     ),
 });
 
@@ -942,16 +887,13 @@ export const init = (): readonly [Model, []] => [
     membership: null,
     members: [],
     clubError: null,
-    joinGroupRef: "",
     pendingInvite: null,
-    inviteToken: "",
     accountPasskeys: [],
     hasPassword: false,
     passkeyLabel: "",
     currentPassword: "",
     newPassword: "",
     accountBusy: false,
-    selectedSourceId: null,
     pendingJump: null,
     reader: null,
     overlay: NoOverlay(),
@@ -1181,7 +1123,7 @@ const updateUploadSlice = (model: Model, message: UploadMessage): Update => {
   if (message._tag !== "UploadedBook") return [withUpload, commands];
   const group = model.currentGroup;
   return [
-    { ...withUpload, overlay: NoOverlay(), selectedSourceId: message.sourceId },
+    { ...withUpload, overlay: NoOverlay() },
     group === null
       ? commands
       : [
@@ -1552,11 +1494,10 @@ const updateSlices = (model: Model, message: Message): Update => {
           ? message.sourceId
           : (group.sources[0] ?? null);
       const meta = stored === null ? undefined : group.sourceMeta[stored];
-      const chosen = { ...model, selectedSourceId: stored };
       return stored === null || meta === undefined || model.reader?.sourceId === stored
-        ? [chosen, []]
+        ? [model, []]
         : updateReaderSlice(
-            chosen,
+            model,
             SelectedReaderSource({
               groupRef: groupUrlName(group),
               sourceId: stored,
@@ -1571,7 +1512,7 @@ const updateSlices = (model: Model, message: Message): Update => {
       const meta = group?.sourceMeta[message.sourceId];
       if (group === undefined || group === null || meta === undefined) return [model, []];
       const [opened, commands] = updateReaderSlice(
-        { ...model, selectedSourceId: message.sourceId },
+        model,
         SelectedReaderSource({
           groupRef: groupUrlName(group),
           sourceId: message.sourceId,
@@ -1606,12 +1547,6 @@ const updateSlices = (model: Model, message: Message): Update => {
         { ...model, accountPasskeys: message.passkeys, hasPassword: message.hasPassword },
         [],
       ];
-    case "LoadedInvite":
-      return [{ ...model, inviteToken: message.token }, []];
-    case "ChangedInviteToken":
-      return [{ ...model, inviteToken: message.token }, []];
-    case "ChangedJoinGroupRef":
-      return [{ ...model, joinGroupRef: message.groupRef }, []];
     case "CompletedAccountAction":
       return withToast(
         { ...model, accountBusy: false, passkeyLabel: "", currentPassword: "", newPassword: "" },
@@ -1659,14 +1594,6 @@ const updateSlices = (model: Model, message: Message): Update => {
       return [model, [RemoveAccountPassword(message)]];
     case "RequestedRemovePasskey":
       return [model, [RemoveAccountPasskey(message)]];
-    case "RequestedInvite":
-      return [model, [LoadInvite(message)]];
-    case "RequestedJoin":
-      return [model, [JoinGroup(message)]];
-    case "RequestedRenameGroup":
-      return [model, [RenameGroup(message)]];
-    case "RequestedMemberRole":
-      return [model, [SetMemberRole(message)]];
     case "RequestedDeleteGroup":
       return [model, [DeleteGroup(message)]];
     case "RequestedUrl":
@@ -1888,7 +1815,7 @@ const workspaceLayoutView = (
                 member?.avatarImageId === undefined
                   ? null
                   : avatarImagePath(author.id, member.avatarImageId),
-              initials: avatarInitial(author.name),
+              initials: author.name.slice(0, 1).toUpperCase(),
               name: author.name,
             };
           }
@@ -1945,6 +1872,14 @@ const workspaceLayoutView = (
                 ? (sourceId, title) => RequestedBookRename({ sourceId, title })
                 : null,
               onAddBook: OpenedOverlay({ overlay: UploadOverlay() }),
+              readerOnlyControl: narrow
+                ? null
+                : {
+                    expanded: model.expandedPane === "left",
+                    onToggle: SteppedExpandedPane({
+                      direction: model.expandedPane === "left" ? "left" : "right",
+                    }),
+                  },
               colors: resolveThemeTokens(model.settings.prefs.appearance),
             },
             h,

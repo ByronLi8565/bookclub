@@ -92,6 +92,11 @@ function token(): string {
   return Encoding.encodeHex(crypto.getRandomValues(new Uint8Array(16)));
 }
 
+function rosterEntry(id: string, member: Member): RosterEntry {
+  const entry: RosterEntry = { id, name: member.name, email: member.email, role: member.role };
+  return member.avatarImageId ? { ...entry, avatarImageId: member.avatarImageId } : entry;
+}
+
 export class GroupAgent extends Agent<Env, GroupState> {
   initialState: GroupState = {
     groupId: "",
@@ -148,12 +153,20 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, role: member.role };
   }
 
-  invite(callerId: string, email: string): InviteResult {
+  private requireAction(
+    callerId: string,
+    action: GroupAction,
+  ): { ok: true; role: GroupRole } | GroupFailure<AccessFailureReason> {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.InviteMember)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
+    return permits(guard.role, action)
+      ? guard
+      : { ok: false, reason: GroupFailureReason.Forbidden };
+  }
+
+  invite(callerId: string, email: string): InviteResult {
+    const guard = this.requireAction(callerId, GroupAction.InviteMember);
+    if (!guard.ok) return guard;
 
     const normalized = canonicalEmail(email);
     const existing = Object.entries(this.state.invites).find(([, inv]) => inv.email === normalized);
@@ -188,46 +201,27 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   ensureOpenInvite(callerId: string): InviteLinkResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.InviteMember);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.InviteMember)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     if (this.state.openInvite === "") this.setState({ ...this.state, openInvite: token() });
     return { ok: true, token: this.state.openInvite };
   }
 
   rotateOpenInvite(callerId: string): InviteLinkResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.InviteMember);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.InviteMember)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     const t = token();
     this.setState({ ...this.state, openInvite: t });
     return { ok: true, token: t };
   }
 
   roster(): RosterEntry[] {
-    return Object.entries(this.state.members).map(([id, m]) => {
-      return m.avatarImageId
-        ? { id, name: m.name, email: m.email, role: m.role, avatarImageId: m.avatarImageId }
-        : { id, name: m.name, email: m.email, role: m.role };
-    });
+    return Object.entries(this.state.members).map(([id, member]) => rosterEntry(id, member));
   }
 
   memberProfile(userId: string): RosterEntry | null {
     const member = this.state.members[userId];
-    if (!member) return null;
-    return member.avatarImageId
-      ? {
-          id: userId,
-          name: member.name,
-          email: member.email,
-          role: member.role,
-          avatarImageId: member.avatarImageId,
-        }
-      : { id: userId, name: member.name, email: member.email, role: member.role };
+    return member ? rosterEntry(userId, member) : null;
   }
 
   setMemberProfile(userId: string, name: string, avatarImageId?: string): RosterEntry | null {
@@ -238,17 +232,12 @@ export class GroupAgent extends Agent<Env, GroupState> {
     if (next.name !== member.name || avatarImageId !== member.avatarImageId) {
       this.setState({ ...this.state, members: { ...this.state.members, [userId]: next } });
     }
-    return avatarImageId
-      ? { id: userId, name: next.name, email: next.email, role: next.role, avatarImageId }
-      : { id: userId, name: next.name, email: next.email, role: next.role };
+    return rosterEntry(userId, next);
   }
 
   renameGroup(callerId: string, rawTitle: string): RenameGroupResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.RenameClub);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.RenameClub)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     const title = rawTitle.trim();
     if (title === "") return { ok: false, reason: GroupFailureReason.Empty };
     this.setState({
@@ -267,11 +256,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   renameBook(callerId: string, sourceId: string, rawTitle: string): RenameResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.RenameBook);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.RenameBook)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     if (!this.state.sources.includes(sourceId))
       return { ok: false, reason: GroupFailureReason.BadSource };
     const title = rawTitle.trim();
@@ -284,11 +270,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   resolveBookTitle(callerId: string, sourceId: string, rawTitle: string): RenameResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.RenameBook);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.RenameBook)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     if (!this.state.sources.includes(sourceId))
       return { ok: false, reason: GroupFailureReason.BadSource };
     const title = rawTitle.trim();
@@ -319,11 +302,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   addSource(callerId: string, sourceId: string, meta: SourceMeta): AddSourceResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.UploadBook);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.UploadBook)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     if (this.state.sources.includes(sourceId)) return { ok: true, summary: this.summary() };
     const sources = [...this.state.sources, sourceId];
     this.setState({
@@ -406,11 +386,8 @@ export class GroupAgent extends Agent<Env, GroupState> {
   }
 
   deleteGroup(callerId: string): DeleteGroupResult {
-    const guard = this.requireMember(callerId);
+    const guard = this.requireAction(callerId, GroupAction.DeleteClub);
     if (!guard.ok) return guard;
-    if (!permits(guard.role, GroupAction.DeleteClub)) {
-      return { ok: false, reason: GroupFailureReason.Forbidden };
-    }
     const result = {
       ok: true as const,
       groupId: this.state.groupId,

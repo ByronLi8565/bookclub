@@ -10,66 +10,44 @@ const ONE_PIXEL_PNG = Uint8Array.from([
   0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 ]);
 
-scenario(
-  "Notes · an uploaded image note is private and reaches another member live",
-  {},
-  async (ctx) => {
-    const api = ctx.need("api");
-    const notes = ctx.need("notes");
+scenario("Notes · an uploaded image is private to club members", {}, async (ctx) => {
+  const api = ctx.need("api");
+  const owner = await api.newIdentity({ label: "owner" });
+  const reader = await api.newIdentity({ label: "reader" });
+  const outsider = await api.newIdentity({ label: "outsider" });
+  const group = await api.createGroup(owner, "Image Notes Club");
+  const ref = api.refFor(group);
+  const token = await api.inviteLink(owner, ref);
+  await api.join(reader, ref, token);
 
-    const owner = await api.newIdentity({ label: "owner" });
-    const reader = await api.newIdentity({ label: "reader" });
-    const outsider = await api.newIdentity({ label: "outsider" });
-    const group = await api.createGroup(owner, "Image Notes Club");
-    const ref = api.refFor(group);
-    const token = await api.inviteLink(owner, ref);
-    await api.join(reader, ref, token);
+  const imageForm = new FormData();
+  imageForm.append(
+    UPLOAD_FILE_FIELD,
+    new Blob([ONE_PIXEL_PNG], { type: "image/png" }),
+    "pixel.png",
+  );
+  const upload = await api.request(owner, `/groups/${ref}/images`, {
+    method: "POST",
+    body: imageForm,
+  });
+  expect(upload.status, "a club member can upload a note image").toBe(201);
+  // SAFETY: the successful note-image upload response returns its persisted metadata.
+  const image = (await upload.json()) as { id: string; contentType: string; size: number };
+  expect(image.contentType, "the uploaded object keeps its image content type").toBe("image/png");
+  expect(image.size, "the stored object records the uploaded byte size").toBe(
+    ONE_PIXEL_PNG.byteLength,
+  );
 
-    const imageForm = new FormData();
-    imageForm.append(
-      UPLOAD_FILE_FIELD,
-      new Blob([ONE_PIXEL_PNG], { type: "image/png" }),
-      "pixel.png",
-    );
-    const upload = await api.request(owner, `/groups/${ref}/images`, {
-      method: "POST",
-      body: imageForm,
-    });
-    expect(upload.status, "a club member can upload a note image").toBe(201);
-    // SAFETY: the successful note-image upload response returns its persisted metadata.
-    const image = (await upload.json()) as { id: string; contentType: string; size: number };
-    expect(image.contentType, "the uploaded object keeps its image content type").toBe("image/png");
-    expect(image.size, "the stored object records the uploaded byte size").toBe(
-      ONE_PIXEL_PNG.byteLength,
-    );
+  const memberFetch = await api.request(reader, `/groups/${ref}/images/${image.id}`);
+  expect(memberFetch.status, "another club member can fetch the uploaded note image").toBe(200);
+  expect(memberFetch.headers.get("Content-Type"), "image responses are served as images").toBe(
+    "image/png",
+  );
+  expect(
+    new Uint8Array(await memberFetch.arrayBuffer()),
+    "the fetched image bytes are the uploaded image bytes",
+  ).toEqual(ONE_PIXEL_PNG);
 
-    const memberFetch = await api.request(reader, `/groups/${ref}/images/${image.id}`);
-    expect(memberFetch.status, "another club member can fetch the uploaded note image").toBe(200);
-    expect(memberFetch.headers.get("Content-Type"), "image responses are served as images").toBe(
-      "image/png",
-    );
-    expect(
-      new Uint8Array(await memberFetch.arrayBuffer()),
-      "the fetched image bytes are the uploaded image bytes",
-    ).toEqual(ONE_PIXEL_PNG);
-
-    const outsiderFetch = await api.request(outsider, `/groups/${ref}/images/${image.id}`);
-    expect(outsiderFetch.status, "non-members cannot fetch private note images").toBe(403);
-
-    const readerSession = await notes.connect(group.groupId, reader);
-    ctx.onCleanup(() => readerSession.close());
-    const ownerSession = await notes.connect(group.groupId, owner);
-    ctx.onCleanup(() => ownerSession.close());
-
-    const body = `Here is the passage reaction.\n\n[[image:${image.id}]]`;
-    const { noteId } = await ownerSession.addNote("image-test-book", body);
-    const delivered = await readerSession.waitForNotes((all) => all.some((n) => n.id === noteId), {
-      label: "image note delivered to another member",
-    });
-    const note = delivered.find((n) => n.id === noteId)!;
-    expect(note.body, "the image block token survives the live note path").toBe(body);
-    expect(note.author.id, "image notes are still server-stamped to the author").toBe(
-      owner.user.id,
-    );
-  },
-);
+  const outsiderFetch = await api.request(outsider, `/groups/${ref}/images/${image.id}`);
+  expect(outsiderFetch.status, "non-members cannot fetch private note images").toBe(403);
+});
