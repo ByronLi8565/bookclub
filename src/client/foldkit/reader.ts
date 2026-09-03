@@ -554,6 +554,20 @@ const readerZoom = <Message>(
   ];
 };
 
+const searchExcerpt = <Message>(
+  excerpt: string,
+  query: string,
+  h: HtmlBuilder<Message | ReaderMessage>,
+): Html => {
+  const needle = query.trim();
+  const at = excerpt.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+  if (needle === "" || at < 0) return h.span([h.Class("reader-search-result-excerpt")], [excerpt]);
+  const before = excerpt.slice(0, at);
+  const match = excerpt.slice(at, at + needle.length);
+  const after = excerpt.slice(at + needle.length);
+  return h.span([h.Class("reader-search-result-excerpt")], [before, h.mark([], [match]), after]);
+};
+
 export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorkspace => ({
   bookMenuOpen: false,
   renamingBook: false,
@@ -1667,6 +1681,32 @@ export const makeReaderSlice = ({
         ),
       ],
     );
+    const searchResults = h.div(
+      [h.Class("reader-search-results"), h.Role("listbox"), h.AriaLabel("Search results")],
+      reader.searchMatches.map((match, index) =>
+        h.button(
+          [
+            h.Key(String(index)),
+            h.Type("button"),
+            h.Role("option"),
+            h.AriaSelected(index === reader.activeSearchMatch),
+            h.Class(
+              index === reader.activeSearchMatch
+                ? "reader-search-result is-active"
+                : "reader-search-result",
+            ),
+            h.OnClick(SelectedSearchMatch({ index })),
+          ],
+          [
+            h.span(
+              [h.Class("reader-search-result-number"), h.AriaHidden(true)],
+              [String(index + 1)],
+            ),
+            searchExcerpt(match.excerpt, reader.searchQuery, h),
+          ],
+        ),
+      ),
+    );
 
     const bookmarkMark = (color: BookmarkColorType | null) =>
       h.svg(
@@ -1845,7 +1885,7 @@ export const makeReaderSlice = ({
         // Chrome hides in two steps, and both are CSS collapses rather than
         // removals, so the bars animate out the way the React reader's do.
         toolbar,
-        ...(reader.searchOpen ? [searchRow] : []),
+        ...(reader.searchOpen ? [searchRow, ...(searchCount === 0 ? [] : [searchResults])] : []),
         ...(reader.error === null ? [] : [h.p([h.Role("alert")], [reader.error])]),
         h.div(
           [h.Class("reader-stage")],

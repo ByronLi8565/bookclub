@@ -113,7 +113,14 @@ for (const book of books) {
     await page.keyboard.press("Meta+f");
     await page.getByLabel("Find in book").fill("the");
     await page.getByLabel("Find in book").press("Enter");
-    await expect(page.locator(".reader-search-count")).not.toHaveText("0 / 0", { timeout: 60_000 });
+    const results = page.getByRole("option");
+    await expect.poll(() => results.count(), { timeout: 60_000 }).toBeGreaterThan(0);
+    await expect(page.locator(".reader-search-count")).not.toHaveText("0 / 0");
+    await expect(results.first()).toBeVisible();
+    await expect(results.first().locator("mark")).toHaveText(/the/iu);
+    await expect(page.locator(".reader-search-results")).toHaveCSS("overflow-y", "auto");
+    await results.nth(1).click();
+    await expect(results.nth(1)).toHaveAttribute("aria-selected", "true");
 
     await page.getByLabel("Next match").click();
     await expect

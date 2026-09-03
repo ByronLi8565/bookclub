@@ -280,6 +280,51 @@
   opacity: var(--subtle-opacity);
 }
 
+.reader-search-results {
+  display: flex;
+  flex-direction: column;
+  max-height: min(35dvh, 320px);
+  overflow-y: auto;
+  border-bottom: var(--line);
+  background: var(--color-background);
+}
+
+.reader-search-result {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: var(--line);
+  text-align: left;
+  line-height: 1.4;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &.is-active {
+    background: color-mix(in srgb, var(--color-background) 90%, var(--color-text));
+  }
+
+  & mark {
+    background: var(--color-highlight);
+    color: inherit;
+    font-weight: 700;
+  }
+}
+
+.reader-search-result-number {
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.reader-search-result-excerpt {
+  min-width: 0;
+}
+
 .reader-stage {
   flex: 1;
   min-height: 0;
