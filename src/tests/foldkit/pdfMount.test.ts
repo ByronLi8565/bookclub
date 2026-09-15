@@ -10,7 +10,8 @@ import {
   PdfDocumentReady,
   PdfSpreadRendered,
   makePdfMount,
-  pdfSearchAnchors,
+  pdfSearchMatches,
+  pdfTextRange,
   type PdfMountEnvironment,
   type PdfMountMessage,
   type PdfRenderTask,
@@ -418,16 +419,35 @@ describe("PDF Foldkit Mount", () => {
     second.handle.dispose();
   }, 30_000);
 
-  it("resolves in-page search against captured geometry without touching the DOM", async () => {
+  it("keeps PDF search as text offsets until the rendered range can supply geometry", async () => {
     const doc = await loadRealDocument(await mobyDickBytes());
     const geometry = new Map([[1, await pageGeometry(await doc.getPage(1))]]);
     const word = geometry.get(1)?.text.trim().split(/\s+/u)[1] ?? "";
 
-    const anchors = pdfSearchAnchors(geometry, word);
+    const matches = pdfSearchMatches(geometry, word);
     expect(word).not.toBe("");
-    expect(anchors.length).toBeGreaterThan(0);
-    expect(anchors[0]).toMatchObject({ kind: "pdf-text", page: 1 });
-    expect(pdfSearchAnchors(geometry, "zzzunlikelyquery")).toEqual([]);
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0]).toMatchObject({
+      anchor: { kind: "pdf-text", page: 1, rects: [] },
+      pdfRange: { page: 1, startNode: 0, endNode: 0 },
+    });
+    expect(pdfSearchMatches(geometry, "zzzunlikelyquery")).toEqual([]);
     await doc.loadingTask.destroy();
   }, 30_000);
+
+  it("resolves search offsets through the same DOM Range used by PDF selections", () => {
+    const layer = document.createElement("div");
+    layer.className = "textLayer";
+    layer.innerHTML = "<span>unrelated glyphs</span><span>Of the monstrous pictures</span>";
+
+    const range = pdfTextRange(layer, {
+      page: 1,
+      startNode: 1,
+      startOffset: 3,
+      endNode: 1,
+      endOffset: 6,
+    });
+
+    expect(range?.toString()).toBe("the");
+  });
 });

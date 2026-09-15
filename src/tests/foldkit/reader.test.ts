@@ -400,7 +400,11 @@ describe("reader place", () => {
 
     const [known, commands] = run(
       epubReader,
-      IdentifiedReaderSession({ userId: "reader-1", groupId: "group-1" }),
+      IdentifiedReaderSession({
+        userId: "reader-1",
+        groupId: "group-1",
+        positionPolicy: "prefer-sync",
+      }),
     );
     expect(known.userId).toBe("reader-1");
     expect(commandNames(commands)).toEqual(["RestoreReaderPosition", "RestoreReaderBookmarks"]);
@@ -429,7 +433,6 @@ describe("reader place", () => {
     );
     expect(restored.position).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 });
     expect(commandNames(commands)).toEqual(["GoToReaderAnchor"]);
-    expect(restored.pendingPlace).toBeNull();
 
     // A place for a book the reader is no longer showing changes nothing.
     const [other, otherCommands] = run(
@@ -443,9 +446,9 @@ describe("reader place", () => {
     expect(commandNames(otherCommands)).toEqual([]);
   });
 
-  it("holds a restored place that arrives before the book has opened", () => {
-    // Nothing has displayed yet, so there is nowhere to navigate to; the place
-    // waits for the book rather than being dropped or forcing a remount.
+  it("seeds a restored place into a reader that has not opened yet", () => {
+    // The reader Mount is withheld while synchronized restoration is pending,
+    // so its first acquisition receives the restored place directly.
     const [waiting, waitingCommands] = run(
       epubReader,
       RestoredReaderPosition({
@@ -454,15 +457,15 @@ describe("reader place", () => {
       }),
     );
     expect(waiting.loading).toBe(true);
-    expect(waiting.pendingPlace).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 });
+    expect(waiting.position).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.5 });
+    expect(waiting.positionStatus).toBe("ready");
     expect(commandNames(waitingCommands)).toEqual([]);
 
-    const [open, openCommands] = run(
+    const [, openCommands] = run(
       waiting,
       OpenedEpub({ sourceId: epubReader.sourceId, title: "Dorian", place: null }),
     );
-    expect(open.pendingPlace).toBeNull();
-    expect(commandNames(openCommands)).toContain("GoToReaderAnchor");
+    expect(commandNames(openCommands)).not.toContain("GoToReaderAnchor");
   });
 
   it("records every reported place, but only for an identified reader", () => {
@@ -480,7 +483,11 @@ describe("reader place", () => {
 
     const [known] = run(
       epubReader,
-      IdentifiedReaderSession({ userId: "reader-1", groupId: "group-1" }),
+      IdentifiedReaderSession({
+        userId: "reader-1",
+        groupId: "group-1",
+        positionPolicy: "prefer-sync",
+      }),
     );
     expect(commandNames(run(known, MovedEpub({ sourceId: known.sourceId, place }))[1])).toEqual([
       "RecordReaderPosition",

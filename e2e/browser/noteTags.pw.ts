@@ -39,8 +39,10 @@ async function publishNote(page: Page, text: string, expectedBody: string): Prom
 }
 
 async function openGeneralSettings(page: Page): Promise<Locator> {
-  await page.getByTitle("Settings").click();
   const dialog = page.getByRole("dialog", { name: "settings" });
+  if (!(await dialog.isVisible())) {
+    await page.getByTitle("Settings", { exact: true }).click();
+  }
   await dialog.getByTitle("General settings").click();
   return dialog;
 }
@@ -50,6 +52,7 @@ async function setNotePreference(page: Page, name: string, checked: boolean): Pr
   const checkbox = dialog.getByRole("checkbox", { name });
   if ((await checkbox.isChecked()) !== checked) await checkbox.click();
   await dialog.getByLabel("close").click();
+  await expect(dialog).toBeHidden();
 }
 
 function tagLabels(container: Locator): Locator {

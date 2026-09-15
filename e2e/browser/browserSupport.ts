@@ -3,7 +3,7 @@ import { expect, type BrowserContext, type Page } from "@playwright/test";
 import { ulid } from "ulidx";
 import { UPLOAD_FILE_FIELD } from "../../src/shared/http/uploads.ts";
 
-export const BASE_URL = "http://localhost:5173";
+export const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
 export const books = {
   pdf: {
     file: new URL("../../assets/moby-dick.pdf", import.meta.url),

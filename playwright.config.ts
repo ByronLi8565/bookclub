@@ -35,6 +35,9 @@ export default defineConfig({
         "**/foldkitComposer.pw.ts",
         "e2e/browser/**/*.pw.ts",
       ],
+      // Performance measurement is a separate gate, not a skipped functional
+      // test. `bun run perf:reader` opts it back into this project explicitly.
+      testIgnore: process.env.READER_PERF === "1" ? [] : ["**/foldkitReader.perf.pw.ts"],
       use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
     },
     {

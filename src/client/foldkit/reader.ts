@@ -16,7 +16,11 @@ import {
   SourceKind,
   type SourceSummary,
 } from "../../shared/types/sources.ts";
-import { PdfPageLayout, SmartArrows } from "../../shared/types/userPrefs.ts";
+import {
+  PdfPageLayout,
+  ReadingPositionOpenPolicy,
+  SmartArrows,
+} from "../../shared/types/userPrefs.ts";
 import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { getRenderSnapshot } from "../logic/reader/renderSnapshot.ts";
@@ -53,7 +57,19 @@ import {
   makePdfMount,
 } from "./mounts/pdf.ts";
 
-export const ReaderSearchMatch = Schema.Struct({ anchor: HighlightAnchor, excerpt: Schema.String });
+export const ReaderSearchMatch = Schema.Struct({
+  anchor: HighlightAnchor,
+  excerpt: Schema.String,
+  pdfRange: Schema.optionalKey(
+    Schema.Struct({
+      page: Schema.Number,
+      startNode: Schema.Number,
+      startOffset: Schema.Number,
+      endNode: Schema.Number,
+      endOffset: Schema.Number,
+    }),
+  ),
+});
 
 /** A highlight the reader wants painted over the page. The quote is what lets
  *  a highlight be re-anchored after the text reflows. */
@@ -107,6 +123,7 @@ export const ReaderWorkspace = Schema.Struct({
   groupId: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   loading: Schema.Boolean,
+  positionStatus: Schema.Literals(["idle", "loading", "ready"]),
   position: Schema.NullOr(SourceReadingPosition),
   bookmarks: Schema.Array(StoredBookmark),
   bookmarksStatus: Schema.Literals(["idle", "loading", "ready"]),
@@ -138,12 +155,6 @@ export const ReaderWorkspace = Schema.Struct({
   chromeLevel: ChromeLevel,
   pane: ReaderPane,
   snapshot: Schema.NullOr(ReaderSnapshotImage),
-  /** Bumped when a restored reading position has to re-seed the Mount, which
-   *  only a new element key can do. */
-  /** A restored place the renderer has not been moved to yet. Held only while
-   *  the book is still opening: a session that has not displayed anything
-   *  cannot be told where to go. */
-  pendingPlace: Schema.NullOr(SourceReadingPosition),
   error: Schema.NullOr(Schema.String),
 });
 export type ReaderWorkspace = typeof ReaderWorkspace.Type;
@@ -186,6 +197,7 @@ export const MeasuredReaderPagination = m("MeasuredReaderPagination", {
 export const IdentifiedReaderSession = m("IdentifiedReaderSession", {
   userId: Schema.String,
   groupId: Schema.String,
+  positionPolicy: ReadingPositionOpenPolicy,
 });
 export const RestoredReaderPosition = m("RestoredReaderPosition", {
   sourceId: Schema.String,
@@ -397,18 +409,10 @@ const bookTitleView = <Message>(
         h.AriaLabel("book title"),
         h.Value(reader.bookTitleDraft),
         h.OnInput((title) => ChangedBookTitleDraft({ title })),
-        h.OnBlur(
-          reader.bookTitleDraft.trim() === "" || reader.bookTitleDraft === label
-            ? CancelledBookRename()
-            : rename(reader.sourceId, reader.bookTitleDraft.trim()),
-        ),
+        h.OnBlur(rename(reader.sourceId, reader.bookTitleDraft.trim())),
         h.OnKeyDownPreventDefault((key) =>
           key === "Enter"
-            ? Option.some(
-                reader.bookTitleDraft.trim() === "" || reader.bookTitleDraft === label
-                  ? CancelledBookRename()
-                  : rename(reader.sourceId, reader.bookTitleDraft.trim()),
-              )
+            ? Option.some(rename(reader.sourceId, reader.bookTitleDraft.trim()))
             : key === "Escape"
               ? Option.some(CancelledBookRename())
               : Option.none(),
@@ -608,6 +612,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   groupId: null,
   title: null,
   loading: true,
+  positionStatus: "idle",
   position: null,
   bookmarks: [],
   bookmarksStatus: "idle",
@@ -633,7 +638,6 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   chromeLevel: 0,
   pane: "reader",
   snapshot: null,
-  pendingPlace: null,
   error: null,
 });
 
@@ -652,7 +656,7 @@ export interface ReaderBackend<Mount> {
     zoomPercent: number,
   ): Effect.Effect<void | undefined, unknown>;
   goTo(anchor: HighlightAnchor): Effect.Effect<void | undefined, unknown>;
-  setSearchHighlight(anchor: HighlightAnchor | null): Effect.Effect<void, never>;
+  setSearchHighlight(match: typeof ReaderSearchMatch.Type | null): Effect.Effect<void, never>;
   syncHighlights(highlights: readonly ReaderHighlight[]): Effect.Effect<void, never>;
   dismissSelection: Effect.Effect<void, never>;
   changeLayout(reader: ReaderWorkspace, layout: PdfPageLayout): ReaderUpdate;
@@ -960,7 +964,7 @@ export const makeReaderSlice = ({
       search: (query) => epubReaderMount.reader.search(query),
       turnPage: (direction) => epubReaderMount.turnPage(direction),
       goTo: (anchor) => epubReaderMount.goTo(anchor),
-      setSearchHighlight: (anchor) => epubReaderMount.setSearchHighlight(anchor),
+      setSearchHighlight: (match) => epubReaderMount.setSearchHighlight(match?.anchor ?? null),
       syncHighlights: (highlights) =>
         epubReaderMount.syncHighlights(
           highlights.flatMap((highlight) =>
@@ -999,7 +1003,7 @@ export const makeReaderSlice = ({
       search: (query) => pdfReaderMount.search(query),
       turnPage: (direction, zoomPercent) => pdfReaderMount.turnPage(direction, zoomPercent),
       goTo: (anchor) => pdfReaderMount.goTo(anchor),
-      setSearchHighlight: (anchor) => pdfReaderMount.setSearchHighlight(anchor),
+      setSearchHighlight: (match) => pdfReaderMount.setSearchHighlight(match),
       syncHighlights: (highlights) => pdfReaderMount.syncHighlights(highlights),
       dismissSelection: pdfReaderMount.dismissSelection,
       changeLayout: (reader, layout) => [
@@ -1065,13 +1069,13 @@ export const makeReaderSlice = ({
   });
 
   const GoToSearchMatch = Command.define("GoToSearchMatch", {
-    args: { anchor: HighlightAnchor, kind: SourceKind },
+    args: { match: ReaderSearchMatch, kind: SourceKind },
     messages: [CompletedReaderAction],
-    execute: ({ anchor, kind }) =>
+    execute: ({ match, kind }) =>
       backendFor(kind)
-        .goTo(anchor)
+        .goTo(match.anchor)
         .pipe(
-          Effect.andThen(backendFor(kind).setSearchHighlight(anchor)),
+          Effect.andThen(backendFor(kind).setSearchHighlight(match)),
           Effect.as(CompletedReaderAction()),
           Effect.catch(logCommandFailure),
         ),
@@ -1106,6 +1110,7 @@ export const makeReaderSlice = ({
       groupId: Schema.String,
       sourceId: Schema.String,
       kind: SourceKind,
+      policy: ReadingPositionOpenPolicy,
     },
     messages: [RestoredReaderPosition],
     execute: (input) =>
@@ -1384,7 +1389,7 @@ export const makeReaderSlice = ({
                 searchStatus: "complete",
                 activeSearchMatch: 0,
               },
-              [GoToSearchMatch({ anchor: message.matches[0].anchor, kind: reader.kind })],
+              [GoToSearchMatch({ match: message.matches[0], kind: reader.kind })],
             ];
       case "FailedReaderSearch":
         return reader.searchQuery === message.query
@@ -1398,10 +1403,7 @@ export const makeReaderSlice = ({
         const match = reader.searchMatches[activeSearchMatch];
         return match === undefined
           ? [reader, []]
-          : [
-              { ...reader, activeSearchMatch },
-              [GoToSearchMatch({ anchor: match.anchor, kind: reader.kind })],
-            ];
+          : [{ ...reader, activeSearchMatch }, [GoToSearchMatch({ match, kind: reader.kind })]];
       }
       case "ToggledReaderLayout":
         return updateReader(
@@ -1458,6 +1460,7 @@ export const makeReaderSlice = ({
             ...reader,
             userId: message.userId,
             groupId: message.groupId,
+            positionStatus: "loading",
             bookmarksStatus: "loading",
           },
           [
@@ -1466,6 +1469,7 @@ export const makeReaderSlice = ({
               groupId: message.groupId,
               sourceId: reader.sourceId,
               kind: reader.kind,
+              policy: message.positionPolicy,
             }),
             RestoreReaderBookmarks({
               userId: message.userId,
@@ -1475,15 +1479,17 @@ export const makeReaderSlice = ({
           ],
         ];
       case "RestoredReaderPosition": {
-        if (message.sourceId !== reader.sourceId || message.position === null) return [reader, []];
-        const restored = { ...reader, position: message.position };
-        // Moving the open book, rather than rebuilding the session around a new
-        // element key. A rebuild downloads and opens the book a second time, and
-        // destroys the first session while it is still opening — which is the
-        // blank page a reader gets when reopening a book they have read before.
-        return reader.loading
-          ? [{ ...restored, pendingPlace: message.position }, []]
-          : [restored, goToPlace(reader, message.position)];
+        if (message.sourceId !== reader.sourceId) return [reader, []];
+        if (message.position === null) return [{ ...reader, positionStatus: "ready" }, []];
+        const restored = {
+          ...reader,
+          position: message.position,
+          positionStatus: "ready" as const,
+        };
+        // Before the first paint, the withheld Mount will receive this place as
+        // its initial position. Once open, navigation stays in the live session
+        // instead of downloading and rebuilding the book.
+        return reader.loading ? [restored, []] : [restored, goToPlace(reader, message.position)];
       }
       case "RequestedPositionSync":
         return reader.userId === null || reader.groupId === null
@@ -1614,13 +1620,12 @@ export const makeReaderSlice = ({
         return message.place === null ? [reader, []] : [placed(reader, message.place), []];
       case "OpenedEpub": {
         if (message.sourceId !== reader.sourceId) return [reader, []];
-        const opened = { ...reader, loading: false, title: message.title, pendingPlace: null };
+        const opened = { ...reader, loading: false, title: message.title };
         return [
           message.place === null ? opened : placed(opened, message.place),
           [
             MeasureEpubPagination({}),
             PaintReaderHighlights({ highlights: reader.highlights, kind: reader.kind }),
-            ...goToPlace(opened, reader.pendingPlace),
           ],
         ];
       }
@@ -1664,9 +1669,8 @@ export const makeReaderSlice = ({
                 title: message.title,
                 totalPages: message.totalPages,
                 zoomPercent: message.zoom,
-                pendingPlace: null,
               },
-              goToPlace(reader, reader.pendingPlace),
+              [],
             ]
           : [reader, []];
       case "PdfSpreadRendered":
@@ -2014,9 +2018,9 @@ export const makeReaderSlice = ({
       [
         // The Mount owns whatever the key identifies: a PDF layout or zoom
         // change rebuilds the document, an EPUB relayouts in place, and a
-        // restored place re-seeds either through the generation counter.
-        h.Key(backendFor(reader.kind).mountKey(reader)),
-        h.OnMount(mount),
+        // restored place seeds the first acquisition after the loading status.
+        h.Key(`${backendFor(reader.kind).mountKey(reader)}:${reader.positionStatus}`),
+        ...(reader.positionStatus === "loading" ? [] : [h.OnMount(mount)]),
         h.Class("reader-surface"),
       ],
       // A snapshot of the last render stands in until the book paints, so

@@ -105,6 +105,7 @@ import {
   type NotesMessage,
 } from "./notes.ts";
 import {
+  CancelledBookRename,
   ChangedReaderLayout,
   CommittedReaderSelection,
   CompletedReaderAction,
@@ -1100,7 +1101,11 @@ const reconcileReaderIdentity = ([model, commands]: Update): Update => {
   }
   const identified = updateReader(
     currentReader,
-    IdentifiedReaderSession({ userId: session.user.id, groupId: currentGroup.groupId }),
+    IdentifiedReaderSession({
+      userId: session.user.id,
+      groupId: currentGroup.groupId,
+      positionPolicy: settingsPrefs(model.settings).reader.readingPositionOpenPolicy,
+    }),
   );
   return identified === null
     ? [model, commands]
@@ -1183,7 +1188,36 @@ const updatePresenceSlice = (model: Model, message: PresenceMessage): Update => 
   const [presence, commands] = updatePresence(model.presence, message);
   const withPresence = { ...model, presence };
   switch (message._tag) {
-    case "DeletedBook":
+    case "DeletedBook": {
+      const updated = { ...withPresence, currentGroup: message.group, overlay: NoOverlay() };
+      if (model.reader === null || message.group.sources.includes(model.reader.sourceId)) {
+        return [updated, commands];
+      }
+      const sourceId = message.group.sources[0];
+      const source = sourceId === undefined ? undefined : message.group.sourceMeta[sourceId];
+      if (sourceId === undefined || source === undefined) {
+        return [
+          { ...updated, reader: null },
+          [...commands, RememberSelectedSource({ groupId: message.group.groupId, sourceId: null })],
+        ];
+      }
+      const [opened, readerCommands] = updateReaderSlice(
+        updated,
+        SelectedReaderSource({
+          groupRef: groupUrlName(message.group),
+          sourceId,
+          kind: source.kind,
+        }),
+      );
+      return [
+        opened,
+        [
+          ...commands,
+          ...readerCommands,
+          RememberSelectedSource({ groupId: message.group.groupId, sourceId }),
+        ],
+      ];
+    }
     case "SavedBookMetadata":
       return [{ ...withPresence, currentGroup: message.group }, commands];
     case "ChangedMemberRole":
@@ -1651,21 +1685,54 @@ const updateSlices = (model: Model, message: Message): Update => {
         ],
       ];
     }
-    case "RequestedBookRename":
-      return model.currentGroup === null
-        ? [model, []]
+    case "RequestedBookRename": {
+      if (model.currentGroup === null) return [model, []];
+      const title =
+        model.reader?.sourceId === message.sourceId && model.reader.renamingBook
+          ? model.reader.bookTitleDraft.trim()
+          : message.title.trim();
+      const currentTitle =
+        model.currentGroup.bookTitles[message.sourceId] ??
+        model.currentGroup.sourceMeta[message.sourceId]?.title ??
+        null;
+      if (title === "" || title === currentTitle) {
+        if (model.reader === null) return [model, []];
+        const cancelled = updateReader(model.reader, CancelledBookRename());
+        return cancelled === null
+          ? [model, []]
+          : [{ ...model, reader: cancelled[0] }, cancelled[1]];
+      }
+      return [
+        model,
+        [
+          RenameBook({
+            groupRef: groupUrlName(model.currentGroup),
+            sourceId: message.sourceId,
+            title,
+          }),
+        ],
+      ];
+    }
+    case "RenamedBook": {
+      if (model.reader === null) return [{ ...model, currentGroup: message.group }, []];
+      const renamed = updateReader(model.reader, CancelledBookRename());
+      return renamed === null
+        ? [{ ...model, currentGroup: message.group }, []]
         : [
-            model,
-            [
-              RenameBook({
-                groupRef: groupUrlName(model.currentGroup),
-                sourceId: message.sourceId,
-                title: message.title,
-              }),
-            ],
+            {
+              ...model,
+              currentGroup: message.group,
+              reader: {
+                ...renamed[0],
+                title:
+                  message.group.bookTitles[model.reader.sourceId] ??
+                  message.group.sourceMeta[model.reader.sourceId]?.title ??
+                  model.reader.title,
+              },
+            },
+            renamed[1],
           ];
-    case "RenamedBook":
-      return [{ ...model, currentGroup: message.group }, []];
+    }
     case "LoadedAccountSecurity":
       return model.session._tag !== "AuthenticatedSession" ||
         model.session.user.id !== message.userId
@@ -1981,6 +2048,8 @@ const workspaceLayoutView = (
         JumpedToHighlight({ anchor: highlight.anchor, sourceId: highlight.sourceId }),
       viewer: { userId: viewerId, isOwner: model.currentGroup?.ownerId === viewerId },
       canWrite: model.membership?.isMember === true,
+      showTags: prefs.notes.showHashtags,
+      extractTags: prefs.notes.hashtagsAddTags,
       // Avatars are a preference; without the resolver the panel falls through
       // to React's avatar-less markup, which is what turning them off means.
       avatarFor: prefs.notes.showAvatars

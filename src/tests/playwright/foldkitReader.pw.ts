@@ -98,6 +98,42 @@ function painted(page: Page, className: string): Promise<number> {
 
 const paintedHighlights = (page: Page) => painted(page, "bc-highlight");
 
+async function expectPdfSearchHighlightOnText(page: Page, query: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.locator(".pdf-underlines .bc-search").evaluateAll((highlights, needle) => {
+          const textRects: DOMRect[] = [];
+          for (const span of document.querySelectorAll(".textLayer span")) {
+            const node = span.firstChild;
+            const text = node?.textContent ?? "";
+            if (!node) continue;
+            let from = 0;
+            for (;;) {
+              const at = text.toLowerCase().indexOf(needle.toLowerCase(), from);
+              if (at < 0) break;
+              const range = document.createRange();
+              range.setStart(node, at);
+              range.setEnd(node, at + needle.length);
+              textRects.push(range.getBoundingClientRect());
+              from = at + needle.length;
+            }
+          }
+          return highlights.some((highlight) => {
+            const overlay = highlight.getBoundingClientRect();
+            return textRects.some(
+              (text) =>
+                Math.abs(overlay.left - text.left) < 1 &&
+                Math.abs(overlay.width - text.width) < 1 &&
+                Math.abs(overlay.top - text.top) < 5,
+            );
+          });
+        }, query),
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+}
+
 for (const book of books) {
   test(`Foldkit ${book.name}: pages, counts, and searches`, async ({ page }) => {
     await openBook(page, book.path, book.ready);
@@ -122,6 +158,7 @@ for (const book of books) {
     await expect(page.locator(".reader-search-results")).toHaveCSS("overflow-y", "auto");
     await results.nth(1).click();
     await expect(results.nth(1)).toHaveAttribute("aria-selected", "true");
+    if (book.name === "PDF") await expectPdfSearchHighlightOnText(page, "the");
 
     await page.keyboard.press("Meta+f");
     await expect(page.getByLabel("Find in book")).toBeFocused();

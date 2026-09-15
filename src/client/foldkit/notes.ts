@@ -342,6 +342,18 @@ const withTags = (existing: readonly string[], added: readonly string[]): readon
   ...new Set([...existing, ...added]),
 ];
 
+const editOperation = (note: Note, body: string, tags: readonly string[]): NoteOp => {
+  const originalTags = note.tags ?? [];
+  const original = new Set(originalTags);
+  const edited = new Set(tags);
+  return editNoteOp(
+    note.id,
+    body,
+    tags.filter((tag) => !original.has(tag)),
+    originalTags.filter((tag) => !edited.has(tag)),
+  );
+};
+
 /**
  * A highlight carries a fresh id every time the reader publishes a selection, so
  * identity has to come from where it points rather than from the id.
@@ -646,6 +658,9 @@ export interface NotesViewContext<Message = never> {
   /** Book titles for the ids notes carry, for the "all books" scope and the
    *  book filter chips. */
   readonly bookTitles?: ReadonlyMap<string, string>;
+  /** Preferences stay outside the notes model, but govern its editor and rows. */
+  readonly showTags?: boolean;
+  readonly extractTags?: boolean;
 }
 
 /** The reader hands over the anchor and the quote context; the note it becomes
@@ -668,7 +683,7 @@ export const highlightNoteOp = (sourceId: string, highlight: Highlight): NoteOp 
 const MAX_INDENT = 4;
 
 const visibleTags = (tags: readonly string[] | undefined): readonly string[] =>
-  (tags ?? []).filter((tag) => !isHiddenTag(tag));
+  (tags ?? []).filter((tag) => !isHiddenTag(tag)).toSorted();
 
 const EMPTY_BOOK_TITLES: ReadonlyMap<string, string> = new Map();
 
@@ -679,6 +694,8 @@ export const notesView = <Message>(
 ): Html => {
   const { sourceId, groupRef, jumpToHighlight, viewer, avatarFor } = context;
   const canWrite = context.canWrite ?? model.ready;
+  const showTags = context.showTags ?? true;
+  const extractTags = context.extractTags ?? true;
   const bookTitles = context.bookTitles ?? EMPTY_BOOK_TITLES;
   const imageUrlBase = `/groups/${groupRef}/images`;
   const query = noteQueryOf(model.filterTerms, model.filterMode);
@@ -697,6 +714,7 @@ export const notesView = <Message>(
     tags: readonly string[],
     options: { readonly editable: boolean; readonly filterable: boolean },
   ): Html => {
+    if (!showTags) return null;
     const shown = visibleTags(tags);
     if (shown.length === 0) return null;
     return h.div(
@@ -742,7 +760,7 @@ export const notesView = <Message>(
     h.div(
       [h.Class("note-editor")],
       [
-        ...(visibleTags(model.draftTags).length === 0
+        ...(!showTags || visibleTags(model.draftTags).length === 0
           ? []
           : [
               h.div(
@@ -761,7 +779,7 @@ export const notesView = <Message>(
               validSeqs: model.notes.map((note) => note.seq),
               groupRef,
               imageUrlBase,
-              extractHashtags: true,
+              extractHashtags: extractTags,
             }),
           ),
         ]),
@@ -1012,7 +1030,7 @@ export const notesView = <Message>(
             ),
             composerView(
               "Save",
-              editNoteOp(note.id, model.draft, [...model.draftTags]),
+              editOperation(note, model.draft, model.draftTags),
               `edit:${note.id}`,
             ),
           ],

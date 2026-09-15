@@ -18,6 +18,7 @@ import {
   popupPoint,
   quoteForRange,
   scanText,
+  type SearchMatch,
 } from "../../logic/notes/highlights.ts";
 import {
   destroyPdf,
@@ -25,7 +26,6 @@ import {
   loadTextLayerBuilderCtor,
   pageGeometry,
   preparePdfRuntime,
-  rectsForRange,
   type PageGeometry,
   type PDFDocumentProxy,
   type PDFPageProxy,
@@ -273,7 +273,7 @@ interface Session {
   renderSeq: number;
   page: number;
   spread: boolean;
-  searchAnchor: HighlightAnchor | null;
+  searchMatch: SearchMatch | null;
   fitToPage: boolean;
   released: boolean;
   snapshotTimer: number | null;
@@ -365,9 +365,8 @@ export function boundingClientRect(rects: readonly DOMRect[]): DOMRect {
 /** Renderer-independent in-page search: the same text scan the React reader
  *  uses, resolved against captured page geometry into page anchors. Commands
  *  call this with the geometry the Mount has published; it touches no DOM. */
-export interface PdfSearchMatch {
-  anchor: HighlightAnchor;
-  excerpt: string;
+export interface PdfSearchMatch extends SearchMatch {
+  pdfRange: NonNullable<SearchMatch["pdfRange"]>;
 }
 
 const EXCERPT_CONTEXT = 40;
@@ -379,10 +378,28 @@ export function pdfSearchMatches(
   return [...geometry.entries()]
     .toSorted(([a], [b]) => a - b)
     .flatMap(([page, pageGeom]) =>
-      scanText(pageGeom.text, query).map((match) => {
+      scanText(pageGeom.text, query).flatMap((match) => {
         const end = match.start + query.length;
+        const runs = pageGeom.runs.filter(
+          (run) =>
+            run.textLayerIndex !== null &&
+            run.start + run.str.length > match.start &&
+            run.start < end,
+        );
+        const first = runs[0];
+        const last = runs.at(-1);
+        if (!first || !last || first.textLayerIndex === null || last.textLayerIndex === null) {
+          return [];
+        }
         return {
-          anchor: pdfAnchor(page, rectsForRange(pageGeom, match.start, end)),
+          anchor: pdfAnchor(page, []),
+          pdfRange: {
+            page,
+            startNode: first.textLayerIndex,
+            startOffset: Math.max(0, match.start - first.start),
+            endNode: last.textLayerIndex,
+            endOffset: Math.min(last.str.length, end - last.start),
+          },
           excerpt: pageGeom.text
             .slice(Math.max(0, match.start - EXCERPT_CONTEXT), end + EXCERPT_CONTEXT)
             .trim(),
@@ -391,11 +408,40 @@ export function pdfSearchMatches(
     );
 }
 
-export function pdfSearchAnchors(
-  geometry: ReadonlyMap<number, PageGeometry>,
-  query: string,
-): HighlightAnchor[] {
-  return pdfSearchMatches(geometry, query).map((match) => match.anchor);
+/** Resolve extracted PDF offsets back into the rendered text layer. Search and
+ * user selections then share the browser's Range geometry instead of keeping
+ * a second approximation of PDF font placement. */
+export function pdfTextRange(
+  textLayer: Node,
+  locator: NonNullable<SearchMatch["pdfRange"]>,
+): Range | null {
+  const doc = textLayer.ownerDocument;
+  if (!doc) return null;
+  const filter = doc.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+  const walker = doc.createTreeWalker(textLayer, filter);
+  const nodes: Node[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.parentElement?.closest(".endOfContent")) continue;
+    if ((node.textContent?.length ?? 0) > 0) nodes.push(node);
+  }
+  const first = nodes[locator.startNode];
+  const last = nodes[locator.endNode];
+  const firstLength = first?.textContent?.length ?? 0;
+  const lastLength = last?.textContent?.length ?? 0;
+  if (
+    !first ||
+    !last ||
+    locator.startOffset < 0 ||
+    locator.startOffset > firstLength ||
+    locator.endOffset < 0 ||
+    locator.endOffset > lastLength
+  ) {
+    return null;
+  }
+  const range = doc.createRange();
+  range.setStart(first, locator.startOffset);
+  range.setEnd(last, locator.endOffset);
+  return range;
 }
 
 function paintRects(layer: HTMLDivElement, rects: readonly PdfRect[], className: string): void {
@@ -427,7 +473,19 @@ function paintAnnotations(session: Session): void {
   for (const anchor of session.highlights.values()) {
     paint(anchor, (pane) => pane.highlight, "bc-highlight");
   }
-  if (session.searchAnchor) paint(session.searchAnchor, (pane) => pane.underline, "bc-search");
+  const match = session.searchMatch;
+  if (!match) return;
+  const { anchor } = match;
+  if (anchor.kind !== "pdf-text") return;
+  const pane = session.panes.find((candidate) => candidate.page === anchor.page);
+  if (!pane) return;
+  const { textLayer } = pane;
+  const range = match.pdfRange && textLayer ? pdfTextRange(textLayer, match.pdfRange) : null;
+  const rects =
+    range && textLayer
+      ? pdfSelectionRects(range, textLayer, pane.inner.getBoundingClientRect())
+      : anchor.rects;
+  paintRects(pane.underline, rects, "bc-search");
 }
 
 /** The zoom at which the current spread's *text* fills the viewport. Returns
@@ -552,7 +610,7 @@ function openSession(
     renderSeq: 0,
     page: Math.max(1, Math.round(args.initialPage)),
     spread: false,
-    searchAnchor: null,
+    searchMatch: null,
     fitToPage: true,
     released: false,
     snapshotTimer: null,
@@ -1010,6 +1068,7 @@ function renderTextLayer(
       pane.builder = builder;
       pane.textLayer = builder.div;
       pane.inner.appendChild(builder.div);
+      paintAnnotations(session);
     } catch {
       pane.textLayer = null;
     }
@@ -1331,9 +1390,9 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
         for (const { id, anchor } of highlights) session.highlights.set(id, anchor);
         paintAnnotations(session);
       }),
-    setSearchHighlight: (anchor: HighlightAnchor | null) =>
+    setSearchHighlight: (match: SearchMatch | null) =>
       onLiveSession((session) => {
-        session.searchAnchor = anchor;
+        session.searchMatch = match;
         paintAnnotations(session);
       }),
     /** The renderer-independent text scan over the geometry the open document

@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { JSDOM } from "jsdom";
 import { captureHighlight, epubAnchor, pdfAnchor } from "../client/logic/notes/highlights.ts";
-import { pageGeometry, pageText, rectsForRange } from "../client/logic/sources/pdf.ts";
+import { pageGeometry, pageText } from "../client/logic/sources/pdf.ts";
 
-function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPageProxy {
+function textPage(
+  items: Array<{ str: string; x?: number; y?: number }>,
+  viewBox: [number, number, number, number] = [0, 0, 100, 100],
+): PDFPageProxy {
+  const [pageX, pageY, right, top] = viewBox;
+  const width = right - pageX;
+  const height = top - pageY;
   // SAFETY: pageText and pageGeometry only call the two PDFPageProxy methods supplied here.
   return {
     getTextContent: () =>
@@ -16,7 +22,11 @@ function textPage(items: Array<{ str: string; x?: number; y?: number }>): PDFPag
           height: 1,
         })),
       }),
-    getViewport: () => ({ width: 100, height: 100 }),
+    getViewport: () => ({
+      width,
+      height,
+      convertToViewportPoint: (x: number, y: number) => [x - pageX, top - y],
+    }),
   } as PDFPageProxy;
 }
 
@@ -67,26 +77,12 @@ describe("PDF text extraction", () => {
     expect(highlight.quote.exact).toBe("is the chief");
   });
 
-  it("slices a search/highlight rect to the matched chars within a run", async () => {
-    // One run "philosophy" spanning x:0..0.1 (width = str length / page width).
-    const geometry = await pageGeometry(textPage([{ str: "philosophy" }]));
+  it("positions page geometry relative to a non-zero PDF page origin", async () => {
+    const geometry = await pageGeometry(
+      textPage([{ str: "dragoman", x: 34, y: 46 }], [24, 36, 124, 136]),
+    );
 
-    // Full-run match → the whole run's rect.
-    expect(rectsForRange(geometry, 0, 10)).toEqual([{ x: 0, y: 0.99, width: 0.1, height: 0.01 }]);
-
-    // "soph" (chars 4..8) → a proportional sub-rect, not the whole line.
-    const [sub] = rectsForRange(geometry, 4, 8);
-    expect(sub?.x).toBeCloseTo(0.04);
-    expect(sub?.width).toBeCloseTo(0.04);
-  });
-
-  it("clips a range that overflows a run to the run's own chars", async () => {
-    const geometry = await pageGeometry(textPage([{ str: "civilised" }, { str: "form" }]));
-    // "form" is the second run at start=10, length 4, x = 0 (own transform).
-    // Range 12..99 overlaps only chars 2..4 of that run.
-    const rects = rectsForRange(geometry, 12, 99);
-    const formRect = rects.at(-1);
-    expect(formRect?.width).toBeCloseTo((2 / 4) * 0.04);
+    expect(geometry.runs[0]).toMatchObject({ x: 0.1, y: 0.89, width: 0.08, height: 0.01 });
   });
 
   it("keeps EPUB quote extraction unchanged", () => {

@@ -117,6 +117,16 @@ export function captureHighlight(
 export interface SearchMatch {
   anchor: HighlightAnchor;
   excerpt: string;
+  /** PDF search keeps text offsets until the destination page's real text
+   * layer exists. The mount then derives rectangles through the same DOM Range
+   * path used by selections and note highlights. */
+  pdfRange?: {
+    page: number;
+    startNode: number;
+    startOffset: number;
+    endNode: number;
+    endOffset: number;
+  };
 }
 
 export interface SourceReader {

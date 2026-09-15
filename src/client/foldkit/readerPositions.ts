@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { SourceReadingPosition } from "../../shared/types/readingPositions.ts";
 import type { SourceKind } from "../../shared/types/sources.ts";
+import type { ReadingPositionOpenPolicy } from "../../shared/types/userPrefs.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import {
   fetchReadingPositionWith,
@@ -25,6 +26,7 @@ export interface ReaderPositions {
     groupId: string;
     sourceId: string;
     kind: SourceKind;
+    policy: ReadingPositionOpenPolicy;
   }) => Effect.Effect<SourceReadingPosition | null>;
   /** Record where the reader is now. Local only: syncing is its own step. */
   record: (input: {
@@ -53,17 +55,21 @@ const clientTransport: ReadingPositionTransport<unknown> = {
 };
 
 export const browserReaderPositions: ReaderPositions = {
-  restore: ({ userId, groupId, sourceId, kind }) =>
-    Effect.sync(() => getReadingPosition(userId, groupId, sourceId, kind)?.position ?? null).pipe(
-      Effect.flatMap((local) =>
-        fetchReadingPositionWith(clientTransport, userId, groupId, sourceId).pipe(
-          Effect.map((server) => server ?? local),
-          // A failed lookup must not strand an offline-capable reader on a
-          // loading shell; the last local place remains the safe fallback.
-          Effect.orElseSucceed(() => local),
-        ),
-      ),
-    ),
+  restore: ({ userId, groupId, sourceId, kind, policy }) =>
+    Effect.gen(function* () {
+      const local = getReadingPosition(userId, groupId, sourceId, kind)?.position ?? null;
+      const refresh = fetchReadingPositionWith(clientTransport, userId, groupId, sourceId).pipe(
+        // A failed lookup must not strand an offline-capable reader on a
+        // loading shell; the last local place remains the safe fallback.
+        Effect.orElseSucceed(() => null),
+      );
+      if (policy === "prefer-local") {
+        Effect.runFork(refresh);
+        return local;
+      }
+      yield* refresh;
+      return getReadingPosition(userId, groupId, sourceId, kind)?.position ?? local;
+    }),
   record: ({ userId, groupId, sourceId, position }) =>
     Effect.sync(() => {
       setLocalReadingPosition(userId, groupId, sourceId, position);

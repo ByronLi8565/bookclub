@@ -113,6 +113,7 @@ function joinPdfTextItems(items: PdfTextItem[]) {
 export interface PageTextRun {
   str: string;
   start: number; // char offset within the page's concatenated text
+  textLayerIndex: number | null;
   x: number;
   y: number;
   width: number;
@@ -124,49 +125,56 @@ export interface PageGeometry {
   runs: PageTextRun[];
 }
 
+function textItemRect(item: PdfTextItem, viewport: ReturnType<PDFPageProxy["getViewport"]>) {
+  const baselineX = item.transform[4] ?? 0;
+  const baselineY = item.transform[5] ?? 0;
+  const textX = item.transform[0] ?? 0;
+  const textY = item.transform[1] ?? 0;
+  const upX = item.transform[2] ?? 0;
+  const upY = item.transform[3] ?? 0;
+  const textLength = Math.hypot(textX, textY) || 1;
+  const upLength = Math.hypot(upX, upY) || 1;
+  const height = item.height || upLength;
+  const advanceX = (textX / textLength) * item.width;
+  const advanceY = (textY / textLength) * item.width;
+  const heightX = (upX / upLength) * height;
+  const heightY = (upY / upLength) * height;
+  const corners = [
+    viewport.convertToViewportPoint(baselineX, baselineY),
+    viewport.convertToViewportPoint(baselineX + advanceX, baselineY + advanceY),
+    viewport.convertToViewportPoint(baselineX + heightX, baselineY + heightY),
+    viewport.convertToViewportPoint(baselineX + advanceX + heightX, baselineY + advanceY + heightY),
+  ];
+  const xs = corners.map(([x]) => x);
+  const ys = corners.map(([, y]) => y);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const right = Math.max(...xs);
+  const bottom = Math.max(...ys);
+  return {
+    x: left / viewport.width,
+    y: top / viewport.height,
+    width: (right - left) / viewport.width,
+    height: (bottom - top) / viewport.height,
+  };
+}
+
 export async function pageGeometry(page: PDFPageProxy): Promise<PageGeometry> {
-  const { width, height } = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: 1 });
   const items = await pageTextItems(page);
   const joined = joinPdfTextItems(items);
   const runs: PageTextRun[] = [];
+  let textLayerIndex = 0;
   for (const [index, item] of items.entries()) {
     const start = joined.starts[index] ?? 0;
-    const baselineX = item.transform[4] ?? 0;
-    const baselineY = item.transform[5] ?? 0;
-    const h = item.height || Math.hypot(item.transform[2] ?? 0, item.transform[3] ?? 0);
     runs.push({
       str: item.str,
       start,
-      x: baselineX / width,
-      y: (height - baselineY - h) / height,
-      width: item.width / width,
-      height: h / height,
+      textLayerIndex: item.str === "" ? null : textLayerIndex++,
+      ...textItemRect(item, viewport),
     });
   }
   return { text: joined.text, runs };
-}
-
-export function rectsForRange(
-  geometry: PageGeometry,
-  start: number,
-  end: number,
-): { x: number; y: number; width: number; height: number }[] {
-  return geometry.runs.flatMap((run) => {
-    const runEnd = run.start + run.str.length;
-    if (runEnd <= start || run.start >= end) return [];
-    // Approximate per-character rects so matches inside long text runs don't highlight the whole run.
-    const len = run.str.length || 1;
-    const from = Math.max(0, start - run.start);
-    const to = Math.min(len, end - run.start);
-    return [
-      {
-        x: run.x + (from / len) * run.width,
-        y: run.y,
-        width: ((to - from) / len) * run.width,
-        height: run.height,
-      },
-    ];
-  });
 }
 
 async function renderPageThumbnail(page: PDFPageProxy, maxWidth = 240): Promise<string | null> {

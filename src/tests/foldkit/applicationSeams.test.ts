@@ -7,6 +7,8 @@ import {
   LoadedGroup,
   Model,
   Navigated,
+  RenameBook,
+  RequestedBookRename,
   init,
   update,
   type Message,
@@ -25,10 +27,12 @@ import {
   ReleasedNoteAgent,
 } from "../../client/foldkit/resources/noteAgent.ts";
 import {
+  ChangedBookTitleDraft,
   CommittedReaderSelection,
   JumpedToHighlight,
   ReaderMessage,
   SelectedReaderSource,
+  StartedBookRename,
   isReaderMessage,
 } from "../../client/foldkit/reader.ts";
 import { HIGHLIGHT_TAG } from "../../shared/types/notes.ts";
@@ -58,6 +62,47 @@ const readerTags = unionTags(ReaderMessage);
 const notesTags = unionTags(NotesMessage);
 
 describe("Foldkit application slice seams", () => {
+  it("submits the current book-title draft when a key handler carries stale text", () => {
+    const [initial] = init();
+    const [opened] = update(
+      initial,
+      SelectedReaderSource({ groupRef: "club-alpha", sourceId: "source-1", kind: "pdf" }),
+    );
+    const group = {
+      groupId: "group-1",
+      slug: "club",
+      publicId: "alpha",
+      displayName: "Club",
+      ownerId: "reader-1",
+      sources: ["source-1"],
+      bookTitles: {},
+      sourceMeta: {
+        "source-1": {
+          kind: "pdf" as const,
+          contentType: "application/pdf",
+          size: 1,
+          title: "Moby Dick",
+          addedBy: "reader-1",
+        },
+      },
+      memberCount: 1,
+    };
+    const [renaming] = update(
+      { ...opened, currentGroup: group },
+      StartedBookRename({ title: "Moby Dick" }),
+    );
+    const [drafted] = update(renaming, ChangedBookTitleDraft({ title: "The Whale" }));
+    const [, commands] = update(
+      drafted,
+      RequestedBookRename({ sourceId: "source-1", title: "Moby Dick" }),
+    );
+
+    expect(commands.map(({ name, args }) => ({ name, args }))).toContainEqual({
+      name: RenameBook.name,
+      args: { groupRef: "club-alpha", sourceId: "source-1", title: "The Whale" },
+    });
+  });
+
   it("opens a deep-linked book instead of the device's remembered selection", () => {
     const [initial] = init();
     const group = {
