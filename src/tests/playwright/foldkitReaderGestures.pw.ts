@@ -72,7 +72,7 @@ test("Foldkit reader: swiping switches pane and steps the chrome", async ({ page
 test("Foldkit reader: a horizontal pan inside the zoomed PDF keeps the pane", async ({ page }) => {
   await openFoldkitReader(page);
   const scroller = page.locator(".pdf-scroller");
-  for (let step = 0; step < 4; step++) await page.getByTitle("Increase text size").click();
+  for (let step = 0; step < 4; step++) await page.getByTitle("Zoom in").click();
   await expect
     .poll(() => scroller.evaluate((el) => el.scrollWidth - el.clientWidth), { timeout: 30_000 })
     .toBeGreaterThan(1);

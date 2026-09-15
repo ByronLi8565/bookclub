@@ -330,8 +330,7 @@
   }
 }
 
-.group-images-error,
-.group-images-loading {
+.group-images-error {
   font-size: var(--font-xs);
   opacity: var(--muted-opacity);
 }

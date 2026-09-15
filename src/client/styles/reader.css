@@ -89,6 +89,12 @@
   }
 }
 
+.reader-bookmarks-status {
+  margin-inline: 1px 3px;
+  font-size: var(--font-xs);
+  opacity: var(--muted-opacity);
+}
+
 .bookmark-jump-arrow {
   margin-left: 1px;
   font-size: 0.7em;

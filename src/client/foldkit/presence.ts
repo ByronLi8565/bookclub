@@ -131,10 +131,11 @@ export const DeletedBook = m("DeletedBook", { group: GroupSummary });
 export const FailedBookDelete = m("FailedBookDelete");
 
 export const LoadedGroupImages = m("LoadedGroupImages", {
+  groupRef: Schema.String,
   images: Schema.Array(GroupImage),
   totalSize: Schema.Number,
 });
-export const FailedGroupImages = m("FailedGroupImages");
+export const FailedGroupImages = m("FailedGroupImages", { groupRef: Schema.String });
 export const ToggledImagePreview = m("ToggledImagePreview", { imageId: Schema.String });
 export const RequestedImageDelete = m("RequestedImageDelete", {
   imageId: Schema.String,
@@ -211,8 +212,8 @@ export const LoadGroupImages = Command.define("LoadGroupImages", {
   execute: ({ groupRef }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.images({ params: { groupRef } })),
-      Effect.map(({ images, totalSize }) => LoadedGroupImages({ images, totalSize })),
-      Effect.catch(() => Effect.succeed(FailedGroupImages())),
+      Effect.map(({ images, totalSize }) => LoadedGroupImages({ groupRef, images, totalSize })),
+      Effect.catch(() => Effect.succeed(FailedGroupImages({ groupRef }))),
     ),
 });
 
@@ -462,9 +463,13 @@ export const updatePresence = (
     case "FailedBookDelete":
       return [{ ...model, deletingId: null }, []];
     case "LoadedGroupImages":
-      return [{ ...model, images: message.images, imageTotalSize: message.totalSize }, []];
+      return message.groupRef === model.groupRef
+        ? [{ ...model, images: message.images, imageTotalSize: message.totalSize }, []]
+        : [model, []];
     case "FailedGroupImages":
-      return [{ ...model, imageError: "Could not load images." }, []];
+      return message.groupRef === model.groupRef
+        ? [{ ...model, imageError: "Could not load images." }, []]
+        : [model, []];
     case "ToggledImagePreview":
       return [
         {
@@ -952,15 +957,16 @@ const imagesView = <Message>(
       h.p(
         [h.Class("group-books-summary label")],
         [
-          `${count} ${count === 1 ? "image" : "images"} · ${formatBytes(model.imageTotalSize)} total`,
+          model.images === null
+            ? model.imageError === null
+              ? "Loading images…"
+              : "Images unavailable"
+            : `${count} ${count === 1 ? "image" : "images"} · ${formatBytes(model.imageTotalSize)} total`,
         ],
       ),
       ...(model.imageError === null
         ? []
         : [h.p([h.Class("group-images-error")], [model.imageError])]),
-      ...(model.images === null && model.imageError === null
-        ? [h.p([h.Class("group-images-loading")], ["Loading…"])]
-        : []),
       ...(model.images === null
         ? []
         : [

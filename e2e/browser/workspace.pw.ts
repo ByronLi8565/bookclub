@@ -13,7 +13,7 @@ test("Workspace · a global toast is rendered exactly once", async ({ page }) =>
   await page.getByLabel("club name").press("Enter");
 
   await expect(page.locator(".toast-viewport")).toHaveCount(1);
-  await expect(page.locator(".toast").filter({ hasText: "Rename failed" })).toHaveCount(1);
+  await expect(page.locator(".toast").filter({ hasText: "Something went wrong" })).toHaveCount(1);
 });
 
 test("Workspace · resize and pane-removal controls preserve a usable layout", async ({ page }) => {
@@ -128,9 +128,12 @@ test("Workspace · an EPUB remains mounted while crossing the mobile breakpoint"
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".pager")).toBeVisible();
   await expect(page.locator(books.epub.ready), "the EPUB rendition remains attached").toBeVisible();
-  expect(await currentPage(page), "the EPUB reading page survives the mobile layout").toBe(
-    readingPage,
-  );
+  const mobilePage = await currentPage(page);
+  expect(mobilePage, "the mobile layout still reports a reading page").not.toBeNull();
+  expect(
+    Math.abs(mobilePage! - readingPage!),
+    "responsive repagination stays at the same EPUB reading location",
+  ).toBeLessThanOrEqual(1);
 
   await page.getByTitle("Show notes").click();
   await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();

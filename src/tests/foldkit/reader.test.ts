@@ -5,15 +5,19 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import {
   ChangedReaderLayout,
+  ChangedReaderSearch,
   CommittedReaderSelection,
   IdentifiedReaderSession,
   ChangedBookmarkColor,
   ClosedReaderMenus,
   JumpedToBookmarkColor,
   PressedBookmarkButton,
+  RequestedReaderSearch,
   RemovedBookmark,
   RestoredReaderBookmarks,
   RestoredReaderPosition,
+  SearchedReader,
+  FailedReaderSearch,
   RequestedPositionSync,
   ShowedReaderSnapshot,
   MeasuredReaderPagination,
@@ -172,6 +176,7 @@ describe("reader bookmarks", () => {
     userId: "reader-1",
     groupId: "group-1",
     position: { kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.21 },
+    bookmarksStatus: "ready",
   };
   const red = {
     groupId: "group-1",
@@ -181,6 +186,14 @@ describe("reader bookmarks", () => {
     updatedAt: "2026-08-22T12:00:00.000Z",
     deletedAt: null,
   };
+
+  it("waits for restored bookmarks before accepting toolbar changes", () => {
+    const pending = { ...placed, bookmarksStatus: "loading" as const };
+    const [unchanged, commands] = update(pending, PressedBookmarkButton());
+
+    expect(unchanged).toBe(pending);
+    expect(commands).toEqual([]);
+  });
 
   it("claims the first free color, then opens the current bookmark menu", () => {
     const [, addCommands] = update(placed, PressedBookmarkButton());
@@ -258,6 +271,7 @@ describe("reader bookmarks", () => {
       page: 5,
       position: { ...blue.position, page: 4 },
       bookmarks: [blue],
+      bookmarksStatus: "ready" as const,
     };
 
     const [opened] = update(catchingUp, PressedBookmarkButton());
@@ -281,6 +295,33 @@ describe("reader bookmarks", () => {
       edit: closed.bookmarkMenuOpen,
       jump: closed.bookmarkJumpMenuOpen,
     }).toEqual({ book: false, edit: false, jump: false });
+  });
+});
+
+describe("reader search state", () => {
+  it("distinguishes an unsubmitted query, an in-flight search, and no matches", () => {
+    const [typed] = update(epubReader, ChangedReaderSearch({ query: "portrait" }));
+    expect(typed.searchStatus).toBe("idle");
+
+    const [searching, commands] = update(typed, RequestedReaderSearch());
+    expect(searching.searchStatus).toBe("searching");
+    expect(commandNames(commands)).toEqual(["SearchReader"]);
+
+    const [complete] = update(searching, SearchedReader({ query: "portrait", matches: [] }));
+    expect(complete.searchStatus).toBe("complete");
+
+    const [failed] = update(searching, FailedReaderSearch({ query: "portrait" }));
+    expect(failed.searchStatus).toBe("failed");
+  });
+
+  it("ignores results for the query the reader has already replaced", () => {
+    const [typed] = update(epubReader, ChangedReaderSearch({ query: "portrait" }));
+    const [searching] = update(typed, RequestedReaderSearch());
+    const [replaced] = update(searching, ChangedReaderSearch({ query: "picture" }));
+    const [afterLateResult] = update(replaced, SearchedReader({ query: "portrait", matches: [] }));
+
+    expect(afterLateResult.searchQuery).toBe("picture");
+    expect(afterLateResult.searchStatus).toBe("idle");
   });
 });
 

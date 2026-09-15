@@ -109,6 +109,7 @@ export const ReaderWorkspace = Schema.Struct({
   loading: Schema.Boolean,
   position: Schema.NullOr(SourceReadingPosition),
   bookmarks: Schema.Array(StoredBookmark),
+  bookmarksStatus: Schema.Literals(["idle", "loading", "ready"]),
   epubPlace: Schema.NullOr(EpubPlace),
   /** The measured page count, in the units the reader shows: EPUB presses or
    *  PDF pages. Zero total means "not measured yet". */
@@ -129,6 +130,7 @@ export const ReaderWorkspace = Schema.Struct({
   searchOpen: Schema.Boolean,
   searchQuery: Schema.String,
   searchMatches: Schema.Array(ReaderSearchMatch),
+  searchStatus: Schema.Literals(["idle", "searching", "complete", "failed"]),
   activeSearchMatch: Schema.Number,
   highlights: Schema.Array(ReaderHighlight),
   activeHighlightId: Schema.NullOr(Schema.String),
@@ -159,6 +161,7 @@ export const SearchedReader = m("SearchedReader", {
   query: Schema.String,
   matches: Schema.Array(ReaderSearchMatch),
 });
+export const FailedReaderSearch = m("FailedReaderSearch", { query: Schema.String });
 export const SelectedSearchMatch = m("SelectedSearchMatch", { index: Schema.Number });
 export const ChangedReaderLayout = m("ChangedReaderLayout", { layout: PdfPageLayout });
 export const ToggledReaderLayout = m("ToggledReaderLayout");
@@ -252,6 +255,7 @@ export const ReaderMessage = Schema.Union([
   ClosedReaderSearch,
   RequestedReaderSearch,
   SearchedReader,
+  FailedReaderSearch,
   SelectedSearchMatch,
   ChangedReaderLayout,
   ToggledReaderLayout,
@@ -606,6 +610,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   loading: true,
   position: null,
   bookmarks: [],
+  bookmarksStatus: "idle",
   epubPlace: null,
   page: 0,
   totalPages: 0,
@@ -620,6 +625,7 @@ export const openReader = (input: typeof SelectedReaderSource.Type): ReaderWorks
   searchOpen: false,
   searchQuery: "",
   searchMatches: [],
+  searchStatus: "idle",
   activeSearchMatch: 0,
   highlights: [],
   activeHighlightId: null,
@@ -1030,13 +1036,18 @@ export const makeReaderSlice = ({
 
   const SearchReader = Command.define("SearchReader", {
     args: { query: Schema.String, kind: SourceKind },
-    messages: [SearchedReader, CompletedReaderAction],
+    messages: [SearchedReader, FailedReaderSearch],
     execute: ({ query, kind }) =>
       backendFor(kind)
         .search(query)
         .pipe(
           Effect.map((matches) => SearchedReader({ query, matches })),
-          Effect.catch(logCommandFailure),
+          Effect.catch((error) =>
+            Effect.sync(() => {
+              console.error("Reader search failed", error);
+              return FailedReaderSearch({ query });
+            }),
+          ),
         ),
   });
 
@@ -1333,26 +1344,52 @@ export const makeReaderSlice = ({
         return [openReader(message), [LoadReaderSnapshot({ sourceId: message.sourceId })]];
       case "ChangedReaderSearch":
         return [
-          { ...reader, searchQuery: message.query, searchMatches: [], activeSearchMatch: 0 },
+          {
+            ...reader,
+            searchQuery: message.query,
+            searchMatches: [],
+            searchStatus: "idle",
+            activeSearchMatch: 0,
+          },
           [ClearSearchHighlight({ kind: reader.kind })],
         ];
       case "OpenedReaderSearch":
         return [{ ...reader, searchOpen: true }, []];
       case "ClosedReaderSearch":
         return [
-          { ...reader, searchOpen: false, searchMatches: [], activeSearchMatch: 0 },
+          {
+            ...reader,
+            searchOpen: false,
+            searchMatches: [],
+            searchStatus: "idle",
+            activeSearchMatch: 0,
+          },
           [ClearSearchHighlight({ kind: reader.kind })],
         ];
       case "RequestedReaderSearch":
-        return [reader, [SearchReader({ query: reader.searchQuery, kind: reader.kind })]];
+        return reader.searchQuery.trim() === "" || reader.searchStatus === "searching"
+          ? [reader, []]
+          : [
+              { ...reader, searchMatches: [], searchStatus: "searching", activeSearchMatch: 0 },
+              [SearchReader({ query: reader.searchQuery, kind: reader.kind })],
+            ];
       case "SearchedReader":
         if (reader.searchQuery !== message.query) return [reader, []];
         return message.matches[0] === undefined
-          ? [{ ...reader, searchMatches: [], activeSearchMatch: 0 }, []]
+          ? [{ ...reader, searchMatches: [], searchStatus: "complete", activeSearchMatch: 0 }, []]
           : [
-              { ...reader, searchMatches: message.matches, activeSearchMatch: 0 },
+              {
+                ...reader,
+                searchMatches: message.matches,
+                searchStatus: "complete",
+                activeSearchMatch: 0,
+              },
               [GoToSearchMatch({ anchor: message.matches[0].anchor, kind: reader.kind })],
             ];
+      case "FailedReaderSearch":
+        return reader.searchQuery === message.query
+          ? [{ ...reader, searchMatches: [], searchStatus: "failed", activeSearchMatch: 0 }, []]
+          : [reader, []];
       case "SelectedSearchMatch": {
         if (reader.searchMatches.length === 0) return [reader, []];
         const activeSearchMatch =
@@ -1417,7 +1454,12 @@ export const makeReaderSlice = ({
         return [{ ...reader, pane: message.pane }, []];
       case "IdentifiedReaderSession":
         return [
-          { ...reader, userId: message.userId, groupId: message.groupId },
+          {
+            ...reader,
+            userId: message.userId,
+            groupId: message.groupId,
+            bookmarksStatus: "loading",
+          },
           [
             RestoreReaderPosition({
               userId: message.userId,
@@ -1463,9 +1505,10 @@ export const makeReaderSlice = ({
             ];
       case "RestoredReaderBookmarks":
         return message.sourceId === reader.sourceId
-          ? [{ ...reader, bookmarks: message.bookmarks }, []]
+          ? [{ ...reader, bookmarks: message.bookmarks, bookmarksStatus: "ready" }, []]
           : [reader, []];
       case "PressedBookmarkButton": {
+        if (reader.bookmarksStatus !== "ready") return [reader, []];
         const current = bookmarkAtCurrentPlace(reader);
         if (current !== null) {
           return [
@@ -1711,11 +1754,15 @@ export const makeReaderSlice = ({
         h.span(
           [h.Class("reader-search-count"), h.Role("status")],
           [
-            searchCount === 0
-              ? reader.searchQuery.trim() === ""
-                ? ""
-                : "0 / 0"
-              : `${reader.activeSearchMatch + 1} / ${searchCount}`,
+            reader.searchStatus === "searching"
+              ? "searching…"
+              : reader.searchStatus === "failed"
+                ? "failed"
+                : searchCount === 0
+                  ? reader.searchStatus === "complete"
+                    ? "0 / 0"
+                    : ""
+                  : `${reader.activeSearchMatch + 1} / ${searchCount}`,
           ],
         ),
         h.button(
@@ -1811,20 +1858,44 @@ export const makeReaderSlice = ({
           [
             h.Type("button"),
             h.Class("reader-bookmark-button"),
-            h.Disabled(reader.position === null || (!canAddBookmark && currentBookmark === null)),
-            h.AriaLabel(currentBookmark === null ? "Bookmark this location" : "Edit this bookmark"),
+            h.Disabled(
+              reader.bookmarksStatus !== "ready" ||
+                reader.position === null ||
+                (!canAddBookmark && currentBookmark === null),
+            ),
+            h.AriaLabel(
+              reader.bookmarksStatus === "ready"
+                ? currentBookmark === null
+                  ? "Bookmark this location"
+                  : "Edit this bookmark"
+                : "Loading bookmarks",
+            ),
             h.AriaExpanded(reader.bookmarkMenuOpen),
             h.Title(
-              currentBookmark === null
-                ? canAddBookmark
-                  ? "Bookmark this location"
-                  : "All five bookmark colors are in use"
-                : `Edit ${currentBookmark.color} bookmark`,
+              reader.bookmarksStatus === "ready"
+                ? currentBookmark === null
+                  ? canAddBookmark
+                    ? "Bookmark this location"
+                    : "All five bookmark colors are in use"
+                  : `Edit ${currentBookmark.color} bookmark`
+                : "Loading bookmarks",
             ),
             h.OnClick(PressedBookmarkButton()),
           ],
           [bookmarkMark(currentBookmark?.color ?? null)],
         ),
+        ...(reader.bookmarksStatus === "ready"
+          ? []
+          : [
+              h.span(
+                [
+                  h.Class("reader-bookmarks-status"),
+                  h.Role("status"),
+                  h.AriaLabel("Loading bookmarks"),
+                ],
+                ["…"],
+              ),
+            ]),
         ...(reader.bookmarkMenuOpen && currentBookmark !== null
           ? [
               h.div(

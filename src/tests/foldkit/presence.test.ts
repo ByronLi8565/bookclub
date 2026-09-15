@@ -152,6 +152,7 @@ describe("Foldkit presence stories", () => {
       Story.Command.resolve(
         LoadGroupImages,
         LoadedGroupImages({
+          groupRef: GROUP_REF,
           images: [
             {
               id: "image-1",
@@ -170,6 +171,16 @@ describe("Foldkit presence stories", () => {
       Story.Command.expectNone(),
       Story.model((model) => expect(model.images).toHaveLength(1)),
     );
+  });
+
+  it("ignores images returned for a club whose modal has already closed", () => {
+    const current = opened();
+    const [afterLateAnswer] = updatePresence(
+      current,
+      LoadedGroupImages({ groupRef: "other-club-def456", images: [], totalSize: 0 }),
+    );
+
+    expect(afterLateAnswer).toBe(current);
   });
 
   it("asks before it deletes an upload, then shrinks the tally by that upload", () => {
@@ -420,8 +431,8 @@ describe("Foldkit presence view", () => {
 
   it("draws the images page, its loading state, and an open preview", async () => {
     const loading = await render({ ...opened(), page: "images" });
-    expect(loading.querySelector(".group-images > .group-images-loading")?.textContent).toBe(
-      "Loading…",
+    expect(loading.querySelector(".group-images > .group-books-summary")?.textContent).toBe(
+      "Loading images…",
     );
 
     const tree = await render({
