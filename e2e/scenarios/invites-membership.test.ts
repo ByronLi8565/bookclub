@@ -18,8 +18,16 @@ scenario(
     });
     expect(rotated.status, "a member can replace the club's open invite").toBe(200);
     // SAFETY: the successful rotate response contains the current invite token.
-    const { token: currentToken } = (await rotated.json()) as { token: string };
+    const { link, token: currentToken } = (await rotated.json()) as { link: string; token: string };
     expect(currentToken, "rotation mints a different token").not.toBe(staleToken);
+    const inviteUrl = new URL(link);
+    expect(inviteUrl.origin, "the shareable link uses the worker's public origin").toBe(
+      new URL(ctx.target.baseUrl).origin,
+    );
+    expect(inviteUrl.pathname, "the shareable link opens this club").toBe(`/clubs/${ref}`);
+    expect(inviteUrl.searchParams.get("invite"), "the shareable link carries the new token").toBe(
+      currentToken,
+    );
 
     const staleJoin = await api.request(reader, `/groups/${ref}/join`, {
       method: "POST",

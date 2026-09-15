@@ -68,7 +68,10 @@ export const GroupsHttp = HttpApiGroup.make("groups").add(
   }),
   HttpApiEndpoint.post("inviteLink", "/groups/:groupRef/invite-link", {
     params: GroupRef,
-    query: { rotate: Schema.optionalKey(Schema.String) },
+    query: {
+      rotate: Schema.optionalKey(Schema.String),
+      sourceId: Schema.optionalKey(Schema.String),
+    },
     success: Schema.Struct({ token: Schema.String, link: Schema.String }),
     error: GroupErrors,
   }),
@@ -92,7 +95,7 @@ export const GroupsHttp = HttpApiGroup.make("groups").add(
   }),
   HttpApiEndpoint.post("invite", "/groups/:groupRef/invite", {
     params: GroupRef,
-    payload: Schema.Struct({ email: Schema.String }),
+    payload: Schema.Struct({ email: Schema.String, sourceId: Schema.optionalKey(Schema.String) }),
     error: [BadRequestError, ...GroupErrors],
   }),
   HttpApiEndpoint.put("setMemberRole", "/groups/:groupRef/members/:memberId/role", {

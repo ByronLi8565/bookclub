@@ -44,9 +44,14 @@ import {
   DismissedLogin,
   CloseLoginAfterSuccess,
   ChangedLoginCode,
+  CompletedAccountAction,
+  FailedAccountSecurity,
   LoginOverlay,
   LoadAccountSecurity,
+  LoadedAccountSecurity,
   OpenedOverlay,
+  RequestedSetPassword,
+  SetAccountPassword,
   SettingsOverlay,
   init,
   makeBookclubApplication,
@@ -75,6 +80,56 @@ describe("Foldkit Bookclub boundary", () => {
     expect(signedInCommands.map((command) => command.name)).toContain(LoadAccountSecurity.name);
   });
 
+  it("does not expose empty account security state while its request is pending", () => {
+    const [initial] = init();
+    const user = { id: "reader-1", email: "reader@example.com", name: "Reader" };
+    const [signedIn] = update(initial, LoadedSession({ user }));
+    const [opened, commands] = update(signedIn, OpenedOverlay({ overlay: SettingsOverlay() }));
+
+    expect(opened.accountSecurityStatus).toBe("loading");
+    expect(commands.map(({ name, args }) => ({ name, args }))).toContainEqual({
+      name: LoadAccountSecurity.name,
+      args: { userId: user.id },
+    });
+
+    const [ignored, ignoredCommands] = update(
+      opened,
+      RequestedSetPassword({ password: "long-enough" }),
+    );
+    expect(ignored.accountBusy).toBe(false);
+    expect(ignoredCommands).toEqual([]);
+
+    const [ready] = update(
+      opened,
+      LoadedAccountSecurity({ userId: user.id, passkeys: [], hasPassword: false }),
+    );
+    const [saving, saveCommands] = update(ready, RequestedSetPassword({ password: "long-enough" }));
+    expect(saving.accountBusy).toBe(true);
+    expect(saveCommands.map((command) => command.name)).toEqual([SetAccountPassword.name]);
+
+    const [refreshing, refreshCommands] = update(
+      saving,
+      CompletedAccountAction({ title: "Password saved", message: "Saved." }),
+    );
+    expect(refreshing.accountSecurityStatus).toBe("loading");
+    expect(refreshCommands.map((command) => command.name)).toContain(LoadAccountSecurity.name);
+  });
+
+  it("ignores account security answers for an earlier reader", () => {
+    const [initial] = init();
+    const user = { id: "reader-1", email: "reader@example.com", name: "Reader" };
+    const [signedIn] = update(initial, LoadedSession({ user }));
+
+    const [lateSuccess] = update(
+      signedIn,
+      LoadedAccountSecurity({ userId: "reader-2", passkeys: [], hasPassword: true }),
+    );
+    expect(lateSuccess.hasPassword).toBe(false);
+
+    const [lateFailure] = update(signedIn, FailedAccountSecurity({ userId: "reader-2" }));
+    expect(lateFailure.toasts).toEqual([]);
+  });
+
   it("keeps serializable session, account, and error-toast transitions", () => {
     const [initial] = init();
     const user = { id: "user-1", email: "reader@example.com", name: "Reader" };
@@ -83,7 +138,7 @@ describe("Foldkit Bookclub boundary", () => {
       update,
       Story.given(initial),
       Story.message(LoadedSession({ user })),
-      Story.Command.resolve(LoadGroups, LoadedGroups({ groups: [] })),
+      Story.Command.resolve(LoadGroups, LoadedGroups({ userId: user.id, groups: [] })),
       Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.model((model) => {
         expect(model.session._tag).toBe("AuthenticatedSession");
@@ -92,7 +147,7 @@ describe("Foldkit Bookclub boundary", () => {
       }),
       // A club list that cannot be refreshed with nothing behind it is the one
       // load failure worth a sentence; the rest are ordinary states.
-      Story.message(FailedGroups()),
+      Story.message(FailedGroups({ userId: user.id })),
       Story.model((model) => {
         expect(model.toasts).toHaveLength(1);
         expect(model.toasts[0]?.message).toBe("You appear to be offline. Try again later.");
@@ -147,7 +202,7 @@ describe("Foldkit Bookclub boundary", () => {
         PasswordLogin,
         LoadedSession({ user: { id: "reader-1", email: "reader@example.com", name: "Reader" } }),
       ),
-      Story.Command.resolve(LoadGroups, LoadedGroups({ groups: [] })),
+      Story.Command.resolve(LoadGroups, LoadedGroups({ userId: "reader-1", groups: [] })),
       Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.message(Navigated({ route: Home() })),
       Story.model((model) => expect(model.route).toEqual(Home())),
@@ -175,7 +230,7 @@ describe("Foldkit Bookclub boundary", () => {
         VerifyLoginCode,
         LoadedSession({ user: { id: "reader-1", email: "reader@example.com", name: "Reader" } }),
       ),
-      Story.Command.resolve(LoadGroups, LoadedGroups({ groups: [] })),
+      Story.Command.resolve(LoadGroups, LoadedGroups({ userId: "reader-1", groups: [] })),
       Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       // The modal says it worked before it goes away, so it is still up.
       Story.model((model) => {
@@ -242,7 +297,7 @@ describe("Foldkit Bookclub boundary", () => {
       Story.message(Navigated({ route: Club({ groupRef: "new-club-public-1" }) })),
       // Loading the club itself is another story's subject; this one ends at
       // the route the push produced.
-      Story.Command.resolve(LoadGroup, MissingGroup()),
+      Story.Command.resolve(LoadGroup, MissingGroup({ groupRef: "new-club-public-1" })),
       Story.model((model) => {
         expect(model.creatingClub).toBe(false);
         expect(model.newGroupName).toBe("");

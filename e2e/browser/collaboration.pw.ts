@@ -7,14 +7,21 @@ import {
   openWorkspace,
   seedWorkspace,
   selectPdfText,
+  uploadBook,
 } from "./browserSupport.ts";
 
 test("Collaboration · an invited reader joins and receives the owner's note live", async ({
   browser,
   page,
 }) => {
+  test.setTimeout(60_000);
   const { ref } = await seedWorkspace(page.context());
+  await uploadBook(page.context(), ref, books.epub);
   await openWorkspace(page, ref);
+  await page.reload();
+  await page.getByTitle("Switch book").click();
+  await page.getByTitle(/Open The Picture of Dorian Gray/u).click();
+  await expect(page.locator(books.epub.ready)).toBeVisible({ timeout: 30_000 });
 
   await page.getByTitle("Show group").click();
   const groupDialog = page.getByRole("dialog", { name: "group" });
@@ -24,7 +31,20 @@ test("Collaboration · an invited reader joins and receives the owner's note liv
   await groupDialog.getByLabel("regenerate link").click();
   await expect.poll(() => inviteInput.inputValue()).not.toBe(previousLink);
   const inviteLink = new URL(`http://${await inviteInput.inputValue()}`);
+  expect(
+    inviteLink.searchParams.get("book"),
+    "the invite points at the owner's open book",
+  ).not.toBe(null);
   await groupDialog.getByLabel("close").click();
+
+  await page.getByTitle("Switch book").click();
+  await page.getByTitle(/Open Moby Dick/u).click();
+  await expect(page.locator(books.pdf.ready)).toBeVisible({ timeout: 30_000 });
+  await page.goto(`${inviteLink.pathname}${inviteLink.search}`);
+  await expect(
+    page.locator(books.epub.ready),
+    "an existing member's link reopens the book it names",
+  ).toBeVisible({ timeout: 30_000 });
 
   const readerContext = await browser.newContext({
     baseURL: BASE_URL,
@@ -34,7 +54,10 @@ test("Collaboration · an invited reader joins and receives the owner's note liv
     await authenticateContext(readerContext, "reader");
     const readerPage = await readerContext.newPage();
     await readerPage.goto(`${inviteLink.pathname}${inviteLink.search}`);
-    await expect(readerPage.locator(books.pdf.ready)).toBeVisible({ timeout: 30_000 });
+    await expect(
+      readerPage.locator(books.epub.ready),
+      "joining through the invite opens the linked book first",
+    ).toBeVisible({ timeout: 30_000 });
     await expect(readerPage.getByRole("heading", { name: "Notes" })).toBeVisible({
       timeout: 30_000,
     });
@@ -43,6 +66,12 @@ test("Collaboration · an invited reader joins and receives the owner's note liv
       "both members join the live group room",
     ).toBeVisible({ timeout: 30_000 });
 
+    await page.getByTitle("Switch book").click();
+    await page.getByTitle(/Open Moby Dick/u).click();
+    await expect(page.locator(books.pdf.ready)).toBeVisible({ timeout: 30_000 });
+    await readerPage.getByTitle("Switch book").click();
+    await readerPage.getByTitle(/Open Moby Dick/u).click();
+    await expect(readerPage.locator(books.pdf.ready)).toBeVisible({ timeout: 30_000 });
     await selectPdfText(page);
     await page.getByTitle("Add a note on this selection").click();
     const editor = page.locator(".note.compose .note-editor-input");

@@ -15,11 +15,9 @@ describe("the Foldkit route table", () => {
     expect(at("/clubs/club-alpha-public-1")).toEqual(Club({ groupRef: "club-alpha-public-1" }));
   });
 
-  it("carries the invite token an invite link puts in the query", () => {
-    // The link the server hands out is `/clubs/<ref>?invite=<token>`; a client
-    // that drops the token cannot let an invited reader in at all.
-    expect(at("/clubs/club-alpha-public-1?invite=tok-123")).toEqual(
-      Club({ groupRef: "club-alpha-public-1", invite: "tok-123" }),
+  it("carries the invite and linked book through routing", () => {
+    expect(at("/clubs/club-alpha-public-1?invite=tok-123&book=source-456")).toEqual(
+      Club({ groupRef: "club-alpha-public-1", invite: "tok-123", book: "source-456" }),
     );
   });
 
@@ -27,12 +25,15 @@ describe("the Foldkit route table", () => {
     expect(at("/nope/nowhere")).toEqual(Home());
   });
 
-  it("builds the href a route is reached by, without the token", () => {
+  it("builds club hrefs without replaying an invite token", () => {
     expect(hrefFor(Home())).toBe("/");
     expect(hrefFor(Club({ groupRef: "club-alpha-public-1" }))).toBe("/clubs/club-alpha-public-1");
     // A link back to a club must never re-offer the invite it was joined with.
     expect(hrefFor(Club({ groupRef: "club-alpha-public-1", invite: "tok-123" }))).toBe(
       "/clubs/club-alpha-public-1",
+    );
+    expect(hrefFor(Club({ groupRef: "club-alpha-public-1", book: "source-456" }))).toBe(
+      "/clubs/club-alpha-public-1?book=source-456",
     );
   });
 });

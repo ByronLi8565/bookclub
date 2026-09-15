@@ -196,6 +196,18 @@
   margin-top: 8px;
 }
 
+.home-club-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-clubs-status {
+  align-self: flex-start;
+  font-size: var(--font-xs);
+  opacity: var(--muted-opacity);
+}
+
 .home-club-list {
   list-style: none;
   margin: 0;

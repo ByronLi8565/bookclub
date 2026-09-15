@@ -30,6 +30,20 @@ const MAX_GROUP_TITLE_LENGTH = 100;
 const ulid = monotonicFactory();
 type Group = DurableObjectStub<GroupAgent>;
 
+const groupInviteUrl = (
+  request: HttpServerRequest.HttpServerRequest,
+  group: GroupSummary,
+  token: string,
+  sourceId?: string,
+): string => {
+  const query = new URLSearchParams({ invite: token });
+  if (sourceId !== undefined) query.set("book", sourceId);
+  return new URL(`/clubs/${groupUrlName(group)}?${query}`, request.originalUrl).href;
+};
+
+const invitedSource = (group: GroupSummary, sourceId?: string): string | undefined =>
+  sourceId !== undefined && group.sources.includes(sourceId) ? sourceId : undefined;
+
 const MigratedGroupsHttp = HttpApiGroup.make("migratedGroups")
   .add(
     GroupsHttp.endpoints.list,
@@ -190,7 +204,12 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         if (!result.ok) return yield* failure(result.reason);
         return {
           token: result.token,
-          link: `${new URL(request.url, "http://localhost").origin}/clubs/${groupUrlName(summary)}?invite=${result.token}`,
+          link: groupInviteUrl(
+            request,
+            summary,
+            result.token,
+            invitedSource(summary, query.sourceId),
+          ),
         };
       }),
     )
@@ -222,7 +241,12 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
             env,
             email,
             summary.displayName,
-            `${new URL(request.url, "http://localhost").origin}/clubs/${groupUrlName(summary)}?invite=${result.token}`,
+            groupInviteUrl(
+              request,
+              summary,
+              result.token,
+              invitedSource(summary, payload.sourceId),
+            ),
           ),
         );
       }),

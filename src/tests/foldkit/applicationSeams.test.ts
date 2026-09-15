@@ -4,6 +4,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   Club,
+  LoadedGroup,
   Model,
   Navigated,
   init,
@@ -57,6 +58,52 @@ const readerTags = unionTags(ReaderMessage);
 const notesTags = unionTags(NotesMessage);
 
 describe("Foldkit application slice seams", () => {
+  it("opens a deep-linked book instead of the device's remembered selection", () => {
+    const [initial] = init();
+    const group = {
+      groupId: "group-1",
+      slug: "club",
+      publicId: "alpha",
+      displayName: "Club",
+      ownerId: "reader-1",
+      sources: ["source-1", "source-2"],
+      bookTitles: {},
+      sourceMeta: {
+        "source-1": {
+          kind: "epub" as const,
+          contentType: "application/epub+zip",
+          size: 1,
+          addedBy: "reader-1",
+        },
+        "source-2": {
+          kind: "pdf" as const,
+          contentType: "application/pdf",
+          size: 1,
+          addedBy: "reader-1",
+        },
+      },
+      memberCount: 1,
+    };
+    const [routed] = update(
+      initial,
+      Navigated({ route: Club({ groupRef: "club-alpha", book: "source-2" }) }),
+    );
+    const [opened, commands] = update(
+      routed,
+      LoadedGroup({
+        groupRef: "club-alpha",
+        group,
+        membership: { isMember: true, role: "owner" },
+        members: [],
+      }),
+    );
+
+    expect(opened.reader?.sourceId).toBe("source-2");
+    expect(opened.pendingLinkedBook).toBeNull();
+    expect(commands.map((command) => command.name)).toContain("RememberSelectedSource");
+    expect(commands.map((command) => command.name)).toContain("ReplaceUrl");
+  });
+
   it("routes each slice's tags to exactly one owner", () => {
     expect(readerTags.length).toBeGreaterThan(0);
     expect(notesTags.length).toBeGreaterThan(0);

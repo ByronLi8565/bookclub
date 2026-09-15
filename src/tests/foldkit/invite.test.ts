@@ -71,15 +71,16 @@ const render = async (model: InviteModel): Promise<HTMLElement> => {
 
 describe("Foldkit invite stories", () => {
   it("asks for the club's link when the modal opens", () => {
+    const sourceId = "source-1";
     Story.story(
       updateInvite,
       Story.given({ ...loaded(), email: "left@over.test" }),
-      Story.message(OpenedInvite({ groupRef })),
+      Story.message(OpenedInvite({ groupRef, sourceId })),
       Story.model((model) => {
         expect(model).toEqual({ ...initialInviteModel(), linkLoading: true });
         expect(JSON.parse(JSON.stringify(model))).toEqual(model);
       }),
-      Story.Command.expectExact(LoadInviteLink({ groupRef, rotate: false })),
+      Story.Command.expectExact(LoadInviteLink({ groupRef, rotate: false, sourceId })),
       Story.Command.resolve(LoadInviteLink, LoadedInviteLink({ link })),
       Story.model((model) => {
         expect(model.link).toBe(link);
@@ -89,13 +90,14 @@ describe("Foldkit invite stories", () => {
   });
 
   it("sends an invite and empties the field the sender typed into", () => {
+    const sourceId = "source-1";
     Story.story(
       updateInvite,
       Story.given(loaded()),
       Story.message(ChangedInviteEmail({ email: "reader@bookclub.test" })),
-      Story.message(SubmittedInvite({ groupRef })),
+      Story.message(SubmittedInvite({ groupRef, sourceId })),
       Story.model((model) => expect(model.busy).toBe(true)),
-      Story.Command.expectExact(SendInvite({ groupRef, email: "reader@bookclub.test" })),
+      Story.Command.expectExact(SendInvite({ groupRef, email: "reader@bookclub.test", sourceId })),
       Story.Command.resolve(SendInvite, SentInvite({ email: "reader@bookclub.test" })),
       Story.model((model) => {
         expect(model.email).toBe("");

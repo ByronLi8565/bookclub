@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { GroupSummary } from "../../shared/types/groups.ts";
-import { Model, Home, init, shellView, type Message } from "../../client/foldkit/application.ts";
+import {
+  AnonymousSession,
+  Model,
+  Home,
+  init,
+  shellView,
+  type Message,
+} from "../../client/foldkit/application.ts";
 import { expectRecordedParity, renderFoldkit, stubAnimationFrame } from "./parity.ts";
 
 const user = { id: "reader-1", email: "one@example.com", name: "Reader One" };
@@ -46,7 +53,23 @@ describe("home parity", () => {
   beforeEach(stubAnimationFrame);
 
   it("renders the signed-out card React rendered", async () => {
-    expectRecordedParity("home-signed-out", await foldkitHome({}));
+    expectRecordedParity("home-signed-out", await foldkitHome({ session: AnonymousSession() }));
+  });
+
+  it("does not present a pending session or club request as an empty state", async () => {
+    const session = await foldkitHome({});
+    expect(session.textContent).toContain("LOADING");
+    expect(session.textContent).not.toContain("sign in to see your clubs");
+
+    const clubs = await foldkitHome({ session: signedIn, groupsStatus: "loading" });
+    expect(clubs.querySelector(".loading--home-clubs")).not.toBeNull();
+    expect(clubs.textContent).not.toContain("no clubs yet");
+  });
+
+  it("marks cached clubs as refreshing until the server answers", async () => {
+    const cached = await foldkitHome({ groups, session: signedIn, groupsStatus: "loading" });
+    expect(cached.textContent).toContain("Club Alpha");
+    expect(cached.querySelector(".home-clubs-status")?.textContent).toBe("refreshing clubs…");
   });
 
   it("renders the club list React rendered", async () => {

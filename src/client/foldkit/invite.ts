@@ -26,16 +26,25 @@ export const initialInviteModel = (): InviteModel => ({
 });
 
 /** Opening the modal, or switching clubs under it, starts the link over. */
-export const OpenedInvite = m("OpenedInvite", { groupRef: Schema.String });
+export const OpenedInvite = m("OpenedInvite", {
+  groupRef: Schema.String,
+  sourceId: Schema.optionalKey(Schema.String),
+});
 export const LoadedInviteLink = m("LoadedInviteLink", { link: Schema.NullOr(Schema.String) });
 export const ChangedInviteEmail = m("ChangedInviteEmail", { email: Schema.String });
-export const SubmittedInvite = m("SubmittedInvite", { groupRef: Schema.String });
+export const SubmittedInvite = m("SubmittedInvite", {
+  groupRef: Schema.String,
+  sourceId: Schema.optionalKey(Schema.String),
+});
 export const SentInvite = m("SentInvite", { email: Schema.String });
 export const FailedInvite = m("FailedInvite");
 export const CopiedInviteLink = m("CopiedInviteLink");
 export const MarkedInviteLinkCopied = m("MarkedInviteLinkCopied");
 export const ClearedInviteLinkCopied = m("ClearedInviteLinkCopied");
-export const RotatedInviteLink = m("RotatedInviteLink", { groupRef: Schema.String });
+export const RotatedInviteLink = m("RotatedInviteLink", {
+  groupRef: Schema.String,
+  sourceId: Schema.optionalKey(Schema.String),
+});
 export const FailedInviteLinkRotation = m("FailedInviteLinkRotation");
 
 export const InviteMessage = Schema.Union([
@@ -76,12 +85,26 @@ export const isInviteMessage = (message: { _tag: string }): message is InviteMes
  * a link to show; a rotation that fails leaves the one already on screen alone.
  */
 export const LoadInviteLink = Command.define("LoadInviteLink", {
-  args: { groupRef: Schema.String, rotate: Schema.Boolean },
+  args: {
+    groupRef: Schema.String,
+    rotate: Schema.Boolean,
+    sourceId: Schema.optionalKey(Schema.String),
+  },
   messages: [LoadedInviteLink, FailedInviteLinkRotation],
-  execute: ({ groupRef, rotate }) =>
+  execute: ({ groupRef, rotate, sourceId }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) =>
-        client.groups.inviteLink({ params: { groupRef }, query: rotate ? { rotate: "1" } : {} }),
+        client.groups.inviteLink({
+          params: { groupRef },
+          query:
+            sourceId === undefined
+              ? rotate
+                ? { rotate: "1" }
+                : {}
+              : rotate
+                ? { rotate: "1", sourceId }
+                : { sourceId },
+        }),
       ),
       Effect.map(({ link }) => LoadedInviteLink({ link })),
       Effect.catch(() =>
@@ -91,12 +114,19 @@ export const LoadInviteLink = Command.define("LoadInviteLink", {
 });
 
 export const SendInvite = Command.define("SendInvite", {
-  args: { groupRef: Schema.String, email: Schema.String },
+  args: {
+    groupRef: Schema.String,
+    email: Schema.String,
+    sourceId: Schema.optionalKey(Schema.String),
+  },
   messages: [SentInvite, FailedInvite],
-  execute: ({ groupRef, email }) =>
+  execute: ({ groupRef, email, sourceId }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) =>
-        client.groups.invite({ params: { groupRef }, payload: { email } }),
+        client.groups.invite({
+          params: { groupRef },
+          payload: sourceId === undefined ? { email } : { email, sourceId },
+        }),
       ),
       Effect.as(SentInvite({ email })),
       Effect.catch(() => Effect.succeed(FailedInvite())),
@@ -133,7 +163,13 @@ export const updateInvite = (
     case "OpenedInvite":
       return [
         initialInviteModel(),
-        [LoadInviteLink({ groupRef: message.groupRef, rotate: false })],
+        [
+          LoadInviteLink(
+            message.sourceId === undefined
+              ? { groupRef: message.groupRef, rotate: false }
+              : { groupRef: message.groupRef, rotate: false, sourceId: message.sourceId },
+          ),
+        ],
       ];
     case "LoadedInviteLink":
       return [{ ...model, link: message.link, linkLoading: false, busy: false }, []];
@@ -144,7 +180,13 @@ export const updateInvite = (
         ? [model, []]
         : [
             { ...model, busy: true },
-            [SendInvite({ groupRef: message.groupRef, email: model.email })],
+            [
+              SendInvite(
+                message.sourceId === undefined
+                  ? { groupRef: message.groupRef, email: model.email }
+                  : { groupRef: message.groupRef, email: model.email, sourceId: message.sourceId },
+              ),
+            ],
           ];
     case "SentInvite":
       return [{ ...model, email: "", busy: false }, []];
@@ -160,7 +202,13 @@ export const updateInvite = (
     case "RotatedInviteLink":
       return [
         { ...model, busy: true },
-        [LoadInviteLink({ groupRef: message.groupRef, rotate: true })],
+        [
+          LoadInviteLink(
+            message.sourceId === undefined
+              ? { groupRef: message.groupRef, rotate: true }
+              : { groupRef: message.groupRef, rotate: true, sourceId: message.sourceId },
+          ),
+        ],
       ];
   }
 };
@@ -214,6 +262,7 @@ export interface InviteViewContext<Message> {
   /** The club itself rather than a reference to it: the server resolves a club
    *  by the segment after the last `-`, so the reference is built here. */
   readonly group: GroupUrlParts & { readonly displayName: string };
+  readonly sourceId?: string;
   readonly onClose: Message;
   /** React's `InviteControls` takes children between the email form and the
    *  share row; the club's settings page puts its roster there. */
@@ -222,7 +271,7 @@ export interface InviteViewContext<Message> {
 
 export const inviteControlsView = <Message>(
   model: InviteModel,
-  { group, children = [] }: Omit<InviteViewContext<Message>, "onClose">,
+  { group, sourceId, children = [] }: Omit<InviteViewContext<Message>, "onClose">,
   h: HtmlBuilder<Message | InviteMessage>,
 ): readonly Html[] => {
   const groupRef = groupUrlName(group);
@@ -230,7 +279,7 @@ export const inviteControlsView = <Message>(
 
   return [
     h.form(
-      [h.OnSubmit(SubmittedInvite({ groupRef }))],
+      [h.OnSubmit(SubmittedInvite(sourceId === undefined ? { groupRef } : { groupRef, sourceId }))],
       [
         h.input([
           h.Type("email"),
@@ -281,7 +330,11 @@ export const inviteControlsView = <Message>(
                   [
                     h.Type("button"),
                     h.Class("invite-icon icon-button"),
-                    h.OnClick(RotatedInviteLink({ groupRef })),
+                    h.OnClick(
+                      RotatedInviteLink(
+                        sourceId === undefined ? { groupRef } : { groupRef, sourceId },
+                      ),
+                    ),
                     h.Disabled(model.busy),
                     h.AriaLabel("regenerate link"),
                     h.Title("Regenerate link"),

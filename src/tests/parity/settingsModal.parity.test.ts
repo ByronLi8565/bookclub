@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   Model as AppModel,
   accountSectionView,
@@ -61,5 +61,28 @@ describe("settings modal parity", () => {
         ),
     });
     expectRecordedParity("settings-account", foldkit);
+  });
+
+  it("shows account security loading instead of empty sign-in methods", async () => {
+    const [initial] = appInit();
+    const foldkit = await renderFoldkit<AppModel, AppMessage>({
+      Model: AppModel,
+      model: { ...initial, accountSecurityStatus: "loading" },
+      view: (model, h) =>
+        settingsView(
+          model.settings,
+          {
+            book: null,
+            signedIn: true,
+            // SAFETY: this render never dispatches its close message.
+            onClose: Close as never,
+            accountSection: accountSectionView(model, h),
+          },
+          h,
+        ),
+    });
+
+    expect(foldkit.querySelector(".loading--settings-detail")).not.toBeNull();
+    expect(foldkit.querySelector(".account-password-form")).toBeNull();
   });
 });

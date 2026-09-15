@@ -147,7 +147,7 @@ describe("asking who is signed in", () => {
     const [initial] = init();
     Story.story(
       update,
-      Story.given({ ...initial, groups: [group] }),
+      Story.given({ ...initial, session: { _tag: "AuthenticatedSession", user }, groups: [group] }),
       Story.message(NoSession()),
       Story.model((model) => expect(model.groups).toEqual([])),
     );
@@ -158,7 +158,9 @@ describe("the club list without a connection", () => {
   it("writes the list down when the server answers", async () => {
     localStorage.setItem("bookclub.session.user", JSON.stringify(user));
     answers(200, { groups: [group] });
-    expect(await Effect.runPromise(LoadGroups().effect)).toEqual(LoadedGroups({ groups: [group] }));
+    expect(await Effect.runPromise(LoadGroups({ userId: user.id }).effect)).toEqual(
+      LoadedGroups({ userId: user.id, groups: [group] }),
+    );
     expect(JSON.parse(localStorage.getItem(`bookclub.groups.${user.id}`) ?? "null")).toEqual([
       group,
     ]);
@@ -169,11 +171,11 @@ describe("the club list without a connection", () => {
     const [initial] = init();
     Story.story(
       update,
-      Story.given(initial),
+      Story.given({ ...initial, session: { _tag: "AuthenticatedSession", user } }),
       Story.message(LoadedSession({ user })),
       // No network answer has arrived yet, and the list is already there.
       Story.model((model) => expect(model.groups).toEqual([group])),
-      Story.Command.resolve(LoadGroups, FailedGroups()),
+      Story.Command.resolve(LoadGroups, FailedGroups({ userId: user.id })),
       Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.model((model) => expect(model.groups).toEqual([group])),
     );
@@ -183,8 +185,8 @@ describe("the club list without a connection", () => {
     const [initial] = init();
     Story.story(
       update,
-      Story.given({ ...initial, groups: [group] }),
-      Story.message(FailedGroups()),
+      Story.given({ ...initial, session: { _tag: "AuthenticatedSession", user }, groups: [group] }),
+      Story.message(FailedGroups({ userId: user.id })),
       Story.model((model) => {
         expect(model.groups).toEqual([group]);
         expect(model.toasts).toEqual([]);
@@ -196,13 +198,25 @@ describe("the club list without a connection", () => {
     const [initial] = init();
     Story.story(
       update,
-      Story.given(initial),
-      Story.message(FailedGroups()),
+      Story.given({ ...initial, session: { _tag: "AuthenticatedSession", user } }),
+      Story.message(FailedGroups({ userId: user.id })),
       Story.Command.resolve(DismissToastLater, DismissedToast({ id: "not-this-one" })),
       Story.model((model) => {
         expect(model.toasts[0]?.title).toBe("Couldn't load your clubs");
       }),
     );
+  });
+
+  it("ignores a club list that belongs to an earlier reader", () => {
+    const [initial] = init();
+    const [signedIn] = update(initial, LoadedSession({ user }));
+    const [afterLateAnswer] = update(
+      signedIn,
+      LoadedGroups({ userId: "another-reader", groups: [group] }),
+    );
+
+    expect(afterLateAnswer.groups).toEqual([]);
+    expect(afterLateAnswer.groupsStatus).toBe("loading");
   });
 });
 
@@ -213,7 +227,7 @@ describe("opening a club without a connection", () => {
     localStorage.setItem("bookclub.session.user", JSON.stringify(user));
     answers(200, view);
     expect(await Effect.runPromise(LoadGroup({ groupRef: "club-alpha-public-1" }).effect)).toEqual(
-      LoadedGroup(view),
+      LoadedGroup({ groupRef: "club-alpha-public-1", ...view }),
     );
     expect(
       JSON.parse(
@@ -227,7 +241,7 @@ describe("opening a club without a connection", () => {
     localStorage.setItem(`bookclub.groupview.${user.id}.club-alpha-public-1`, JSON.stringify(view));
     unreachable();
     expect(await Effect.runPromise(LoadGroup({ groupRef: "club-alpha-public-1" }).effect)).toEqual(
-      LoadedGroup(view),
+      LoadedGroup({ groupRef: "club-alpha-public-1", ...view }),
     );
   });
 
@@ -244,7 +258,7 @@ describe("opening a club without a connection", () => {
     // A deleted club must not keep opening from a stale copy for ever.
     answers(404, { error: "not_found" });
     expect(await Effect.runPromise(LoadGroup({ groupRef: "club-alpha-public-1" }).effect)).toEqual(
-      MissingGroup(),
+      MissingGroup({ groupRef: "club-alpha-public-1" }),
     );
   });
 
@@ -255,7 +269,7 @@ describe("opening a club without a connection", () => {
     Story.story(
       update,
       Story.given(onAClub),
-      Story.message(MissingGroup()),
+      Story.message(MissingGroup({ groupRef: "club-alpha-public-1" })),
       Story.model((model) => expect(model.clubError).toBe("notfound")),
       // Leaving the club clears the answer, so the next one does not open under
       // the last one's error.
@@ -269,6 +283,29 @@ describe("opening a club without a connection", () => {
       Story.message(UnreachableGroup({ groupRef: "club-alpha-public-1" })),
       Story.model((model) => expect(model.clubError).toBe("offline")),
     );
+  });
+
+  it("does not let a slower club request replace the route that won the race", () => {
+    const [initial] = init();
+    const onAnotherClub = { ...initial, route: Club({ groupRef: "club-beta-public-2" }) };
+    const [afterLateAnswer] = update(
+      onAnotherClub,
+      LoadedGroup({ groupRef: "club-alpha-public-1", ...view }),
+    );
+
+    expect(afterLateAnswer.currentGroup).toBeNull();
+    expect(afterLateAnswer.route).toEqual(Club({ groupRef: "club-beta-public-2" }));
+  });
+
+  it("clears the previous club while navigating to a different one", () => {
+    const [initial] = init();
+    const [navigated] = update(
+      { ...initial, currentGroup: group, membership, members: [] },
+      Navigated({ route: Club({ groupRef: "club-beta-public-2" }) }),
+    );
+
+    expect(navigated.currentGroup).toBeNull();
+    expect(navigated.membership).toBeNull();
   });
 });
 

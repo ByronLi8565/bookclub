@@ -165,6 +165,7 @@ export const UploadOverlay = ts("UploadOverlay");
 export const InviteOverlay = ts("InviteOverlay", {
   groupRef: Schema.String,
   displayName: Schema.String,
+  sourceId: Schema.optionalKey(Schema.String),
 });
 export const Overlay = Schema.Union([
   NoOverlay,
@@ -242,6 +243,7 @@ export const Model = Schema.Struct({
   loginBusy: Schema.Boolean,
   passkeysAvailable: Schema.Boolean,
   groups: Schema.Array(GroupSummary),
+  groupsStatus: Schema.Literals(["idle", "loading", "ready", "failed"]),
   newGroupName: Schema.String,
   creatingClub: Schema.Boolean,
   newGroupPending: Schema.Boolean,
@@ -255,8 +257,12 @@ export const Model = Schema.Struct({
   /** The token an invite link arrived with, held until the club reports whether
    *  this reader is already a member. */
   pendingInvite: Schema.NullOr(Schema.String),
+  /** A book named by an incoming deep link. It waits beside an invite token
+   *  until the club establishes membership, then overrides local history once. */
+  pendingLinkedBook: Schema.NullOr(Schema.String),
   accountPasskeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
+  accountSecurityStatus: Schema.Literals(["idle", "loading", "ready", "failed"]),
   passkeyLabel: Schema.String,
   currentPassword: Schema.String,
   newPassword: Schema.String,
@@ -316,10 +322,13 @@ export const RequestedPasskeyLogin = m("RequestedPasskeyLogin");
 export const SentLoginCode = m("SentLoginCode");
 export const FailedLogin = m("FailedLogin", { error: Schema.String });
 export const DismissedLogin = m("DismissedLogin");
-export const LoadedGroups = m("LoadedGroups", { groups: Schema.Array(GroupSummary) });
+export const LoadedGroups = m("LoadedGroups", {
+  userId: Schema.String,
+  groups: Schema.Array(GroupSummary),
+});
 /** The club list could not be refreshed. Whatever is already on screen — the
  *  copy this device cached — stays there. */
-export const FailedGroups = m("FailedGroups");
+export const FailedGroups = m("FailedGroups", { userId: Schema.String });
 export const StartedCreatingClub = m("StartedCreatingClub");
 export const CancelledCreatingClub = m("CancelledCreatingClub");
 export const FailedCreateGroup = m("FailedCreateGroup", { error: Schema.String });
@@ -332,20 +341,23 @@ export const ChangedNewGroupName = m("ChangedNewGroupName", { name: Schema.Strin
 export const SubmittedNewGroup = m("SubmittedNewGroup");
 export const CreatedGroup = m("CreatedGroup", { group: GroupSummary });
 export const LoadedGroup = m("LoadedGroup", {
+  groupRef: Schema.String,
   group: GroupSummary,
   membership: Membership,
   members: Schema.Array(RosterEntry),
 });
 /** The server answered that there is no such club. Authoritative, so it is a
  *  page and not a toast. */
-export const MissingGroup = m("MissingGroup");
+export const MissingGroup = m("MissingGroup", { groupRef: Schema.String });
 /** The server never answered. If this device has read the club before it opens
  *  from that copy; otherwise the reader is told they are offline. */
 export const UnreachableGroup = m("UnreachableGroup", { groupRef: Schema.String });
 export const LoadedAccountSecurity = m("LoadedAccountSecurity", {
+  userId: Schema.String,
   passkeys: Schema.Array(PasskeyInfo),
   hasPassword: Schema.Boolean,
 });
+export const FailedAccountSecurity = m("FailedAccountSecurity", { userId: Schema.String });
 export const CompletedAccountAction = m("CompletedAccountAction", {
   title: Schema.String,
   message: Schema.String,
@@ -435,6 +447,7 @@ export type Message =
   | typeof MissingGroup.Type
   | typeof UnreachableGroup.Type
   | typeof LoadedAccountSecurity.Type
+  | typeof FailedAccountSecurity.Type
   | typeof CompletedAccountAction.Type
   | typeof FailedAccountAction.Type
   | typeof ChangedPasskeyLabel.Type
@@ -506,16 +519,17 @@ export const ApplyReaderColors = Command.define("ApplyReaderColors", {
 });
 
 export const LoadGroups = Command.define("LoadGroups", {
+  args: { userId: Schema.String },
   messages: [LoadedGroups, FailedGroups],
-  execute: bookclubClient.pipe(
-    Effect.flatMap((client) => client.groups.list({})),
-    Effect.map(({ groups }) => {
-      const user = cachedSessionUser();
-      if (user !== null) rememberGroups(user.id, groups);
-      return LoadedGroups({ groups });
-    }),
-    Effect.catch(() => Effect.succeed(FailedGroups())),
-  ),
+  execute: ({ userId }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.groups.list({})),
+      Effect.map(({ groups }) => {
+        rememberGroups(userId, groups);
+        return LoadedGroups({ userId, groups });
+      }),
+      Effect.catch(() => Effect.succeed(FailedGroups({ userId }))),
+    ),
 });
 
 /** Every API failure carries a code the sign-in form turns into a sentence; a
@@ -699,26 +713,32 @@ export const LoadGroup = Command.define("LoadGroup", {
       Effect.map(({ group, membership, members }) => {
         const user = cachedSessionUser();
         if (user !== null) rememberGroupView(user.id, groupRef, { group, membership, members });
-        return LoadedGroup({ group, membership, members });
+        return LoadedGroup({ groupRef, group, membership, members });
       }),
       Effect.catch((error) =>
         Effect.sync(() => {
-          if (apiFailure(error) === "notfound") return MissingGroup();
+          if (apiFailure(error) === "notfound") return MissingGroup({ groupRef });
           const user = cachedSessionUser();
           const view = user === null ? null : cachedGroupView(user.id, groupRef);
-          return view === null ? UnreachableGroup({ groupRef }) : LoadedGroup(view);
+          return view === null
+            ? UnreachableGroup({ groupRef })
+            : LoadedGroup({ groupRef, ...view });
         }),
       ),
     ),
 });
 
 export const LoadAccountSecurity = Command.define("LoadAccountSecurity", {
-  messages: [LoadedAccountSecurity, FailedClientCommand],
-  execute: bookclubClient.pipe(
-    Effect.flatMap((client) => client.auth.passkeys({})),
-    Effect.map(({ passkeys, hasPassword }) => LoadedAccountSecurity({ passkeys, hasPassword })),
-    Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
-  ),
+  args: { userId: Schema.String },
+  messages: [LoadedAccountSecurity, FailedAccountSecurity],
+  execute: ({ userId }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.auth.passkeys({})),
+      Effect.map(({ passkeys, hasPassword }) =>
+        LoadedAccountSecurity({ userId, passkeys, hasPassword }),
+      ),
+      Effect.catch(() => Effect.succeed(FailedAccountSecurity({ userId }))),
+    ),
 });
 
 export const SetAccountPassword = Command.define("SetAccountPassword", {
@@ -879,6 +899,7 @@ export const init = (): readonly [Model, []] => [
     loginBusy: false,
     passkeysAvailable: passkeysSupported(),
     groups: [],
+    groupsStatus: "idle",
     newGroupName: "",
     creatingClub: false,
     newGroupPending: false,
@@ -888,8 +909,10 @@ export const init = (): readonly [Model, []] => [
     members: [],
     clubError: null,
     pendingInvite: null,
+    pendingLinkedBook: null,
     accountPasskeys: [],
     hasPassword: false,
+    accountSecurityStatus: "idle",
     passkeyLabel: "",
     currentPassword: "",
     newPassword: "",
@@ -974,15 +997,35 @@ const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
 const navigateTo = (model: Model, route: Route): Update => {
   if (route._tag === "Home") {
     return [
-      { ...model, route, reader: null, currentGroup: null, pendingInvite: null, clubError: null },
+      {
+        ...model,
+        route,
+        reader: null,
+        currentGroup: null,
+        pendingInvite: null,
+        pendingLinkedBook: null,
+        clubError: null,
+      },
       [],
     ];
   }
-  const { groupRef, invite } = route;
+  const { groupRef, invite, book } = route;
+  const alreadyShowing =
+    model.currentGroup !== null && groupUrlName(model.currentGroup) === groupRef;
   return [
     // The token is held rather than acted on: only the club's own answer says
     // whether this reader still needs it.
-    { ...model, route, pendingInvite: invite ?? null, clubError: null },
+    {
+      ...model,
+      route,
+      pendingInvite: invite ?? null,
+      pendingLinkedBook: book ?? null,
+      clubError: null,
+      currentGroup: alreadyShowing ? model.currentGroup : null,
+      membership: alreadyShowing ? model.membership : null,
+      members: alreadyShowing ? model.members : [],
+      reader: alreadyShowing ? model.reader : null,
+    },
     [LoadGroup({ groupRef })],
   ];
 };
@@ -1243,6 +1286,8 @@ const updateSlices = (model: Model, message: Message): Update => {
   switch (message._tag) {
     case "LoadedSession": {
       const signingIn = model.overlay._tag === "LoginOverlay";
+      const sameReader =
+        model.session._tag === "AuthenticatedSession" && model.session.user.id === message.user.id;
       return [
         {
           ...model,
@@ -1250,7 +1295,12 @@ const updateSlices = (model: Model, message: Message): Update => {
           account: ReadyAccount({ user: message.user }),
           // The clubs this device already knows about paint now rather than
           // when the network answers, and remain the answer if it never does.
-          groups: model.groups.length === 0 ? cachedGroups(message.user.id) : model.groups,
+          groups:
+            sameReader && model.groups.length > 0 ? model.groups : cachedGroups(message.user.id),
+          groupsStatus: "loading",
+          accountPasskeys: sameReader ? model.accountPasskeys : [],
+          hasPassword: sameReader ? model.hasPassword : false,
+          accountSecurityStatus: sameReader ? model.accountSecurityStatus : "idle",
           // The login modal stays up long enough to say it worked; the page
           // behind it was already where the reader wanted to be.
           loginStep: signingIn ? "done" : model.loginStep,
@@ -1260,15 +1310,24 @@ const updateSlices = (model: Model, message: Message): Update => {
           loginCode: "",
         },
         signingIn
-          ? [LoadGroups(), LoadUserPrefs(), CloseLoginAfterSuccess()]
-          : [LoadGroups(), LoadUserPrefs()],
+          ? [LoadGroups({ userId: message.user.id }), LoadUserPrefs(), CloseLoginAfterSuccess()]
+          : [LoadGroups({ userId: message.user.id }), LoadUserPrefs()],
       ];
     }
     case "NoSession":
       // Nobody is signed in, so nobody's clubs belong on screen — a session
       // that expired must not leave the last reader's list behind.
       return [
-        { ...model, session: AnonymousSession(), account: UnavailableAccount(), groups: [] },
+        {
+          ...model,
+          session: AnonymousSession(),
+          account: UnavailableAccount(),
+          groups: [],
+          groupsStatus: "idle",
+          accountPasskeys: [],
+          hasPassword: false,
+          accountSecurityStatus: "idle",
+        },
         [],
       ];
     case "SpawnedToast":
@@ -1285,15 +1344,25 @@ const updateSlices = (model: Model, message: Message): Update => {
       switch (message.overlay._tag) {
         case "SettingsOverlay": {
           const [next, commands] = updateSettingsSlice(opened, OpenedSettings());
+          const session = model.session;
           return [
-            next,
-            model.session._tag === "AuthenticatedSession"
-              ? [LoadAccountSecurity(), ...commands]
+            session._tag === "AuthenticatedSession"
+              ? { ...next, accountSecurityStatus: "loading" }
+              : next,
+            session._tag === "AuthenticatedSession"
+              ? [LoadAccountSecurity({ userId: session.user.id }), ...commands]
               : commands,
           ];
         }
         case "InviteOverlay":
-          return updateInviteSlice(opened, OpenedInvite({ groupRef: message.overlay.groupRef }));
+          return updateInviteSlice(
+            opened,
+            OpenedInvite(
+              message.overlay.sourceId === undefined
+                ? { groupRef: message.overlay.groupRef }
+                : { groupRef: message.overlay.groupRef, sourceId: message.overlay.sourceId },
+            ),
+          );
         case "UploadOverlay":
           return [{ ...opened, upload: initialUploadModel() }, []];
         case "PresenceOverlay": {
@@ -1306,7 +1375,12 @@ const updateSlices = (model: Model, message: Message): Update => {
             opened,
             OpenedPresence({ groupRef }),
           );
-          const [invited, inviteCommands] = updateInviteSlice(shown, OpenedInvite({ groupRef }));
+          const [invited, inviteCommands] = updateInviteSlice(
+            shown,
+            OpenedInvite(
+              model.reader === null ? { groupRef } : { groupRef, sourceId: model.reader.sourceId },
+            ),
+          );
           return [invited, [...presenceCommands, ...inviteCommands]];
         }
         default:
@@ -1409,16 +1483,27 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "DismissedLogin":
       return [{ ...model, overlay: NoOverlay(), ...blankLogin }, []];
     case "LoadedGroups":
-      return [{ ...model, groups: message.groups }, []];
-    case "FailedGroups":
+      return model.session._tag !== "AuthenticatedSession" ||
+        model.session.user.id !== message.userId
+        ? [model, []]
+        : [{ ...model, groups: message.groups, groupsStatus: "ready" }, []];
+    case "FailedGroups": {
+      if (
+        model.session._tag !== "AuthenticatedSession" ||
+        model.session.user.id !== message.userId
+      ) {
+        return [model, []];
+      }
+      const failed = { ...model, groupsStatus: "failed" as const };
       // The cached list is already on screen and is the best answer available,
       // so a refusal is only worth saying when there is nothing behind it.
       return model.groups.length > 0
-        ? [model, []]
+        ? [failed, []]
         : withToast(
-            model,
+            failed,
             errorToast("Couldn't load your clubs", "You appear to be offline. Try again later."),
           );
+    }
     case "ChangedNewGroupName":
       return [{ ...model, newGroupName: message.name }, []];
     case "StartedCreatingClub":
@@ -1459,9 +1544,22 @@ const updateSlices = (model: Model, message: Message): Update => {
       // change, so the club reloads through the same path every arrival takes.
       return [
         { ...model, currentGroup: message.group },
-        [ReplaceUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })],
+        [
+          ReplaceUrl({
+            href: hrefFor(
+              Club(
+                model.pendingLinkedBook === null
+                  ? { groupRef: groupUrlName(message.group) }
+                  : { groupRef: groupUrlName(message.group), book: model.pendingLinkedBook },
+              ),
+            ),
+          }),
+        ],
       ];
     case "LoadedGroup": {
+      if (model.route._tag !== "Club" || model.route.groupRef !== message.groupRef) {
+        return [model, []];
+      }
       // An invite link is only spent once the club says this reader is not
       // already in it, which is the order React redeems in too.
       if (!message.membership.isMember && model.pendingInvite !== null) {
@@ -1478,14 +1576,40 @@ const updateSlices = (model: Model, message: Message): Update => {
         membership: message.membership,
         members: message.members,
       };
+      const linkedBook = model.pendingLinkedBook;
+      if (linkedBook !== null && message.group.sources.includes(linkedBook)) {
+        const [opened, commands] = updateSlices(
+          { ...loaded, pendingLinkedBook: null },
+          SelectedBook({ sourceId: linkedBook }),
+        );
+        return [
+          opened,
+          [
+            ...commands,
+            ReplaceUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) }),
+          ],
+        ];
+      }
       // A club is its open book, so loading one asks which book this device
       // was last reading before deciding what the page shows.
-      return [loaded, [RestoreSelectedSource({ groupId: message.group.groupId })]];
+      return [
+        { ...loaded, pendingLinkedBook: null },
+        [
+          RestoreSelectedSource({ groupId: message.group.groupId }),
+          ...(linkedBook === null
+            ? []
+            : [ReplaceUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })]),
+        ],
+      ];
     }
     case "MissingGroup":
-      return [{ ...model, clubError: "notfound", currentGroup: null, reader: null }, []];
+      return model.route._tag !== "Club" || model.route.groupRef !== message.groupRef
+        ? [model, []]
+        : [{ ...model, clubError: "notfound", currentGroup: null, reader: null }, []];
     case "UnreachableGroup":
-      return [{ ...model, clubError: "offline", currentGroup: null, reader: null }, []];
+      return model.route._tag !== "Club" || model.route.groupRef !== message.groupRef
+        ? [model, []]
+        : [{ ...model, clubError: "offline", currentGroup: null, reader: null }, []];
     case "RestoredSelectedSource": {
       const group = model.currentGroup;
       if (group === null) return [model, []];
@@ -1543,15 +1667,42 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "RenamedBook":
       return [{ ...model, currentGroup: message.group }, []];
     case "LoadedAccountSecurity":
-      return [
-        { ...model, accountPasskeys: message.passkeys, hasPassword: message.hasPassword },
-        [],
-      ];
-    case "CompletedAccountAction":
-      return withToast(
-        { ...model, accountBusy: false, passkeyLabel: "", currentPassword: "", newPassword: "" },
-        infoToast(message.title, message.message),
-      );
+      return model.session._tag !== "AuthenticatedSession" ||
+        model.session.user.id !== message.userId
+        ? [model, []]
+        : [
+            {
+              ...model,
+              accountPasskeys: message.passkeys,
+              hasPassword: message.hasPassword,
+              accountSecurityStatus: "ready",
+            },
+            [],
+          ];
+    case "FailedAccountSecurity":
+      return model.session._tag !== "AuthenticatedSession" ||
+        model.session.user.id !== message.userId
+        ? [model, []]
+        : withToast(
+            { ...model, accountSecurityStatus: "failed" },
+            errorToast("Account", "Couldn't load your sign-in methods."),
+          );
+    case "CompletedAccountAction": {
+      const settled = {
+        ...model,
+        accountBusy: false,
+        passkeyLabel: "",
+        currentPassword: "",
+        newPassword: "",
+      };
+      const toasted = withToast(settled, infoToast(message.title, message.message));
+      return model.session._tag === "AuthenticatedSession"
+        ? [
+            { ...toasted[0], accountSecurityStatus: "loading" },
+            [...toasted[1], LoadAccountSecurity({ userId: model.session.user.id })],
+          ]
+        : toasted;
+    }
     case "FailedAccountAction":
       return withToast(
         { ...model, accountBusy: false },
@@ -1572,6 +1723,11 @@ const updateSlices = (model: Model, message: Message): Update => {
           session: AnonymousSession(),
           account: UnavailableAccount(),
           groups: [],
+          groupsStatus: "idle",
+          accountPasskeys: [],
+          hasPassword: false,
+          accountSecurityStatus: "idle",
+          accountBusy: false,
         },
         [PushUrl({ href: hrefFor(Home()) })],
       ];
@@ -1589,11 +1745,17 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "RequestedSignOut":
       return [model, [SignOut()]];
     case "RequestedSetPassword":
-      return [model, [SetAccountPassword(message)]];
+      return model.accountBusy || model.accountSecurityStatus !== "ready"
+        ? [model, []]
+        : [{ ...model, accountBusy: true }, [SetAccountPassword(message)]];
     case "RequestedRemovePassword":
-      return [model, [RemoveAccountPassword(message)]];
+      return model.accountBusy || model.accountSecurityStatus !== "ready"
+        ? [model, []]
+        : [{ ...model, accountBusy: true }, [RemoveAccountPassword(message)]];
     case "RequestedRemovePasskey":
-      return [model, [RemoveAccountPasskey(message)]];
+      return model.accountBusy || model.accountSecurityStatus !== "ready"
+        ? [model, []]
+        : [{ ...model, accountBusy: true }, [RemoveAccountPasskey(message)]];
     case "RequestedDeleteGroup":
       return [model, [DeleteGroup(message)]];
     case "RequestedUrl":
@@ -1607,11 +1769,22 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "FailedClientCommand":
       return withToast(model, errorToast("Something went wrong", message.message));
     case "CompletedPasskeyRegistration":
-      return message.error === null
-        ? [model, []]
-        : withToast(model, errorToast("Passkey failed", loginErrorMessage(message.error)));
+      if (message.error !== null) {
+        return withToast(
+          { ...model, accountBusy: false },
+          errorToast("Passkey failed", loginErrorMessage(message.error)),
+        );
+      }
+      return model.session._tag === "AuthenticatedSession"
+        ? [
+            { ...model, accountBusy: false, passkeyLabel: "", accountSecurityStatus: "loading" },
+            [LoadAccountSecurity({ userId: model.session.user.id })],
+          ]
+        : [{ ...model, accountBusy: false }, []];
     case "RequestedPasskeyRegistration":
-      return [model, [RegisterPasskey({ label: message.label })]];
+      return model.accountBusy || model.accountSecurityStatus !== "ready"
+        ? [model, []]
+        : [{ ...model, accountBusy: true }, [RegisterPasskey({ label: message.label })]];
   }
 };
 
@@ -1773,15 +1946,18 @@ const splitSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }));
 
-const subscriptions = Subscription.aggregate<Model, Message, NoteAgentService>()(
-  noteAgentSubscriptions,
-  readerSubscriptions,
-  viewportSubscriptions,
-  connectivitySubscriptions,
-  overlaySubscriptions,
-  splitSubscriptions,
-  paneKeySubscriptions,
-);
+// Keep this merge local instead of calling Foldkit's aggregate helper: the PWA
+// still supports iOS Safari versions without Object.hasOwn, which that helper
+// uses while the application module is being evaluated.
+const subscriptions = {
+  ...noteAgentSubscriptions,
+  ...readerSubscriptions,
+  ...viewportSubscriptions,
+  ...connectivitySubscriptions,
+  ...overlaySubscriptions,
+  ...splitSubscriptions,
+  ...paneKeySubscriptions,
+};
 
 const paneClass = (base: string, hidden: boolean): string =>
   hidden ? `${base} split-pane--hidden` : base;
@@ -2021,7 +2197,13 @@ export const overlayView = (model: Model, h: HtmlBuilder<Message>): Html[] => {
             // backup controls at the head of the books page.
             inviteControls: inviteControlsView(
               model.invite,
-              { group, children: [presencePeopleView(model.presence, roster, h)] },
+              model.reader === null
+                ? { group, children: [presencePeopleView(model.presence, roster, h)] }
+                : {
+                    group,
+                    sourceId: model.reader.sourceId,
+                    children: [presencePeopleView(model.presence, roster, h)],
+                  },
               h,
             ),
             backupControls: [backupControlsView(model.settings, group, h)],
@@ -2035,7 +2217,15 @@ export const overlayView = (model: Model, h: HtmlBuilder<Message>): Html[] => {
       const group = model.groups.find((candidate) => groupUrlName(candidate) === overlay.groupRef);
       return group === undefined
         ? []
-        : [inviteView(model.invite, { group, onClose: ClosedOverlay() }, h)];
+        : [
+            inviteView(
+              model.invite,
+              overlay.sourceId === undefined
+                ? { group, onClose: ClosedOverlay() }
+                : { group, onClose: ClosedOverlay(), sourceId: overlay.sourceId },
+              h,
+            ),
+          ];
     }
     default:
       return [];
@@ -2185,35 +2375,37 @@ const homeTopButtons = (model: Model, h: HtmlBuilder<Message>): Html =>
 const loginCorner = (model: Model, h: HtmlBuilder<Message>): Html =>
   h.div(
     [h.Class("home-corner home-corner--login")],
-    model.session._tag === "AuthenticatedSession"
-      ? [
-          h.div(
-            [h.Class("login login--authed")],
-            [
-              h.span([h.Class("login-email")], [model.session.user.email]),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Class("login-link plain-button"),
-                  h.Title("Sign out"),
-                  h.OnClick(RequestedSignOut()),
-                ],
-                ["sign out"],
-              ),
-            ],
-          ),
-        ]
-      : [
-          h.button(
-            [
-              h.Type("button"),
-              h.Class("login-signin"),
-              h.Title("Sign in"),
-              h.OnClick(OpenedOverlay({ overlay: LoginOverlay() })),
-            ],
-            ["sign in"],
-          ),
-        ],
+    model.session._tag === "LoadingSession"
+      ? [loadingView(h, "loading--inline")]
+      : model.session._tag === "AuthenticatedSession"
+        ? [
+            h.div(
+              [h.Class("login login--authed")],
+              [
+                h.span([h.Class("login-email")], [model.session.user.email]),
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("login-link plain-button"),
+                    h.Title("Sign out"),
+                    h.OnClick(RequestedSignOut()),
+                  ],
+                  ["sign out"],
+                ),
+              ],
+            ),
+          ]
+        : [
+            h.button(
+              [
+                h.Type("button"),
+                h.Class("login-signin"),
+                h.Title("Sign in"),
+                h.OnClick(OpenedOverlay({ overlay: LoginOverlay() })),
+              ],
+              ["sign in"],
+            ),
+          ],
   );
 
 const backToClubs = (h: HtmlBuilder<Message>): Html =>
@@ -2223,40 +2415,67 @@ const backToClubs = (h: HtmlBuilder<Message>): Html =>
   );
 
 const clubList = (model: Model, h: HtmlBuilder<Message>): Html =>
-  model.session._tag === "AuthenticatedSession"
-    ? model.groups.length === 0
-      ? h.span([h.Class("home-existing-label")], ["no clubs yet \u2014 create one above"])
-      : h.ul(
-          [h.Class("home-club-list")],
-          model.groups.map((group) =>
-            h.li(
-              [h.Key(group.groupId)],
+  model.session._tag === "LoadingSession"
+    ? loadingView(h, "loading--home-clubs")
+    : model.session._tag === "AuthenticatedSession"
+      ? model.groups.length === 0
+        ? model.groupsStatus === "loading"
+          ? loadingView(h, "loading--home-clubs")
+          : h.span(
+              [h.Class("home-existing-label")],
               [
-                h.a(
-                  [h.Href(hrefFor(Club({ groupRef: groupUrlName(group) })))],
-                  [group.displayName],
-                ),
-                h.button(
-                  [
-                    h.Type("button"),
-                    h.Class("login-link plain-button"),
-                    h.Title("Invite people"),
-                    h.OnClick(
-                      OpenedOverlay({
-                        overlay: InviteOverlay({
-                          groupRef: groupUrlName(group),
-                          displayName: group.displayName,
-                        }),
-                      }),
-                    ),
-                  ],
-                  ["invite"],
-                ),
+                model.groupsStatus === "failed"
+                  ? "clubs unavailable \u2014 reconnect to try again"
+                  : "no clubs yet \u2014 create one above",
               ],
-            ),
+            )
+        : model.groupsStatus === "loading"
+          ? h.div(
+              [h.Class("home-club-results")],
+              [
+                clubListItems(model, h),
+                h.span([h.Class("home-clubs-status"), h.Role("status")], ["refreshing clubs…"]),
+              ],
+            )
+          : model.groupsStatus === "failed"
+            ? h.div(
+                [h.Class("home-club-results")],
+                [
+                  clubListItems(model, h),
+                  h.span([h.Class("home-clubs-status"), h.Role("status")], ["showing saved clubs"]),
+                ],
+              )
+            : clubListItems(model, h)
+      : h.span([h.Class("home-existing-label")], ["sign in to see your clubs"]);
+
+const clubListItems = (model: Model, h: HtmlBuilder<Message>): Html =>
+  h.ul(
+    [h.Class("home-club-list")],
+    model.groups.map((group) =>
+      h.li(
+        [h.Key(group.groupId)],
+        [
+          h.a([h.Href(hrefFor(Club({ groupRef: groupUrlName(group) })))], [group.displayName]),
+          h.button(
+            [
+              h.Type("button"),
+              h.Class("login-link plain-button"),
+              h.Title("Invite people"),
+              h.OnClick(
+                OpenedOverlay({
+                  overlay: InviteOverlay({
+                    groupRef: groupUrlName(group),
+                    displayName: group.displayName,
+                  }),
+                }),
+              ),
+            ],
+            ["invite"],
           ),
-        )
-    : h.span([h.Class("home-existing-label")], ["sign in to see your clubs"]);
+        ],
+      ),
+    ),
+  );
 
 const homeView = (model: Model, h: HtmlBuilder<Message>, overlay: Html[] = []): Html =>
   homeCard(
@@ -2413,144 +2632,162 @@ const loginCodeForm = (model: Model, h: HtmlBuilder<Message>): Html =>
 
 /** React's `AccountSettings`, which is a page of the settings modal rather than
  *  a screen of its own. */
-export const accountSectionView = (model: Model, h: HtmlBuilder<Message>): Html[] => [
-  h.section(
-    [h.Class("settings-item settings-item--stacked")],
-    [
-      h.div(
-        [h.Class("settings-item-text")],
-        [
-          h.h2([h.Class("settings-item-head")], ["Passkeys"]),
-          h.p(
-            [h.Class("settings-item-desc")],
-            ["Sign in with Face ID, Touch ID, or a security key."],
-          ),
-        ],
+export const accountSectionView = (model: Model, h: HtmlBuilder<Message>): Html[] => {
+  if (model.accountSecurityStatus === "loading") {
+    return [loadingView(h, "loading--settings-detail")];
+  }
+  if (model.accountSecurityStatus === "failed") {
+    return [
+      h.p(
+        [h.Class("settings-item-desc"), h.Role("status")],
+        ["Couldn't load your sign-in methods."],
       ),
-      ...(model.passkeysAvailable
-        ? [
-            ...(model.accountPasskeys.length === 0
-              ? []
-              : [
-                  h.ul(
-                    [h.Class("account-passkey-list")],
-                    model.accountPasskeys.map((passkey) =>
-                      h.li(
-                        [h.Key(passkey.id), h.Class("account-passkey")],
-                        [
-                          h.span([h.Class("account-passkey-label truncate")], [passkey.label]),
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Class("login-link plain-button"),
-                              h.Title("Remove this passkey"),
-                              h.OnClick(RequestedRemovePasskey({ id: passkey.id })),
-                            ],
-                            ["remove"],
-                          ),
-                        ],
+    ];
+  }
+  return [
+    h.section(
+      [h.Class("settings-item settings-item--stacked")],
+      [
+        h.div(
+          [h.Class("settings-item-text")],
+          [
+            h.h2([h.Class("settings-item-head")], ["Passkeys"]),
+            h.p(
+              [h.Class("settings-item-desc")],
+              ["Sign in with Face ID, Touch ID, or a security key."],
+            ),
+          ],
+        ),
+        ...(model.passkeysAvailable
+          ? [
+              ...(model.accountPasskeys.length === 0
+                ? []
+                : [
+                    h.ul(
+                      [h.Class("account-passkey-list")],
+                      model.accountPasskeys.map((passkey) =>
+                        h.li(
+                          [h.Key(passkey.id), h.Class("account-passkey")],
+                          [
+                            h.span([h.Class("account-passkey-label truncate")], [passkey.label]),
+                            h.button(
+                              [
+                                h.Type("button"),
+                                h.Class("login-link plain-button"),
+                                h.Title("Remove this passkey"),
+                                h.OnClick(RequestedRemovePasskey({ id: passkey.id })),
+                              ],
+                              ["remove"],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+                  ]),
+              h.div(
+                [h.Class("account-passkey-add")],
+                [
+                  h.input([
+                    h.Type("text"),
+                    h.AriaLabel("Passkey name"),
+                    h.Placeholder("passkey name (optional)"),
+                    h.Value(model.passkeyLabel),
+                    h.OnInput((label) => ChangedPasskeyLabel({ label })),
+                  ]),
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("settings-action"),
+                      h.Title("Add a passkey"),
+                      h.Disabled(model.accountBusy),
+                      h.OnClick(
+                        RequestedPasskeyRegistration({
+                          label: model.passkeyLabel.trim() === "" ? "Passkey" : model.passkeyLabel,
+                        }),
+                      ),
+                    ],
+                    ["add passkey"],
                   ),
-                ]),
-            h.div(
-              [h.Class("account-passkey-add")],
+                ],
+              ),
+            ]
+          : [h.p([h.Class("settings-item-desc")], ["This browser doesn't support passkeys."])]),
+      ],
+    ),
+    h.section(
+      [h.Class("settings-item settings-item--stacked")],
+      [
+        h.div(
+          [h.Class("settings-item-text")],
+          [h.h2([h.Class("settings-item-head")], ["Password"])],
+        ),
+        h.form(
+          [
+            h.Class("account-password-form"),
+            h.OnSubmit(
+              RequestedSetPassword(
+                model.hasPassword
+                  ? { password: model.newPassword, currentPassword: model.currentPassword }
+                  : { password: model.newPassword },
+              ),
+            ),
+          ],
+          [
+            ...(model.hasPassword
+              ? [
+                  h.input([
+                    h.Type("password"),
+                    h.Autocomplete("current-password"),
+                    h.AriaLabel("Current password"),
+                    h.Placeholder("current password"),
+                    h.Value(model.currentPassword),
+                    h.OnInput((password) => ChangedCurrentPassword({ password })),
+                  ]),
+                ]
+              : []),
+            h.input([
+              h.Type("password"),
+              h.Autocomplete("new-password"),
+              h.AriaLabel("New password"),
+              h.Placeholder(model.hasPassword ? "new password" : "password"),
+              h.Value(model.newPassword),
+              h.OnInput((password) => ChangedNewPassword({ password })),
+            ]),
+            h.button(
               [
-                h.input([
-                  h.Type("text"),
-                  h.AriaLabel("Passkey name"),
-                  h.Placeholder("passkey name (optional)"),
-                  h.Value(model.passkeyLabel),
-                  h.OnInput((label) => ChangedPasskeyLabel({ label })),
-                ]),
-                h.button(
-                  [
-                    h.Type("button"),
-                    h.Class("settings-action"),
-                    h.Title("Add a passkey"),
-                    h.Disabled(model.accountBusy),
-                    h.OnClick(
-                      RequestedPasskeyRegistration({
-                        label: model.passkeyLabel.trim() === "" ? "Passkey" : model.passkeyLabel,
-                      }),
-                    ),
-                  ],
-                  ["add passkey"],
+                h.Type("submit"),
+                h.Class("settings-action"),
+                h.Title(model.hasPassword ? "Change password" : "Set password"),
+                h.Disabled(
+                  model.accountBusy ||
+                    model.newPassword === "" ||
+                    (model.hasPassword && model.currentPassword === ""),
                 ),
               ],
+              [model.hasPassword ? "change" : "set password"],
             ),
-          ]
-        : [h.p([h.Class("settings-item-desc")], ["This browser doesn't support passkeys."])]),
-    ],
-  ),
-  h.section(
-    [h.Class("settings-item settings-item--stacked")],
-    [
-      h.div([h.Class("settings-item-text")], [h.h2([h.Class("settings-item-head")], ["Password"])]),
-      h.form(
-        [
-          h.Class("account-password-form"),
-          h.OnSubmit(
-            RequestedSetPassword(
-              model.hasPassword
-                ? { password: model.newPassword, currentPassword: model.currentPassword }
-                : { password: model.newPassword },
-            ),
-          ),
-        ],
-        [
-          ...(model.hasPassword
-            ? [
-                h.input([
-                  h.Type("password"),
-                  h.Autocomplete("current-password"),
-                  h.AriaLabel("Current password"),
-                  h.Placeholder("current password"),
-                  h.Value(model.currentPassword),
-                  h.OnInput((password) => ChangedCurrentPassword({ password })),
-                ]),
-              ]
-            : []),
-          h.input([
-            h.Type("password"),
-            h.Autocomplete("new-password"),
-            h.AriaLabel("New password"),
-            h.Placeholder(model.hasPassword ? "new password" : "password"),
-            h.Value(model.newPassword),
-            h.OnInput((password) => ChangedNewPassword({ password })),
-          ]),
-          h.button(
-            [
-              h.Type("submit"),
-              h.Class("settings-action"),
-              h.Title(model.hasPassword ? "Change password" : "Set password"),
-              h.Disabled(
-                model.accountBusy ||
-                  model.newPassword === "" ||
-                  (model.hasPassword && model.currentPassword === ""),
-              ),
-            ],
-            [model.hasPassword ? "change" : "set password"],
-          ),
-          ...(model.hasPassword
-            ? [
-                h.button(
-                  [
-                    h.Type("button"),
-                    h.Class("login-link plain-button"),
-                    h.Title("Remove password"),
-                    h.Disabled(model.accountBusy || model.currentPassword === ""),
-                    h.OnClick(RequestedRemovePassword({ currentPassword: model.currentPassword })),
-                  ],
-                  ["remove"],
-                ),
-              ]
-            : []),
-        ],
-      ),
-    ],
-  ),
-];
+            ...(model.hasPassword
+              ? [
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("login-link plain-button"),
+                      h.Title("Remove password"),
+                      h.Disabled(model.accountBusy || model.currentPassword === ""),
+                      h.OnClick(
+                        RequestedRemovePassword({ currentPassword: model.currentPassword }),
+                      ),
+                    ],
+                    ["remove"],
+                  ),
+                ]
+              : []),
+          ],
+        ),
+      ],
+    ),
+  ];
+};
 
 /** A club that cannot be shown, on the same card the clubs list lives on. */
 const clubMessageView = (h: HtmlBuilder<Message>, title: string, body: string): Html =>
