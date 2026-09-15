@@ -13,7 +13,7 @@ import {
 import type { InspectionProgress, SourceInspectionResult, SourceMetadata } from "./checkHealth.ts";
 
 // oxlint-disable-next-line import/default
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker&url";
 
 export type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 
@@ -39,36 +39,11 @@ interface PdfInfo {
   Author?: string;
 }
 
-// Covers pdf.js fake-worker fallback on Safari/iOS before Promise.withResolvers exists.
-function installPromiseWithResolvers(): void {
-  // SAFETY: Promise.withResolvers is feature-detected before this constructor member is called.
-  const ctor = Promise as PromiseConstructor & {
-    withResolvers?: <T>() => {
-      promise: Promise<T>;
-      resolve: (value: T | PromiseLike<T>) => void;
-      reject: (reason?: unknown) => void;
-    };
-  };
-  if (typeof ctor.withResolvers === "function") return;
-  ctor.withResolvers = function withResolvers<T>() {
-    let resolve!: (value: T | PromiseLike<T>) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    return { promise, resolve, reject };
-  };
-}
-
 function pdfjsLib(): Promise<typeof PdfjsModule> {
-  pdfjsPromise ??= (() => {
-    installPromiseWithResolvers();
-    return import("pdfjs-dist").then((lib) => {
-      lib.GlobalWorkerOptions.workerSrc = workerUrl;
-      return lib;
-    });
-  })();
+  pdfjsPromise ??= import("pdfjs-dist/legacy/build/pdf.mjs").then((lib) => {
+    lib.GlobalWorkerOptions.workerSrc = workerUrl;
+    return lib;
+  });
   return pdfjsPromise;
 }
 
@@ -82,7 +57,7 @@ export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilde
   const lib = await pdfjsLib();
   // SAFETY: pdf.js looks up this documented global using the same module shape imported above.
   (globalThis as { pdfjsLib?: typeof PdfjsModule }).pdfjsLib = lib;
-  viewerPromise ??= import("pdfjs-dist/web/pdf_viewer.mjs");
+  viewerPromise ??= import("pdfjs-dist/legacy/web/pdf_viewer.mjs");
   return (await viewerPromise).TextLayerBuilder;
 }
 

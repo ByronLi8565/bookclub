@@ -7,35 +7,9 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon.png" />
     <title>bookclub</title>
-    <script>
-      // The PWA still opens on iOS Safari versions that predate these ES2023
-      // helpers. Foldkit and Effect evaluate before the entry module, so this
-      // small bootstrap must run before any bundled module does.
-      if (!Object.hasOwn) {
-        Object.hasOwn = function (object, property) {
-          return Object.prototype.hasOwnProperty.call(object, property);
-        };
-      }
-      if (!Array.prototype.at) {
-        Array.prototype.at = function (index) {
-          const position = index < 0 ? this.length + index : index;
-          return this[position];
-        };
-      }
-      if (!Array.prototype.toSorted) {
-        Array.prototype.toSorted = function (compareFn) {
-          return Array.prototype.slice.call(this).sort(compareFn);
-        };
-      }
-      if (!Array.prototype.toReversed) {
-        Array.prototype.toReversed = function () {
-          return Array.prototype.slice.call(this).reverse();
-        };
-      }
-    </script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/client/foldkit/entry.ts"></script>
+    <script type="module" src="/src/client/bootstrap.ts"></script>
   </body>
 </html>

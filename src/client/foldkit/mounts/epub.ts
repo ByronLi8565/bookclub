@@ -412,7 +412,11 @@ export const epubJsEngine = async ({
     book,
     async load(bytes, initialCfi) {
       const loading = (async () => {
-        opening = book.open(bytes, "binary");
+        // `Book.open()` only waits for package unpacking. `book.opened` also
+        // waits for archived resource replacements, which must settle before
+        // this session may render or destroy the Resources object they use.
+        const unpacked = book.open(bytes, "binary");
+        opening = Promise.all([unpacked, book.opened]);
         await opening;
         const metadata = await book.loaded.metadata.catch(() => null);
         const navigation = await book.loaded.navigation.catch(() => null);

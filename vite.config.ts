@@ -60,6 +60,12 @@ function lowerDecorators(): Plugin {
 }
 
 export default defineConfig(({ command }) => ({
+  environments: {
+    // The default Baseline target starts at Safari 16.4. Installed PWAs can
+    // outlive an OS upgrade cycle, so lower client syntax to the support floor
+    // that the compatibility bootstrap covers.
+    client: { build: { target: "safari15" } },
+  },
   plugins: [
     lowerDecorators(),
     pdfjsWasm(),

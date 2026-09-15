@@ -137,16 +137,7 @@ for (const book of books) {
     await expect(results.nth(2)).toHaveAttribute("aria-selected", "true");
 
     await page.getByLabel("Next match").click();
-    await expect
-      .poll(
-        () =>
-          page
-            .locator(".bc-search")
-            .count()
-            .then((n) => n),
-        { timeout: 30_000 },
-      )
-      .toBeGreaterThanOrEqual(0);
+    await expect(results.nth(3)).toHaveAttribute("aria-selected", "true");
 
     await page.keyboard.press("Escape");
     await expect(page.getByLabel("Find in book")).toBeHidden();

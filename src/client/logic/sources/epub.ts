@@ -65,9 +65,13 @@ export async function inspectEpub(
   file: File,
   onProgress?: InspectionProgress,
 ): Promise<SourceInspectionResult> {
-  const book = ePub();
+  // Inspection reads package data directly and never renders a spine item.
+  // Disabling replacements avoids creating every archived asset URL only to
+  // discard it, and makes the `opened` boundary describe all startup work.
+  const book = ePub({ replacements: "none" });
   try {
-    await book.open(await file.arrayBuffer(), "binary");
+    const unpacked = book.open(await file.arrayBuffer(), "binary");
+    await Promise.all([unpacked, book.opened]);
     await book.loaded.spine;
     const bookSpine: unknown = book.spine;
     // SAFETY: epub.js populates spineItems after loaded.spine resolves, but its declaration omits it.

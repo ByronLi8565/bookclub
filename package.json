@@ -34,6 +34,7 @@
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "agents": "^0.16.2",
+    "core-js": "^3.49.0",
     "effect": "4.0.0-rc.108",
     "epubjs": "^0.3.93",
     "fflate": "^0.8.3",
