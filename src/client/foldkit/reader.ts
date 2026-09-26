@@ -25,6 +25,7 @@ import { getCachedSource, putCachedSource } from "../logic/groups/sourceCache.ts
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { getRenderSnapshot } from "../logic/reader/renderSnapshot.ts";
 import { loadingView } from "./loading.ts";
+import { tagGuard } from "./messageGuard.ts";
 import {
   browserReaderPositions,
   noReaderPositions,
@@ -43,6 +44,7 @@ import {
   FailedEpubLoad,
   MovedEpub,
   OpenedEpub,
+  RelaidOutEpub,
   SelectedEpubText,
   makeEpubMount,
   type EpubColors,
@@ -176,7 +178,6 @@ export const FailedReaderSearch = m("FailedReaderSearch", { query: Schema.String
 export const SelectedSearchMatch = m("SelectedSearchMatch", { index: Schema.Number });
 export const ChangedReaderLayout = m("ChangedReaderLayout", { layout: PdfPageLayout });
 export const ToggledReaderLayout = m("ToggledReaderLayout");
-export const ChangedReaderFontSize = m("ChangedReaderFontSize", { points: Schema.Number });
 export const SteppedReaderZoom = m("SteppedReaderZoom", {
   direction: Schema.Literals(["in", "out"]),
 });
@@ -189,11 +190,10 @@ export const ShowedReaderHighlights = m("ShowedReaderHighlights", {
 export const SteppedReaderChrome = m("SteppedReaderChrome", {
   direction: Schema.Literals(["hide", "show"]),
 });
+const SEARCH_RESULTS_PAGE = 100;
+
 export const ToggledReaderChrome = m("ToggledReaderChrome");
 export const SwitchedReaderPane = m("SwitchedReaderPane", { pane: ReaderPane });
-export const MeasuredReaderPagination = m("MeasuredReaderPagination", {
-  place: Schema.NullOr(EpubPlace),
-});
 export const IdentifiedReaderSession = m("IdentifiedReaderSession", {
   userId: Schema.String,
   groupId: Schema.String,
@@ -223,19 +223,16 @@ export const CommittedReaderSelection = m("CommittedReaderSelection", {
 export const DismissedReaderSelection = m("DismissedReaderSelection");
 export const RequestedFitToText = m("RequestedFitToText");
 export const ToggledBookMenu = m("ToggledBookMenu");
-export const ClosedBookMenu = m("ClosedBookMenu");
 export const ClosedReaderMenus = m("ClosedReaderMenus");
 export const StartedBookRename = m("StartedBookRename", { title: Schema.String });
 export const ChangedBookTitleDraft = m("ChangedBookTitleDraft", { title: Schema.String });
 export const CancelledBookRename = m("CancelledBookRename");
-/** Show a passage the notes pane pointed at. */
 /** A note's highlight names the book it lives in, because the note list shows
  *  every book's notes and the one being read is often not the one clicked. */
 export const PendingJump = Schema.Struct({ sourceId: Schema.String, anchor: HighlightAnchor });
 export type PendingJump = typeof PendingJump.Type;
 
 export const JumpedToHighlight = m("JumpedToHighlight", PendingJump.fields);
-export const SetReaderZoom = m("SetReaderZoom", { percent: Schema.Number });
 export const CompletedReaderAction = m("CompletedReaderAction");
 
 const RevealActiveSearchResult = Mount.define(
@@ -271,14 +268,12 @@ export const ReaderMessage = Schema.Union([
   SelectedSearchMatch,
   ChangedReaderLayout,
   ToggledReaderLayout,
-  ChangedReaderFontSize,
   SteppedReaderZoom,
   TurnedReaderPage,
   ShowedReaderHighlights,
   SteppedReaderChrome,
   ToggledReaderChrome,
   SwitchedReaderPane,
-  MeasuredReaderPagination,
   IdentifiedReaderSession,
   RestoredReaderPosition,
   RequestedPositionSync,
@@ -293,16 +288,15 @@ export const ReaderMessage = Schema.Union([
   DismissedReaderSelection,
   RequestedFitToText,
   ToggledBookMenu,
-  ClosedBookMenu,
   ClosedReaderMenus,
   StartedBookRename,
   ChangedBookTitleDraft,
   CancelledBookRename,
   JumpedToHighlight,
-  SetReaderZoom,
   CompletedReaderAction,
   OpenedEpub,
   MovedEpub,
+  RelaidOutEpub,
   SelectedEpubText,
   ClearedEpubSelection,
   ClickedEpubHighlight,
@@ -315,7 +309,7 @@ export const ReaderMessage = Schema.Union([
 ]);
 export type ReaderMessage = typeof ReaderMessage.Type;
 
-export const isReaderMessage = Schema.is(ReaderMessage);
+export const isReaderMessage = tagGuard(ReaderMessage);
 
 /** The cache answers a reopened book without a round trip; the first open of a
  *  book downloads it and fills the cache for the next one. */
@@ -660,9 +654,8 @@ export interface ReaderBackend<Mount> {
   syncHighlights(highlights: readonly ReaderHighlight[]): Effect.Effect<void, never>;
   dismissSelection: Effect.Effect<void, never>;
   changeLayout(reader: ReaderWorkspace, layout: PdfPageLayout): ReaderUpdate;
-  changeFontSize(reader: ReaderWorkspace, value: number): ReaderUpdate | null;
   stepZoom(reader: ReaderWorkspace, value: number): ReaderUpdate;
-  fitToText(reader: ReaderWorkspace): ReaderUpdate | null;
+  fitToText(reader: ReaderWorkspace): ReaderUpdate;
   zoom(reader: ReaderWorkspace): { value: number; unit: "%" | " pt"; fitToText: boolean };
   mountKey(reader: ReaderWorkspace): string;
   mount<Message>(reader: ReaderWorkspace, context: ReaderViewContext<Message>): Mount;
@@ -828,14 +821,10 @@ export const readerSwipeStream = (pane: ReaderPane): Stream.Stream<ReaderMessage
  * open, so closing the reader removes the listeners with the Subscription's
  * scope rather than leaving them to filter events for a reader that is gone.
  */
-export const makeReaderSubscriptions = <Model, Message>({
-  modelToReader,
-  toMessage,
-}: {
-  modelToReader: (model: Model) => ReaderWorkspace | null;
-  toMessage: (message: ReaderMessage) => Message;
-}) =>
-  Subscription.make<Model, Message>()((entry) => ({
+export const makeReaderSubscriptions = <Model>(
+  modelToReader: (model: Model) => ReaderWorkspace | null,
+) =>
+  Subscription.make<Model, ReaderMessage>()((entry) => ({
     readerKeyboard: entry(
       { open: Schema.Boolean, searchOpen: Schema.Boolean },
       {
@@ -845,15 +834,13 @@ export const makeReaderSubscriptions = <Model, Message>({
         },
         dependenciesToStream: ({ open, searchOpen }) =>
           Stream.when(
-            Subscription.fromEventFilterMap<KeyboardEvent, Message>({
+            Subscription.fromEventFilterMap<KeyboardEvent, ReaderMessage>({
               target: globalThis.document,
               type: "keydown",
               toMessage: (event) =>
                 refocusOpenReaderSearch(event, searchOpen)
                   ? Option.none()
-                  : Option.map(readerKeyMessage(event, searchOpen), (message) =>
-                      toMessage(message),
-                    ),
+                  : readerKeyMessage(event, searchOpen),
             }),
             Effect.sync(() => open),
           ),
@@ -873,14 +860,14 @@ export const makeReaderSubscriptions = <Model, Message>({
         },
         dependenciesToStream: ({ open }) =>
           Stream.when(
-            Subscription.fromEventFilterMap<PointerEvent, Message>({
+            Subscription.fromEventFilterMap<PointerEvent, ReaderMessage>({
               target: globalThis.document,
               type: "pointerdown",
               toMessage: (event) =>
                 event.target instanceof Element &&
                 event.target.closest(".book-menu, .reader-bookmarks") !== null
                   ? Option.none()
-                  : Option.some(toMessage(ClosedReaderMenus())),
+                  : Option.some(ClosedReaderMenus()),
             }),
             Effect.sync(() => open),
           ),
@@ -892,7 +879,7 @@ export const makeReaderSubscriptions = <Model, Message>({
         modelToDependencies: (model) => ({ selecting: modelToReader(model)?.selection !== null }),
         dependenciesToStream: ({ selecting }) =>
           Stream.when(
-            Subscription.fromEventFilterMap<PointerEvent, Message>({
+            Subscription.fromEventFilterMap<PointerEvent, ReaderMessage>({
               target: globalThis.document,
               type: "pointerdown",
               // A press inside the popup is the popup's own business; anywhere
@@ -900,7 +887,7 @@ export const makeReaderSubscriptions = <Model, Message>({
               toMessage: (event) =>
                 event.target instanceof Element && event.target.closest(".selection-actions")
                   ? Option.none()
-                  : Option.some(toMessage(DismissedReaderSelection())),
+                  : Option.some(DismissedReaderSelection()),
             }),
             Effect.sync(() => selecting),
           ),
@@ -918,7 +905,7 @@ export const makeReaderSubscriptions = <Model, Message>({
         dependenciesToStream: ({ syncing }) =>
           Stream.when(
             Stream.map(Stream.fromSchedule(Schedule.spaced("3 seconds")), () =>
-              toMessage(RequestedPositionSync()),
+              RequestedPositionSync(),
             ),
             Effect.sync(() => syncing),
           ),
@@ -933,7 +920,7 @@ export const makeReaderSubscriptions = <Model, Message>({
         },
         dependenciesToStream: ({ open, pane }) =>
           Stream.when(
-            Stream.map(readerSwipeStream(pane), toMessage),
+            readerSwipeStream(pane),
             Effect.sync(() => open),
           ),
       },
@@ -978,15 +965,11 @@ export const makeReaderSlice = ({
         { ...reader, layout, spreadPaneExpanded: reader.spreadPaneExpanded || layout === "auto" },
         [SetEpubSpread({ layout })],
       ],
-      changeFontSize: (reader, points) => [
-        { ...reader, fontSizePoints: points },
-        [SetEpubFontSize({ points }), MeasureEpubPagination({})],
-      ],
       stepZoom: (reader, points) => [
         { ...reader, fontSizePoints: points },
-        [SetEpubFontSize({ points }), MeasureEpubPagination({})],
+        [SetEpubFontSize({ points })],
       ],
-      fitToText: () => null,
+      fitToText: (reader) => [reader, []],
       zoom: (reader) => ({ value: reader.fontSizePoints, unit: " pt", fitToText: false }),
       mountKey: (reader) => `epub:${reader.sourceId}`,
       mount: (reader, context) =>
@@ -1010,7 +993,6 @@ export const makeReaderSlice = ({
         { ...reader, layout, spreadPaneExpanded: reader.spreadPaneExpanded || layout === "auto" },
         [],
       ],
-      changeFontSize: () => null,
       stepZoom: (reader, percent) => [
         { ...reader, zoomPercent: percent },
         [ApplyPdfZoom({ percent })],
@@ -1234,34 +1216,24 @@ export const makeReaderSlice = ({
       backendFor(kind).dismissSelection.pipe(Effect.as(CompletedReaderAction())),
   });
 
+  // Both relayout the open book in place, which keeps the reader's place; the
+  // Mount reports the re-counted pages as RelaidOutEpub once they are measured.
   const SetEpubFontSize = Command.define("SetEpubFontSize", {
     args: { points: Schema.Number },
     messages: [CompletedReaderAction],
     execute: ({ points }) =>
-      epubReaderMount.setFontSize(points).pipe(Effect.as(CompletedReaderAction())),
+      epubReaderMount
+        .setFontSize(points)
+        .pipe(Effect.as(CompletedReaderAction()), Effect.catch(logCommandFailure)),
   });
 
-  /** An EPUB relayouts in place rather than remounting, so the reader keeps its
-   *  place and its painted annotations across a spread change. */
   const SetEpubSpread = Command.define("SetEpubSpread", {
     args: { layout: PdfPageLayout },
-    messages: [MeasuredReaderPagination, CompletedReaderAction],
+    messages: [CompletedReaderAction],
     execute: ({ layout }) =>
-      epubReaderMount.setSpread(epubSpread(layout)).pipe(
-        Effect.andThen(epubReaderMount.measurePagination),
-        Effect.map((place) => MeasuredReaderPagination({ place })),
-        Effect.catch(logCommandFailure),
-      ),
-  });
-
-  const MeasureEpubPagination = Command.define("MeasureEpubPagination", {
-    args: {},
-    messages: [MeasuredReaderPagination, CompletedReaderAction],
-    execute: () =>
-      epubReaderMount.measurePagination.pipe(
-        Effect.map((place) => MeasuredReaderPagination({ place })),
-        Effect.catch(logCommandFailure),
-      ),
+      epubReaderMount
+        .setSpread(epubSpread(layout))
+        .pipe(Effect.as(CompletedReaderAction()), Effect.catch(logCommandFailure)),
   });
 
   const placed = (reader: ReaderWorkspace, place: EpubPlace): ReaderWorkspace => ({
@@ -1343,7 +1315,7 @@ export const makeReaderSlice = ({
           }),
         ];
 
-  const updateReader = (reader: ReaderWorkspace, message: ReaderMessage): ReaderUpdate | null => {
+  const updateReader = (reader: ReaderWorkspace, message: ReaderMessage): ReaderUpdate => {
     switch (message._tag) {
       case "SelectedReaderSource":
         return [openReader(message), [LoadReaderSnapshot({ sourceId: message.sourceId })]];
@@ -1405,17 +1377,10 @@ export const makeReaderSlice = ({
           ? [reader, []]
           : [{ ...reader, activeSearchMatch }, [GoToSearchMatch({ match, kind: reader.kind })]];
       }
-      case "ToggledReaderLayout":
-        return updateReader(
-          reader,
-          ChangedReaderLayout({ layout: reader.layout === "auto" ? "single" : "auto" }),
-        );
       case "ChangedReaderLayout":
         return message.layout === reader.layout
           ? [reader, []]
           : backendFor(reader.kind).changeLayout(reader, message.layout);
-      case "ChangedReaderFontSize":
-        return backendFor(reader.kind).changeFontSize(reader, message.points);
       case "SteppedReaderZoom": {
         const zoom = backendFor(reader.kind).zoom(reader);
         const step =
@@ -1596,8 +1561,6 @@ export const makeReaderSlice = ({
           },
           [],
         ];
-      case "ClosedBookMenu":
-        return [{ ...reader, bookMenuOpen: false }, []];
       case "ClosedReaderMenus":
         return [
           { ...reader, bookMenuOpen: false, bookmarkMenuOpen: false, bookmarkJumpMenuOpen: false },
@@ -1611,22 +1574,17 @@ export const makeReaderSlice = ({
         return [{ ...reader, renamingBook: false, bookTitleDraft: "" }, []];
       case "RequestedFitToText":
         return backendFor(reader.kind).fitToText(reader);
-      case "SetReaderZoom":
-        // FitPdfToText has already applied this zoom to the live mount. This
-        // message only reconciles the Model; issuing a normal zoom command
-        // here would immediately leave fit mode again.
-        return [{ ...reader, zoomPercent: message.percent }, []];
-      case "MeasuredReaderPagination":
-        return message.place === null ? [reader, []] : [placed(reader, message.place), []];
+      case "RelaidOutEpub":
+        // The reader did not move, so the count changes and nothing is recorded.
+        return message.sourceId === reader.sourceId
+          ? [placed(reader, message.place), []]
+          : [reader, []];
       case "OpenedEpub": {
         if (message.sourceId !== reader.sourceId) return [reader, []];
         const opened = { ...reader, loading: false, title: message.title };
         return [
           message.place === null ? opened : placed(opened, message.place),
-          [
-            MeasureEpubPagination({}),
-            PaintReaderHighlights({ highlights: reader.highlights, kind: reader.kind }),
-          ],
+          [PaintReaderHighlights({ highlights: reader.highlights, kind: reader.kind })],
         ];
       }
       case "MovedEpub": {
@@ -1708,6 +1666,9 @@ export const makeReaderSlice = ({
               [],
             ]
           : [reader, []];
+      // Page layout is a stored preference, so the host turns the key into a
+      // preference change and the reader hears the result as ChangedReaderLayout.
+      case "ToggledReaderLayout":
       case "CompletedReaderAction":
         return [reader, []];
     }
@@ -1800,32 +1761,42 @@ export const makeReaderSlice = ({
         ),
       ],
     );
+    // A common word can match tens of thousands of times, and redrawing every
+    // row on each keystroke froze the reader for seconds. The list shows the page
+    // of results holding the active match; stepping walks all of them.
+    const resultsPageStart =
+      Math.floor(reader.activeSearchMatch / SEARCH_RESULTS_PAGE) * SEARCH_RESULTS_PAGE;
     const searchResults = h.div(
       [h.Class("reader-search-results"), h.Role("listbox"), h.AriaLabel("Search results")],
-      reader.searchMatches.map((match, index) =>
-        h.button(
-          [
-            h.Key(String(index)),
-            h.Type("button"),
-            h.Role("option"),
-            h.AriaSelected(index === reader.activeSearchMatch),
-            h.Class(
-              index === reader.activeSearchMatch
-                ? "reader-search-result is-active"
-                : "reader-search-result",
-            ),
-            ...(index === reader.activeSearchMatch ? [h.OnMount(RevealActiveSearchResult())] : []),
-            h.OnClick(SelectedSearchMatch({ index })),
-          ],
-          [
-            h.span(
-              [h.Class("reader-search-result-number"), h.AriaHidden(true)],
-              [String(index + 1)],
-            ),
-            searchExcerpt(match.excerpt, reader.searchQuery, h),
-          ],
+      reader.searchMatches
+        .slice(resultsPageStart, resultsPageStart + SEARCH_RESULTS_PAGE)
+        .map((match, offset) => ({ match, index: resultsPageStart + offset }))
+        .map(({ match, index }) =>
+          h.button(
+            [
+              h.Key(String(index)),
+              h.Type("button"),
+              h.Role("option"),
+              h.AriaSelected(index === reader.activeSearchMatch),
+              h.Class(
+                index === reader.activeSearchMatch
+                  ? "reader-search-result is-active"
+                  : "reader-search-result",
+              ),
+              ...(index === reader.activeSearchMatch
+                ? [h.OnMount(RevealActiveSearchResult())]
+                : []),
+              h.OnClick(SelectedSearchMatch({ index })),
+            ],
+            [
+              h.span(
+                [h.Class("reader-search-result-number"), h.AriaHidden(true)],
+                [String(index + 1)],
+              ),
+              searchExcerpt(match.excerpt, reader.searchQuery, h),
+            ],
+          ),
         ),
-      ),
     );
 
     const bookmarkMark = (color: BookmarkColorType | null) =>
@@ -2097,5 +2068,3 @@ export const makeReaderSlice = ({
 
   return { update: updateReader, view: readerView, epub: epubReaderMount, pdf: pdfReaderMount };
 };
-
-export type ReaderSlice = ReturnType<typeof makeReaderSlice>;

@@ -14,7 +14,7 @@ const Close = { _tag: "Close" } as const;
 describe("info screen parity", () => {
   beforeEach(stubAnimationFrame);
 
-  it("renders the info page React rendered", async () => {
+  it("renders the info page", async () => {
     const foldkit = await renderFoldkit<InfoModel, typeof Close | InfoMessage>({
       Model: InfoModel,
       model: initialInfoModel(),

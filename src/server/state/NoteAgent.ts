@@ -1,5 +1,4 @@
 import {
-  Agent,
   callable,
   type Connection,
   type ConnectionContext,
@@ -7,6 +6,7 @@ import {
   getCurrentAgent,
 } from "agents";
 import { monotonicFactory } from "ulidx";
+import { ServerOwnedAgent } from "./serverOwnedAgent.ts";
 import {
   NoteRejectionReason,
   type ApplyOpsResult,
@@ -34,7 +34,7 @@ import {
   type NoteState,
 } from "../../shared/notes/noteState.ts";
 import type { Env } from "../env.ts";
-import { currentIdentity } from "../auth/cookies.ts";
+import { socketIdentity } from "../auth/cookies.ts";
 import { deleteImages } from "../services/images.ts";
 export type { NoteState } from "../../shared/notes/noteState.ts";
 
@@ -54,7 +54,7 @@ export interface OnlinePeer {
   avatarImageId?: string;
 }
 
-export class NoteAgent extends Agent<Env, NoteState> {
+export class NoteAgent extends ServerOwnedAgent<Env, NoteState> {
   initialState: NoteState = emptyNoteState();
 
   private stamp: NoteStamp = { id: () => ulid(), now: () => new Date().toISOString() };
@@ -79,7 +79,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
   }
 
   async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
-    const me = await currentIdentity(ctx.request, this.env);
+    const me = await socketIdentity(ctx.request, this.env);
     if (!me) return connection.close(1008, "unauthenticated");
     const group = await getAgentByName(this.env.GroupAgent, this.name);
     const profile = await group.memberProfile(me.id);
@@ -228,16 +228,7 @@ export class NoteAgent extends Agent<Env, NoteState> {
     this.setState(emptyNoteState());
   }
 
-  updateMemberRole(userId: string, role: GroupRole): void {
-    for (const connection of this.getConnections<ConnIdentity>()) {
-      if (connection.state?.userId === userId) {
-        connection.setState({ ...connection.state, role });
-      }
-    }
-    this.broadcastPresence();
-  }
-
-  updateMemberProfile(userId: string, name: string, avatarImageId?: string): void {
+  updateMember(userId: string, name: string, role: GroupRole, avatarImageId?: string): void {
     const needsNoteUpdate = this.state.notes.some(
       (note) => note.author.id === userId && note.author.name !== name,
     );
@@ -252,9 +243,8 @@ export class NoteAgent extends Agent<Env, NoteState> {
     for (const connection of this.getConnections<ConnIdentity>()) {
       if (connection.state?.userId === userId) {
         const { avatarImageId: _oldAvatar, ...current } = connection.state;
-        connection.setState(
-          avatarImageId ? { ...current, name, avatarImageId } : { ...current, name },
-        );
+        const next = { ...current, name, role };
+        connection.setState(avatarImageId ? { ...next, avatarImageId } : next);
       }
     }
     this.broadcastPresence();

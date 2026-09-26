@@ -4,80 +4,76 @@ import {
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
-import { parseHttpError } from "../../http.ts";
-import { apiFetch } from "../net/api.ts";
-import * as Schema from "effect/Schema";
-import { decode } from "../../../shared/schema.ts";
+import { Data, Effect } from "effect";
+import { bookclubClient } from "../net/bookclubClient.ts";
 
-export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
+/** The part of a ceremony the API contract cannot type: options it could not
+ *  have produced, or a browser prompt that threw, which is how a dismissed one
+ *  arrives. It carries the same `error` code field the API's own errors do, so
+ *  one mapping turns either into a sentence. */
+export class PasskeyCeremonyFailed extends Data.TaggedError("PasskeyCeremonyFailed")<{
+  readonly error: "passkey_cancelled" | "verification_failed";
+}> {}
 
-// The contract's own `PublicUser` lives beside the HttpApi schemas, and importing
-// it here pulls the whole httpapi module into the React bundle for four fields.
-const SessionEnvelope = Schema.Struct({
-  user: Schema.Struct({
-    id: Schema.String,
-    email: Schema.String,
-    name: Schema.String,
-    avatarImageId: Schema.optionalKey(Schema.String),
-  }),
-  token: Schema.optionalKey(Schema.String),
-});
-export type SessionEnvelope = typeof SessionEnvelope.Type;
+type JsonObject = { readonly [key: string]: unknown };
 
-const json = { "Content-Type": "application/json" };
+const isCreationOptions = (
+  options: JsonObject,
+): options is JsonObject & PublicKeyCredentialCreationOptionsJSON =>
+  typeof options.challenge === "string" &&
+  typeof options.rp === "object" &&
+  typeof options.user === "object" &&
+  Array.isArray(options.pubKeyCredParams);
+
+const isRequestOptions = (
+  options: JsonObject,
+): options is JsonObject & PublicKeyCredentialRequestOptionsJSON =>
+  typeof options.challenge === "string";
+
+/** The options endpoints answer with SimpleWebAuthn's JSON, which the contract
+ *  carries as an open object; it is checked here, where it is used. */
+const prompt = <Options, Response>(
+  options: JsonObject,
+  isOptions: (options: JsonObject) => options is JsonObject & Options,
+  ask: (optionsJSON: Options) => Promise<Response>,
+) =>
+  isOptions(options)
+    ? Effect.tryPromise({
+        try: () => ask(options),
+        catch: () => new PasskeyCeremonyFailed({ error: "passkey_cancelled" }),
+      })
+    : Effect.fail(new PasskeyCeremonyFailed({ error: "verification_failed" }));
+
 // Registration ceremony: fetch creation options, prompt the authenticator, then
-// verify. A thrown ceremony means the user dismissed the prompt.
-export async function registerPasskey(label: string): Promise<Result> {
-  const optionsRes = await apiFetch("/auth/passkey/register/options", { method: "POST" });
-  if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
-  // SAFETY: the registration-options endpoint returns SimpleWebAuthn's creation options contract.
-  const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialCreationOptionsJSON;
-
-  let attestation;
-  try {
-    attestation = await startRegistration({ optionsJSON });
-  } catch {
-    return { ok: false, error: "passkey_cancelled" };
-  }
-
-  const verifyRes = await apiFetch("/auth/passkey/register/verify", {
-    method: "POST",
-    headers: json,
-    body: JSON.stringify({ response: attestation, label }),
-  });
-  if (!verifyRes.ok) return { ok: false, error: await parseHttpError(verifyRes) };
-  return { ok: true, value: undefined };
-}
+// verify.
+export const registerPasskey = (label: string) =>
+  bookclubClient.pipe(
+    Effect.flatMap((client) =>
+      client.auth.passkeyRegistrationOptions({}).pipe(
+        Effect.flatMap((options) =>
+          prompt(options, isCreationOptions, (optionsJSON) => startRegistration({ optionsJSON })),
+        ),
+        Effect.flatMap((response) =>
+          client.auth.verifyPasskeyRegistration({ payload: { response, label } }),
+        ),
+      ),
+    ),
+    Effect.asVoid,
+  );
 
 // Authentication ceremony: fetch request options, prompt the authenticator, then
-// verify. A thrown ceremony means the user dismissed the prompt. The caller owns
-// what a returned session does next, so both clients share this much.
-export async function passkeyLogin(email: string): Promise<Result<SessionEnvelope>> {
-  const optionsRes = await apiFetch("/auth/passkey/login/options", {
-    method: "POST",
-    headers: json,
-    body: JSON.stringify({ email }),
-  });
-  if (!optionsRes.ok) return { ok: false, error: await parseHttpError(optionsRes) };
-  // SAFETY: the login-options endpoint returns SimpleWebAuthn's request options contract.
-  const optionsJSON = (await optionsRes.json()) as PublicKeyCredentialRequestOptionsJSON;
-
-  let assertion;
-  try {
-    assertion = await startAuthentication({ optionsJSON });
-  } catch {
-    return { ok: false, error: "passkey_cancelled" };
-  }
-
-  const verifyRes = await apiFetch("/auth/passkey/login/verify", {
-    method: "POST",
-    headers: json,
-    body: JSON.stringify({ response: assertion }),
-  });
-  if (!verifyRes.ok) return { ok: false, error: await parseHttpError(verifyRes) };
-  const session = decode(SessionEnvelope, await verifyRes.json());
-  return session ? { ok: true, value: session } : { ok: false, error: "verification_failed" };
-}
+// verify. The caller owns what the returned session does next.
+export const passkeyLogin = (email: string) =>
+  bookclubClient.pipe(
+    Effect.flatMap((client) =>
+      client.auth.passkeyLoginOptions({ payload: { email } }).pipe(
+        Effect.flatMap((options) =>
+          prompt(options, isRequestOptions, (optionsJSON) => startAuthentication({ optionsJSON })),
+        ),
+        Effect.flatMap((response) => client.auth.verifyPasskeyLogin({ payload: { response } })),
+      ),
+    ),
+  );
 
 // Whether this device/browser can plausibly use passkeys. Cheap gate for the UI.
 export function passkeysSupported(): boolean {

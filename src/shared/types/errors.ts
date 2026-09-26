@@ -44,10 +44,3 @@ export const ApiErrorSchema = Schema.Union([
 ]);
 
 export const ApiErrorReasonSchema = Schema.String;
-
-export const ApiErrorBody = Schema.Struct({
-  error: ApiErrorSchema,
-  reason: Schema.optionalKey(ApiErrorReasonSchema),
-});
-
-export interface ApiErrorBody extends Schema.Schema.Type<typeof ApiErrorBody> {}

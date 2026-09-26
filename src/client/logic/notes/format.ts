@@ -5,7 +5,7 @@ export function noteTitle(note: Note): string {
   const verb = note.parent === null ? (isHighlight(note) ? "highlighted" : "posted") : "replied";
   return noteHeading(note.author.name, verb, note.createdAt);
 }
-export function noteHeading(
+function noteHeading(
   authorName: string,
   verb: "posted" | "replied" | "highlighted",
   createdAt: string,

@@ -18,6 +18,7 @@ import { downloadFile } from "../logic/files/browserDownload.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { isNative } from "../logic/net/api.ts";
 import { toolIconView, trashIconView } from "./icons.ts";
+import { tagGuard } from "./messageGuard.ts";
 import { modalTabsView, modalView } from "./modal.ts";
 import { radioMenuView } from "./radioMenu.ts";
 import { ChangedNoteAgentPresence } from "./resources/noteAgent.ts";
@@ -95,7 +96,6 @@ export const OpenedPresence = m("OpenedPresence", { groupRef: Schema.String });
 export const ChangedPresencePage = m("ChangedPresencePage", { page: PresencePage });
 
 export const ToggledRoleMenu = m("ToggledRoleMenu", { memberId: Schema.String });
-export const ClosedRoleMenu = m("ClosedRoleMenu");
 export const ChoseMemberRole = m("ChoseMemberRole", {
   memberId: Schema.String,
   role: GroupRoleSchema,
@@ -157,7 +157,6 @@ export const PresenceMessage = Schema.Union([
   OpenedPresence,
   ChangedPresencePage,
   ToggledRoleMenu,
-  ClosedRoleMenu,
   ChoseMemberRole,
   CancelledRoleChange,
   ConfirmedRoleChange,
@@ -191,7 +190,7 @@ export const PresenceMessage = Schema.Union([
 ]);
 export type PresenceMessage = typeof PresenceMessage.Type;
 
-export const isPresenceMessage = Schema.is(PresenceMessage);
+export const isPresenceMessage = tagGuard(PresenceMessage);
 
 export const SetMemberRole = Command.define("SetMemberRole", {
   args: { groupRef: Schema.String, memberId: Schema.String, role: GroupRoleSchema },
@@ -347,8 +346,6 @@ export const updatePresence = (
         },
         [],
       ];
-    case "ClosedRoleMenu":
-      return [{ ...model, openRoleMenuId: null }, []];
     case "ChoseMemberRole":
       return [
         {

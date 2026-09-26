@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { expect, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type FrameLocator, type Page } from "@playwright/test";
 import { ulid } from "ulidx";
 import { UPLOAD_FILE_FIELD } from "../../src/shared/http/uploads.ts";
+import { targetBaseUrl } from "../src/ports.ts";
 
-export const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+const BASE_URL = targetBaseUrl("browser");
 export const books = {
   pdf: {
     file: new URL("../../assets/moby-dick.pdf", import.meta.url),
@@ -101,12 +102,12 @@ export async function joinGroup(
 export async function openWorkspace(
   page: Page,
   ref: string,
-  ready = books.pdf.ready,
+  ready: string = books.pdf.ready,
 ): Promise<void> {
   await page.goto(`/clubs/${ref}`);
   await expect(page.locator(ready)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".split-divider")).toBeVisible();
+  await expect(page.locator(".split-divider, .pager-tabs").first()).toBeVisible();
 }
 
 export async function selectPdfText(page: Page): Promise<void> {
@@ -140,6 +141,45 @@ export async function selectPdfText(page: Page): Promise<void> {
       selection?.addRange(range);
       document.dispatchEvent(new Event("selectionchange"));
     });
+}
+
+/** The visible book's content document. Pagination measurement keeps a second,
+ * offscreen rendition under <body>; only the one inside the reader surface is read. */
+export async function epubFrame(page: Page): Promise<FrameLocator> {
+  const visibleFrame = page.locator(books.epub.ready).first();
+  await expect(visibleFrame).toBeVisible({ timeout: 30_000 });
+  const frame = visibleFrame.contentFrame();
+  await frame.locator("body").waitFor();
+  return frame;
+}
+
+/** `passage` picks a different run of text: re-selecting the range the book
+ * already holds changes nothing, so the reader rightly sees no new selection. */
+export async function selectEpubText(page: Page, passage = 0): Promise<void> {
+  const frame = await epubFrame(page);
+  await frame.locator("body").evaluate((body, skip) => {
+    const wanted = 80;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    for (let skipped = -1; node; node = walker.nextNode()) {
+      if ((node.textContent?.trim().length ?? 0) >= 8 && ++skipped === skip) break;
+    }
+    if (!node?.textContent) throw new Error("No selectable EPUB text");
+    const start = node.textContent.search(/\S/u);
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, Math.min(node.textContent.length, start + wanted));
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, passage);
+}
+
+/** Highlights paint into the page for a PDF and inside the content document for an EPUB. */
+export async function paintedHighlights(page: Page): Promise<number> {
+  const inPage = await page.locator(".bc-highlight").count();
+  if (inPage > 0 || (await page.locator(books.epub.ready).count()) === 0) return inPage;
+  return (await epubFrame(page)).locator(".bc-highlight").count();
 }
 
 export function currentPage(page: Page): Promise<number | null> {

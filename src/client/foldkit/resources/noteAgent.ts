@@ -227,9 +227,8 @@ const defaultRetrySchedule = Schedule.exponential("300 millis").pipe(
 // oldest rather than block a socket callback.
 const EVENT_BUFFER = 128;
 
-export interface NoteAgentResourceConfig<Model, Message> {
+export interface NoteAgentResourceConfig<Model> {
   readonly modelToRequirements: (model: Model) => Option.Option<NoteAgentRequirements>;
-  readonly toMessage: (message: NoteAgentMessage) => Message;
   readonly connect?: NoteAgentConnect;
   readonly retrySchedule?: typeof defaultRetrySchedule;
   readonly persistence?: NotePersistence;
@@ -382,10 +381,8 @@ export const acquireNoteAgent = (
     } satisfies NoteAgentConnection;
   });
 
-export const makeNoteAgentResources = <Model, Message>(
-  config: NoteAgentResourceConfig<Model, Message>,
-) =>
-  ManagedResource.make<Model, Message>()((entry) => ({
+export const makeNoteAgentResources = <Model>(config: NoteAgentResourceConfig<Model>) =>
+  ManagedResource.make<Model, NoteAgentMessage>()((entry) => ({
     noteAgent: entry(Schema.Option(NoteAgentRequirements), {
       resource: NoteAgentResource,
       modelToMaybeRequirements: config.modelToRequirements,
@@ -399,17 +396,13 @@ export const makeNoteAgentResources = <Model, Message>(
       // unfinished acquisition releases exactly like a finished one.
       release: () => Effect.void,
       onAcquired: (connection) =>
-        config.toMessage(
-          ConnectedNoteAgent({ groupId: connection.groupId, agentName: connection.agentName }),
-        ),
+        ConnectedNoteAgent({ groupId: connection.groupId, agentName: connection.agentName }),
       onAcquireError: (error) =>
-        config.toMessage(
-          FailedNoteAgentConnection({
-            groupId: error instanceof NoteAgentConnectionError ? error.groupId : "",
-            reason: String(error),
-          }),
-        ),
-      onReleased: () => config.toMessage(ReleasedNoteAgent()),
+        FailedNoteAgentConnection({
+          groupId: error instanceof NoteAgentConnectionError ? error.groupId : "",
+          reason: String(error),
+        }),
+      onReleased: () => ReleasedNoteAgent(),
     }),
   }));
 
@@ -423,16 +416,15 @@ export const makeNoteAgentResources = <Model, Message>(
  * out a new event queue. Events published before the stream starts stay
  * buffered, so no presence or status update is lost to the gap.
  */
-export const makeNoteAgentSubscriptions = <Model, Message>(config: {
-  readonly modelToConnectionKey: (model: Model) => string | null;
-  readonly toMessage: (message: NoteAgentMessage) => Message;
-}) => {
-  const noMessages: Stream.Stream<Message> = Stream.empty;
-  return Subscription.make<Model, Message, NoteAgentService>()((entry) => ({
+export const makeNoteAgentSubscriptions = <Model>(
+  modelToConnectionKey: (model: Model) => string | null,
+) => {
+  const noMessages: Stream.Stream<NoteAgentMessage> = Stream.empty;
+  return Subscription.make<Model, NoteAgentMessage, NoteAgentService>()((entry) => ({
     noteAgentEvents: entry(
       { connectionKey: Schema.NullOr(Schema.String) },
       {
-        modelToDependencies: (model) => ({ connectionKey: config.modelToConnectionKey(model) }),
+        modelToDependencies: (model) => ({ connectionKey: modelToConnectionKey(model) }),
         dependenciesToStream: ({ connectionKey }) =>
           connectionKey === null
             ? noMessages
@@ -440,7 +432,7 @@ export const makeNoteAgentSubscriptions = <Model, Message>(config: {
                 NoteAgentResource.get.pipe(
                   Effect.map((connection) =>
                     Stream.fromQueue(connection.events).pipe(
-                      Stream.map((event) => config.toMessage(noteAgentEventToMessage(event))),
+                      Stream.map(noteAgentEventToMessage),
                       // Leaving a club shuts this queue down from the resource's
                       // finalizer, which reaches the reader here as an
                       // interruption before the Model has dropped the connection

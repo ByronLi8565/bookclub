@@ -40,6 +40,7 @@ import { applyTheme } from "../logic/theme.ts";
 import { isNative } from "../logic/net/api.ts";
 import { readVersionedLocal, writeLocal } from "../logic/storage.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
+import { tagGuard } from "./messageGuard.ts";
 import { modalTabsView, modalView } from "./modal.ts";
 import { radioMenuView, type RadioMenuOption } from "./radioMenu.ts";
 
@@ -87,6 +88,10 @@ export const SettingsModel = Schema.Struct({
    */
   category: Schema.NullOr(SettingsCategory),
   prefs: UserPrefs,
+  /** Counts the reader's own preference changes. A server copy requested
+   *  before the latest change is older than what is on screen, so its answer
+   *  is dropped rather than allowed to undo the toggle. */
+  prefsRevision: Schema.Number,
   /** The custom-theme textarea's own text, edited independently of `prefs`
    *  until it's submitted — typing shouldn't save on every keystroke, and an
    *  in-progress line with a typo shouldn't be overwritten by a resync. */
@@ -102,8 +107,8 @@ export const SettingsModel = Schema.Struct({
   backupBusy: Schema.NullOr(Schema.Literals(["download", "restore"])),
   armedDownload: Schema.NullOr(ArmedBackupDownload),
   restorePreview: Schema.NullOr(BackupRestorePreview),
-  /** React spawns a toast; toasts are page chrome the host owns, so the sentence
-   *  is published here for the host to render. */
+  /** Toasts are page chrome the host owns, so the sentence is published here
+   *  and the host takes it off as it raises the toast. */
   notice: Schema.NullOr(SettingsNotice),
 });
 export type SettingsModel = typeof SettingsModel.Type;
@@ -132,6 +137,7 @@ export const initialSettingsModel = (): SettingsModel => {
   return {
     category: null,
     prefs,
+    prefsRevision: 0,
     customThemeDraft: serializeThemeConfig(resolveThemeTokens(prefs.appearance)),
     customThemeErrors: [],
     openDropdown: null,
@@ -148,7 +154,7 @@ export const initialSettingsModel = (): SettingsModel => {
 export const OpenedSettings = m("OpenedSettings");
 export const ChoseSettingsCategory = m("ChoseSettingsCategory", { category: SettingsCategory });
 export const ToggledSettingsDropdown = m("ToggledSettingsDropdown", { dropdown: Schema.String });
-export const LoadedUserPrefs = m("LoadedUserPrefs", { prefs: UserPrefs });
+export const LoadedUserPrefs = m("LoadedUserPrefs", { prefs: UserPrefs, revision: Schema.Number });
 export const ChoseOpeningPosition = m("ChoseOpeningPosition", { value: ReadingPositionOpenPolicy });
 export const ChosePdfPageLayout = m("ChosePdfPageLayout", { value: PdfPageLayout });
 export const ChoseSmartArrows = m("ChoseSmartArrows", { value: SmartArrows });
@@ -189,7 +195,6 @@ export const PreviewedBackup = m("PreviewedBackup", {
 export const CancelledBackupRestore = m("CancelledBackupRestore");
 export const ConfirmedBackupRestore = m("ConfirmedBackupRestore", { groupRef: Schema.String });
 export const RestoredBackup = m("RestoredBackup", { notes: Schema.Number, images: Schema.Number });
-export const DismissedSettingsNotice = m("DismissedSettingsNotice");
 export const CompletedSettingsAction = m("CompletedSettingsAction");
 export const FailedSettingsAction = m("FailedSettingsAction", {
   title: Schema.String,
@@ -227,23 +232,31 @@ export const SettingsMessage = Schema.Union([
   CancelledBackupRestore,
   ConfirmedBackupRestore,
   RestoredBackup,
-  DismissedSettingsNotice,
   CompletedSettingsAction,
   FailedSettingsAction,
 ]);
 export type SettingsMessage = typeof SettingsMessage.Type;
 
-export const isSettingsMessage = Schema.is(SettingsMessage);
+export const isSettingsMessage = tagGuard(SettingsMessage);
 
 export const LoadUserPrefs = Command.define("LoadUserPrefs", {
+  args: { revision: Schema.Number },
   messages: [LoadedUserPrefs, CompletedSettingsAction],
-  execute: bookclubClient.pipe(
-    Effect.flatMap((client) => client.accounts.prefs({})),
-    Effect.tap(({ prefs }) => rememberUserPrefs(prefs)),
-    Effect.map(({ prefs }) => LoadedUserPrefs({ prefs })),
-    // React keeps whatever it already had when the round trip fails, silently.
-    Effect.catch(() => Effect.succeed(CompletedSettingsAction())),
-  ),
+  execute: ({ revision }) =>
+    bookclubClient.pipe(
+      Effect.flatMap((client) => client.accounts.prefs({})),
+      Effect.map(({ prefs }) => LoadedUserPrefs({ prefs, revision })),
+      // React keeps whatever it already had when the round trip fails, silently.
+      Effect.catch(() => Effect.succeed(CompletedSettingsAction())),
+    ),
+});
+
+/** Only an answer the reader has not since overruled is written down, so the
+ *  next cold start paints what they last chose. */
+export const RememberUserPrefs = Command.define("RememberUserPrefs", {
+  args: { prefs: UserPrefs },
+  messages: [CompletedSettingsAction],
+  execute: ({ prefs }) => rememberUserPrefs(prefs).pipe(Effect.as(CompletedSettingsAction())),
 });
 
 /** Paints the theme immediately, ahead of whatever `SaveUserPrefs` round trip
@@ -447,6 +460,7 @@ export const RestoreGroupBackup = Command.define("RestoreGroupBackup", {
 
 export type SettingsCommand =
   | ReturnType<typeof LoadUserPrefs>
+  | ReturnType<typeof RememberUserPrefs>
   | ReturnType<typeof SaveUserPrefs>
   | ReturnType<typeof ApplyTheme>
   | ReturnType<typeof SaveClubProfile>
@@ -459,23 +473,35 @@ export type SettingsCommand =
 
 type Fold = readonly [SettingsModel, readonly SettingsCommand[]];
 
+const changedPrefs = (model: SettingsModel, prefs: UserPrefs): SettingsModel => ({
+  ...model,
+  prefs,
+  prefsRevision: model.prefsRevision + 1,
+});
+
 const savedReaderPref = (model: SettingsModel, reader: UserPrefs["reader"]): Fold => {
   const prefs = { ...model.prefs, reader };
-  return [{ ...model, prefs, openDropdown: null }, [SaveUserPrefs({ prefs })]];
+  return [{ ...changedPrefs(model, prefs), openDropdown: null }, [SaveUserPrefs({ prefs })]];
 };
 
 const savedNotesPref = (model: SettingsModel, notes: UserPrefs["notes"]): Fold => {
   const prefs = { ...model.prefs, notes };
-  return [{ ...model, prefs }, [SaveUserPrefs({ prefs })]];
+  return [changedPrefs(model, prefs), [SaveUserPrefs({ prefs })]];
 };
 
 const savedAppearance = (model: SettingsModel, appearance: UserPrefs["appearance"]): Fold => {
   const prefs = { ...model.prefs, appearance };
   return [
-    { ...model, prefs, customThemeDraft: serializeThemeConfig(resolveThemeTokens(appearance)) },
+    {
+      ...changedPrefs(model, prefs),
+      customThemeDraft: serializeThemeConfig(resolveThemeTokens(appearance)),
+    },
     [ApplyTheme({ appearance }), SaveUserPrefs({ prefs })],
   ];
 };
+
+const counted = (count: number, noun: string): string =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 const notified = (
   model: SettingsModel,
@@ -495,10 +521,11 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
         {
           ...initialSettingsModel(),
           prefs: model.prefs,
+          prefsRevision: model.prefsRevision,
           customThemeDraft: serializeThemeConfig(resolveThemeTokens(model.prefs.appearance)),
         },
         // React's prefs store hydrates from the server whenever it is read.
-        [LoadUserPrefs()],
+        [LoadUserPrefs({ revision: model.prefsRevision })],
       ];
     case "ChoseSettingsCategory":
       return [{ ...model, category: message.category, openDropdown: null }, []];
@@ -511,16 +538,21 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
         [],
       ];
     case "LoadedUserPrefs":
-      return [
-        {
-          ...model,
-          prefs: message.prefs,
-          customThemeDraft: serializeThemeConfig(resolveThemeTokens(message.prefs.appearance)),
-        },
-        // The server's copy may differ from what booted from cache (a theme
-        // picked on another device), so the paint has to catch up too.
-        [ApplyTheme({ appearance: message.prefs.appearance })],
-      ];
+      return message.revision === model.prefsRevision
+        ? [
+            {
+              ...model,
+              prefs: message.prefs,
+              customThemeDraft: serializeThemeConfig(resolveThemeTokens(message.prefs.appearance)),
+            },
+            // The server's copy may differ from what booted from cache (a theme
+            // picked on another device), so the paint has to catch up too.
+            [
+              ApplyTheme({ appearance: message.prefs.appearance }),
+              RememberUserPrefs({ prefs: message.prefs }),
+            ],
+          ]
+        : [model, []];
     case "ChoseOpeningPosition":
       return savedReaderPref(model, {
         ...model.prefs.reader,
@@ -553,7 +585,7 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
       const appearance = { themeId: "custom" as const, customColors: tokens };
       const prefs = { ...model.prefs, appearance };
       return [
-        { ...model, prefs, customThemeErrors: errors },
+        { ...changedPrefs(model, prefs), customThemeErrors: errors },
         [ApplyTheme({ appearance }), SaveUserPrefs({ prefs })],
       ];
     }
@@ -647,14 +679,12 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
         {
           ...notified(model, {
             title: "Notes restored",
-            body: `Restored ${message.notes} notes and ${message.images} images.`,
+            body: `Restored ${counted(message.notes, "note")} and ${counted(message.images, "image")}.`,
           }),
           restorePreview: null,
         },
         [],
       ];
-    case "DismissedSettingsNotice":
-      return [{ ...model, notice: null }, []];
     case "FailedSettingsAction":
       return [notified(model, { title: message.title, body: message.body, tone: "error" }), []];
     case "CompletedSettingsAction":
@@ -662,13 +692,23 @@ export const updateSettings = (model: SettingsModel, message: SettingsMessage): 
   }
 };
 
-/** The prefs the rest of the client reads: which the settings pages own, and
- *  which React's `useReaderPrefs`/`useNotesPrefs` hand out. */
-export const settingsPrefs = (model: SettingsModel): UserPrefs => model.prefs;
+/** What a chosen backup would bring back, as the confirmation reads it. */
+export const restorePreviewSummary = (preview: typeof BackupRestorePreview.Type): string =>
+  `${preview.clubName} · ${counted(preview.notes, "note")} · ${counted(preview.images, "image")} · ${new Date(
+    preview.createdAt,
+  ).toLocaleString()}`;
 
-/** The sentence React would have spawned a toast for. Page chrome belongs to
- *  the host, so it renders this and dismisses it with `DismissedSettingsNotice`. */
-export const settingsNotice = (model: SettingsModel): SettingsNotice | null => model.notice;
+/** A nickname is saved only when it says something new: an emptied field or
+ *  the name the club already has is not a change. */
+export const canSaveDisplayName = (model: SettingsModel, profile: ClubProfile): boolean => {
+  const displayName = (model.displayName ?? profile.displayName).trim();
+  return (
+    !model.savingName &&
+    !model.uploadingAvatar &&
+    displayName !== "" &&
+    displayName !== profile.displayName
+  );
+};
 
 export interface SettingsGroupRef {
   readonly groupId: string;
@@ -776,7 +816,6 @@ export const settingsView = <Message>(
       profile.avatarImageId === undefined
         ? null
         : avatarImagePath(profile.id, profile.avatarImageId);
-    const unchanged = displayName.trim() === profile.displayName;
     return [
       h.section(
         [h.Class("settings-item settings-user-profile")],
@@ -846,12 +885,7 @@ export const settingsView = <Message>(
                   h.Class("settings-action settings-text-submit-button"),
                   h.AriaLabel("Save display name"),
                   h.Title("Save display name (Enter)"),
-                  h.Disabled(
-                    model.savingName ||
-                      model.uploadingAvatar ||
-                      displayName.trim() === "" ||
-                      unchanged,
-                  ),
+                  h.Disabled(!canSaveDisplayName(model, profile)),
                 ],
                 [h.span([h.AriaHidden(true)], ["↵"])],
               ),
@@ -1149,14 +1183,7 @@ export const backupControlsView = <Message>(
               [h.Class("settings-backup-preview"), h.Role("status")],
               [
                 h.strong([], ["Replace all current notes?"]),
-                h.span(
-                  [],
-                  [
-                    `${model.restorePreview.clubName} · ${model.restorePreview.notes} notes · ${model.restorePreview.images} images · ${new Date(
-                      model.restorePreview.createdAt,
-                    ).toLocaleString()}`,
-                  ],
-                ),
+                h.span([], [restorePreviewSummary(model.restorePreview)]),
                 h.p(
                   [],
                   [

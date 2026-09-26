@@ -1,46 +1,25 @@
 import { Effect, Layer } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
-import { HttpApiMiddleware } from "effect/unstable/httpapi";
-import {
-  Forbidden,
-  ForbiddenError,
-  InternalError,
-  InternalErrorSchema,
-} from "../../shared/http/errors.ts";
+import { Forbidden } from "../../shared/http/errors.ts";
+import { Administration } from "../../shared/http/middleware.ts";
 import { constantTimeEqual } from "../../shared/crypto.ts";
-import { CloudflareEnv, CloudflareRequest } from "./cloudflare.ts";
-import { currentStructuredIdentity } from "./authentication.ts";
+import { requestIdentity } from "./authentication.ts";
+import { requestEnv } from "./cloudflare.ts";
 
-export class Administration extends HttpApiMiddleware.Service<
-  Administration,
-  { provides: CloudflareEnv }
->()("bookclub/http/Administration", { error: [ForbiddenError, InternalErrorSchema] }) {}
-
+// Machines (the pre-deploy backup) present ADMIN_API_TOKEN; a person signs in as ADMIN_EMAIL.
 export const AdministrationLive = Layer.succeed(Administration, (effect) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
-    const source = request.source;
-    if (!(source instanceof CloudflareRequest)) {
-      return yield* new InternalError({ error: "internal_error" });
-    }
-    const env = source.env;
+    const env = yield* requestEnv;
     const authorization = request.headers.authorization;
     const bearer = authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
       : undefined;
     if (env.ADMIN_API_TOKEN && bearer && constantTimeEqual(bearer, env.ADMIN_API_TOKEN)) {
-      return yield* Effect.provideService(effect, CloudflareEnv, env);
+      return yield* effect;
     }
-
-    // SAFETY: the worker serves this API through the Effect Web adapter, whose
-    // request source is always the Fetch API `Request` it was constructed from.
-    const identity = yield* Effect.tryPromise({
-      try: () => currentStructuredIdentity(request.source as Request, env),
-      catch: () => new InternalError({ error: "internal_error" }),
-    });
-    if (env.ADMIN_EMAIL && identity?.email === env.ADMIN_EMAIL) {
-      return yield* Effect.provideService(effect, CloudflareEnv, env);
-    }
+    const identity = yield* requestIdentity;
+    if (env.ADMIN_EMAIL && identity?.email === env.ADMIN_EMAIL) return yield* effect;
     return yield* new Forbidden({ error: "forbidden" });
   }),
 );

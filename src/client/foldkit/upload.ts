@@ -12,6 +12,8 @@ import type { SourceInspection } from "../logic/sources/checkHealth.ts";
 // bundle either way; loading it lazily here only split the graph on paper.
 import { putCachedSource } from "../logic/groups/sourceCache.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
+import { loadingView } from "./loading.ts";
+import { tagGuard } from "./messageGuard.ts";
 import { modalView } from "./modal.ts";
 
 const ACCEPT = ".epub,application/epub+zip,.pdf,application/pdf";
@@ -72,7 +74,6 @@ export const UploadModel = Schema.Struct({
   status: Schema.Literals(["idle", "checking", "ready", "uploading"]),
   inspected: Schema.NullOr(InspectedBook),
   error: Schema.NullOr(Schema.String),
-  progress: Schema.Number,
   dragging: Schema.Boolean,
   /** React's `RenamableText` keeps its own editing state; here the modal owns it
    *  so the title and author cells stay serializable. */
@@ -85,7 +86,6 @@ export const initialUploadModel = (): UploadModel => ({
   status: "idle",
   inspected: null,
   error: null,
-  progress: 0,
   dragging: false,
   editingField: null,
   editDraft: "",
@@ -98,7 +98,6 @@ export const CompletedBookInspection = m("CompletedBookInspection", { book: Insp
 export const FailedBookInspection = m("FailedBookInspection", {
   reason: Schema.Literals(["unsupported_type", "read_failed"]),
 });
-export const ProgressedBookInspection = m("ProgressedBookInspection", { progress: Schema.Number });
 export const StartedBookFieldEdit = m("StartedBookFieldEdit", {
   field: Schema.Literals(["title", "author"]),
 });
@@ -115,7 +114,6 @@ export const UploadMessage = Schema.Union([
   SelectedBookFile,
   CompletedBookInspection,
   FailedBookInspection,
-  ProgressedBookInspection,
   StartedBookFieldEdit,
   ChangedBookFieldDraft,
   CancelledBookFieldEdit,
@@ -126,24 +124,7 @@ export const UploadMessage = Schema.Union([
 ]);
 export type UploadMessage = typeof UploadMessage.Type;
 
-const uploadMessageTags: ReadonlySet<string> = new Set([
-  "DraggedOverBookDrop",
-  "LeftBookDrop",
-  "SelectedBookFile",
-  "CompletedBookInspection",
-  "FailedBookInspection",
-  "ProgressedBookInspection",
-  "StartedBookFieldEdit",
-  "ChangedBookFieldDraft",
-  "CancelledBookFieldEdit",
-  "CommittedBookFieldEdit",
-  "SubmittedBookUpload",
-  "UploadedBook",
-  "FailedBookUpload",
-]);
-
-export const isUploadMessage = (message: { _tag: string }): message is UploadMessage =>
-  uploadMessageTags.has(message._tag);
+export const isUploadMessage = tagGuard(UploadMessage);
 
 const healthIssue = (issue: {
   code: string;
@@ -283,7 +264,6 @@ export const updateUpload = (
           status: "checking",
           inspected: null,
           error: null,
-          progress: 0,
           dragging: false,
           editingField: null,
           editDraft: "",
@@ -306,8 +286,6 @@ export const updateUpload = (
         },
         [],
       ];
-    case "ProgressedBookInspection":
-      return [{ ...model, progress: message.progress }, []];
     case "StartedBookFieldEdit":
       return [
         {
@@ -433,41 +411,6 @@ const infoRows = (book: InspectedBook): readonly InfoRow[] => [
   { key: "size", label: "Size", value: formatBytes(book.fileSize) },
   ...healthRows(book.health),
 ];
-
-/** React's `Loading`, which `shared.css` styles by class name and nothing else. */
-const loadingView = <Message>(
-  className: string,
-  progress: number | undefined,
-  h: HtmlBuilder<Message>,
-): Html =>
-  h.output(
-    [h.Class(`loading ${className}`), h.AriaLive("polite"), h.AriaLabel("Loading")],
-    [
-      h.span(
-        [h.Class("loading-text")],
-        [
-          "LOADING",
-          h.span(
-            [h.Class("loading-dots"), h.AriaHidden(true)],
-            [h.span([], ["."]), h.span([], ["."]), h.span([], ["."])],
-          ),
-        ],
-      ),
-      ...(progress === undefined
-        ? []
-        : [
-            h.span(
-              [h.Class("loading-progress"), h.AriaHidden(true)],
-              [
-                h.span([
-                  h.Class("loading-progress-fill"),
-                  h.Style({ width: `${Math.max(0, Math.min(100, progress))}%` }),
-                ]),
-              ],
-            ),
-          ]),
-    ],
-  );
 
 const uploadIcon = <Message>(h: HtmlBuilder<Message>): Html =>
   h.svg(
@@ -595,7 +538,7 @@ export const uploadView = <Message>(
                 h.div(
                   [h.Class("upload-checking")],
                   [
-                    loadingView("loading--inline", model.progress, h),
+                    loadingView(h, "loading--inline"),
                     h.span([], ["checking whether highlights will work…"]),
                   ],
                 ),

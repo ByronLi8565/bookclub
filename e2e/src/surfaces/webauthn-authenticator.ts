@@ -139,7 +139,7 @@ export class SoftwareAuthenticator {
     type: "webauthn.create" | "webauthn.get",
     challenge: string,
     origin: string,
-  ): Uint8Array {
+  ): Uint8Array<ArrayBuffer> {
     return new TextEncoder().encode(
       JSON.stringify({ type, challenge, origin, crossOrigin: false }),
     );

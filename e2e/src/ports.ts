@@ -20,7 +20,9 @@ export function targetPort(target: string): number {
 export function targetBaseUrl(target: string): string {
   const attached = process.env[`E2E_${target.toUpperCase()}_URL`];
   if (attached) return attached.replace(/\/$/u, "");
-  return `http://127.0.0.1:${targetPort(target)}`;
+  // `localhost` rather than 127.0.0.1: cookie jars treat it as secure, so the
+  // worker's Secure session cookie survives plain http.
+  return `http://localhost:${targetPort(target)}`;
 }
 
 export function shouldBoot(target: string): boolean {

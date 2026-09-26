@@ -9,8 +9,8 @@ export { GroupAgent } from "./state/GroupAgent.ts";
 export { GroupRegistry } from "./state/GroupRegistry.ts";
 
 export default {
-  fetch: (request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> =>
-    bookclubHttpFallback.handler(request, env, ctx),
+  fetch: (request: Request, env: Env): Response | Promise<Response> =>
+    bookclubHttpFallback.handler(request, env),
   scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext): void => {
     ctx.waitUntil(
       Effect.runPromise(

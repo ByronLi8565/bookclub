@@ -1,11 +1,13 @@
 import * as Schema from "effect/Schema";
+import { cookieValue } from "./cookies.ts";
 import { signToken, verifyToken } from "./signedToken.ts";
 
 // The passkey authentication ceremony spans two requests, but no session yet
 // exists to anchor server-side state. Rather than add a store, the challenge is
 // signed into a short-lived HttpOnly cookie: stateless, tamper-evident, and
 // scoped to the email that requested it so the verify step can't be replayed
-// against a different account.
+// against a different account. The signature cannot be revoked, so the account
+// records each challenge it accepts and refuses a second use within the TTL.
 const CHALLENGE_COOKIE = "bc_pk_challenge";
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
@@ -26,17 +28,9 @@ export async function challengeCookie(
 }
 
 export async function readChallenge(
-  request: Request,
+  cookieHeader: string | null | undefined,
   secret: string,
-): Promise<{ email: string; challenge: string } | null> {
-  const header = request.headers.get("Cookie");
-  if (!header) return null;
-  let token: string | null = null;
-  for (const part of header.split(";")) {
-    const [name, ...rest] = part.trim().split("=");
-    if (name === CHALLENGE_COOKIE) token = rest.join("=");
-  }
-  if (!token) return null;
-  const payload = await verifyToken(ChallengePayloadSchema, token, secret);
-  return payload ? { email: payload.email, challenge: payload.challenge } : null;
+): Promise<{ email: string; challenge: string; exp: number } | null> {
+  const token = cookieValue(cookieHeader, CHALLENGE_COOKIE);
+  return token ? await verifyToken(ChallengePayloadSchema, token, secret) : null;
 }

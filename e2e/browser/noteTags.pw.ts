@@ -1,7 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   authenticateContext,
-  BASE_URL,
   joinGroup,
   openWorkspace,
   seedWorkspace,
@@ -240,6 +239,7 @@ test("Note tags · filtering supports all, any, exclusion, empty results, and re
   await expect(noteWithBody(page, "Beta only")).toHaveCount(0);
   await expect(noteWithBody(page, "Combined")).toHaveCount(0);
   await page.getByRole("button", { name: "Clear" }).click();
+  await expect(activeFilter(page, "question"), "Clear removes every active filter").toHaveCount(0);
 
   await input.fill("missing-tag");
   await page.getByRole("button", { name: /Create missing-tag filter/u }).click();
@@ -285,10 +285,7 @@ test("Note tags · additions and removals converge live while another member is 
   page,
 }) => {
   const { ref } = await seedWorkspace(page.context());
-  const readerContext = await browser.newContext({
-    baseURL: BASE_URL,
-    viewport: { width: 1280, height: 900 },
-  });
+  const readerContext = await browser.newContext();
   try {
     await authenticateContext(readerContext, "tag-reader");
     await joinGroup(page.context(), readerContext, ref);

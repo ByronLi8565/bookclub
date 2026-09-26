@@ -1,16 +1,10 @@
 .reader {
-  --reader-jump-flash-duration: 700ms;
   --reader-page-turn-hit-width: clamp(28px, 4vw, 56px);
 
   display: flex;
   flex-direction: column;
   min-height: 0;
   flex: 1;
-}
-
-.reader-empty {
-  margin: auto;
-  opacity: var(--muted-opacity);
 }
 
 .reader-bar,
@@ -346,13 +340,6 @@
   & .loading--reader {
     z-index: 2;
   }
-
-  & .reader-empty {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-  }
 }
 
 .epub-container {
@@ -440,44 +427,6 @@
   fill: var(--color-danger);
   fill-opacity: 0.32;
   mix-blend-mode: multiply;
-}
-
-.bc-jump-flash {
-  animation: reader-jump-flash var(--reader-jump-flash-duration) linear;
-  background: var(--color-highlight);
-  fill: var(--color-highlight);
-  mix-blend-mode: multiply;
-  pointer-events: none;
-}
-
-.bc-highlight-jump-flash {
-  animation: reader-highlight-pulse var(--reader-jump-flash-duration) linear;
-}
-
-@keyframes reader-jump-flash {
-  0%,
-  15% {
-    opacity: 0.72;
-    fill-opacity: 0.72;
-  }
-
-  100% {
-    opacity: 0;
-    fill-opacity: 0;
-  }
-}
-
-@keyframes reader-highlight-pulse {
-  0%,
-  55% {
-    filter: brightness(0.82) saturate(1.35);
-    opacity: 0.8;
-    fill-opacity: 0.8;
-  }
-
-  100% {
-    filter: brightness(1) saturate(1);
-  }
 }
 
 .pdf-scroller {
@@ -583,7 +532,6 @@
 }
 
 .pdf-highlights,
-.pdf-jump-flash,
 .pdf-underlines,
 .pdf-selection {
   z-index: 1;

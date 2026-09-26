@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
   authenticateContext,
-  BASE_URL,
   books,
   currentPage,
   openWorkspace,
@@ -34,10 +33,7 @@ test("Reading position · a manual sync opens the same page in another browser",
     syncedPage,
   );
 
-  const secondContext = await browser.newContext({
-    baseURL: BASE_URL,
-    viewport: { width: 1280, height: 900 },
-  });
+  const secondContext = await browser.newContext();
   try {
     await authenticateContext(secondContext, "same-member", owner.email);
     const secondPage = await secondContext.newPage();

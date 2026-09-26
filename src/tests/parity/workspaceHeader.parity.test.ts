@@ -12,7 +12,7 @@ import { expectRecordedParity, renderFoldkit, stubAnimationFrame } from "./parit
 describe("workspace header parity", () => {
   beforeEach(stubAnimationFrame);
 
-  it("renders the topbar React rendered", async () => {
+  it("renders the topbar", async () => {
     const peers = [
       { id: "reader-1", name: "Reader One", role: "member" as const },
       { id: "reader-2", name: "Reader Two", role: "member" as const },

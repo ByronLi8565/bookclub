@@ -167,11 +167,10 @@ describe("Lexical Mount", () => {
     // SAFETY: reading the same Lexical-owned root element property the editor sets on attach.
     expect((element as LexicalHost).__lexicalEditor).toBeFalsy();
 
+    // A discrete update notifies its listeners synchronously, so a listener
+    // that survived the release would already have published.
     const published = mounted.messages.length;
     writeBody(editor, "after teardown");
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 10);
-    });
     expect(mounted.messages).toHaveLength(published);
   });
 
@@ -201,9 +200,8 @@ describe("Lexical Mount", () => {
 
     const prevented = pasteInto(element, []);
 
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 10);
-    });
+    // The listener claims and reports an image paste in the same synchronous
+    // step, so an unclaimed paste is one it did not report.
     expect(mounted.messages.some((message) => message._tag === "PastedNoteImage")).toBe(false);
     // Ordinary text paste must still reach Lexical.
     expect(prevented()).toBe(false);
@@ -216,11 +214,12 @@ describe("Lexical Mount", () => {
     await vi.waitFor(() => expect(mounted.drafts()).not.toHaveLength(0));
     await mounted.release();
 
-    pasteInto(element, [new File([Uint8Array.from([1])], "shot.png", { type: "image/png" })]);
+    const prevented = pasteInto(element, [
+      new File([Uint8Array.from([1])], "shot.png", { type: "image/png" }),
+    ]);
 
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 10);
-    });
+    // A live listener claims an image paste synchronously, before it reports it.
+    expect(prevented()).toBe(false);
     expect(mounted.messages.some((message) => message._tag === "PastedNoteImage")).toBe(false);
   });
 

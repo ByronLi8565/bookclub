@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
   authenticateContext,
-  BASE_URL,
   books,
   joinGroup,
   openWorkspace,
@@ -46,10 +45,7 @@ test("Collaboration · an invited reader joins and receives the owner's note liv
     "an existing member's link reopens the book it names",
   ).toBeVisible({ timeout: 30_000 });
 
-  const readerContext = await browser.newContext({
-    baseURL: BASE_URL,
-    viewport: { width: 1280, height: 900 },
-  });
+  const readerContext = await browser.newContext();
   try {
     await authenticateContext(readerContext, "reader");
     const readerPage = await readerContext.newPage();
@@ -93,10 +89,7 @@ test("Collaboration · reply, edit, and delete converge across two open browsers
   page,
 }) => {
   const { ref } = await seedWorkspace(page.context());
-  const readerContext = await browser.newContext({
-    baseURL: BASE_URL,
-    viewport: { width: 1280, height: 900 },
-  });
+  const readerContext = await browser.newContext();
   try {
     await authenticateContext(readerContext, "reader");
     await joinGroup(page.context(), readerContext, ref);

@@ -13,8 +13,8 @@ export interface RpConfig {
   origin: string;
 }
 
-export function rpConfig(request: Request): RpConfig {
-  const url = new URL(request.url);
+export function rpConfig(requestUrl: string): RpConfig {
+  const url = new URL(requestUrl);
   return { rpID: url.hostname, origin: url.origin };
 }
 

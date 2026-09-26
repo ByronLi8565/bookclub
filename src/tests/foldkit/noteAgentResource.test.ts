@@ -21,6 +21,7 @@ import {
   type NoteAgentEvent,
   type NoteAgentMessage,
   type NoteAgentRequirements,
+  type NoteAgentService,
   type NoteAgentSocket,
   type SocketState,
 } from "../../client/foldkit/resources/noteAgent.ts";
@@ -393,20 +394,16 @@ describe("NoteAgent managed resource inside a Foldkit runtime", () => {
     container.id = "note-agent-resource-test";
     document.body.appendChild(container);
 
-    const managedResources = makeNoteAgentResources<Model, Message>({
+    const managedResources = makeNoteAgentResources<Model>({
       modelToRequirements: (model) =>
         model.groupId === null ? Option.none() : Option.some(requirementsFor(model.groupId)),
-      toMessage: (message) => message,
       connect: transport.connect,
       persistence: memoryPersistence(),
     });
-    const subscriptions = makeNoteAgentSubscriptions<Model, Message>({
-      modelToConnectionKey: (model) => model.connectionKey,
-      toMessage: (message) => message,
-    });
+    const subscriptions = makeNoteAgentSubscriptions<Model>((model) => model.connectionKey);
 
     return Runtime.embed(
-      Runtime.makeElement({
+      Runtime.makeElement<Model, Message, never, NoteAgentService>({
         Model,
         container,
         init: () =>

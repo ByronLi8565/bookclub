@@ -1,34 +1,20 @@
-import { getAgentByName } from "agents";
 import { Effect } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder, HttpApiGroup } from "effect/unstable/httpapi";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { monotonicFactory } from "ulidx";
-import { randomId } from "../../shared/crypto.ts";
-import { canonicalEmail, normalizeEmail } from "../../shared/email.ts";
-import { groupUrlName, publicIdFromGroupUrl } from "../../shared/groupUrls.ts";
-import { GroupsHttp } from "../../shared/http/groups.ts";
-import {
-  BadRequest,
-  Conflict,
-  Forbidden,
-  InternalError,
-  NotFound,
-  ServiceUnavailable,
-} from "../../shared/http/errors.ts";
-import {
-  GroupFailureReason,
-  type BookMetadataPatch,
-  type GroupSummary,
-} from "../../shared/types/groups.ts";
-import { deleteImagesForScope } from "../services/images.ts";
+import { groupUrlName } from "../../shared/groupUrls.ts";
+import { BookclubHttp } from "../../shared/http/BookclubHttp.ts";
+import { NotFound } from "../../shared/http/errors.ts";
+import { CurrentIdentity } from "../../shared/http/middleware.ts";
+import type { GroupSummary } from "../../shared/types/groups.ts";
 import { sendInvite } from "../services/email.ts";
-import type { GroupAgent, RenameGroupResult, RenameResult } from "../state/GroupAgent.ts";
-import { Authentication, CurrentIdentity } from "./authentication.ts";
+import type { GroupAgent } from "../state/GroupAgent.ts";
 import { CloudflareEnv } from "./cloudflare.ts";
+import * as GroupData from "./groupDataHandlers.ts";
+import { ensurePublicUrl, reservePublicId, resolveGroup } from "./groupLookup.ts";
+import { authAgent, groupAgent, groupCall, io, noteAgent } from "./io.ts";
 
-const MAX_GROUP_TITLE_LENGTH = 100;
 const ulid = monotonicFactory();
-type Group = DurableObjectStub<GroupAgent>;
 
 const groupInviteUrl = (
   request: HttpServerRequest.HttpServerRequest,
@@ -37,116 +23,35 @@ const groupInviteUrl = (
   sourceId?: string,
 ): string => {
   const query = new URLSearchParams({ invite: token });
-  if (sourceId !== undefined) query.set("book", sourceId);
+  if (sourceId !== undefined && group.sources.includes(sourceId)) query.set("book", sourceId);
   return new URL(`/clubs/${groupUrlName(group)}?${query}`, request.originalUrl).href;
 };
 
-const invitedSource = (group: GroupSummary, sourceId?: string): string | undefined =>
-  sourceId !== undefined && group.sources.includes(sourceId) ? sourceId : undefined;
-
-const MigratedGroupsHttp = HttpApiGroup.make("migratedGroups")
-  .add(
-    GroupsHttp.endpoints.list,
-    GroupsHttp.endpoints.create,
-    GroupsHttp.endpoints.get,
-    GroupsHttp.endpoints.inviteLink,
-    GroupsHttp.endpoints.rename,
-    GroupsHttp.endpoints.renameBook,
-    GroupsHttp.endpoints.resolveBookTitle,
-    GroupsHttp.endpoints.invite,
-    GroupsHttp.endpoints.setMemberRole,
-    GroupsHttp.endpoints.join,
-    GroupsHttp.endpoints.deleteBook,
-    GroupsHttp.endpoints.updateBookMetadata,
-    GroupsHttp.endpoints.delete,
-  )
-  .middleware(Authentication);
-
-export const GroupsApi = HttpApi.make("bookclub-groups").add(MigratedGroupsHttp);
-
-export const attempt = <A>(evaluate: () => A) =>
-  Effect.tryPromise({
-    try: () => Promise.resolve(evaluate()),
-    catch: () => new InternalError({ error: "internal_error" }),
-  });
-
-export const groupFailure = (reason: GroupFailureReason) => {
-  switch (reason) {
-    case GroupFailureReason.Exists:
-      return new Conflict({ error: reason });
-    case GroupFailureReason.NotFound:
-    case GroupFailureReason.BadSource:
-    case GroupFailureReason.BadMember:
-      return new NotFound({ error: reason });
-    case GroupFailureReason.Empty:
-      return new BadRequest({ error: reason });
-    default:
-      return new Forbidden({ error: reason });
-  }
-};
-const failure = groupFailure;
-
-const registry = Effect.fn("GroupHandlers.registry")(function* () {
-  const env = yield* CloudflareEnv;
-  return yield* attempt(() => getAgentByName(env.GroupRegistry, "global"));
-});
-
-const reservePublicId = Effect.fn("GroupHandlers.reservePublicId")(function* (groupId: string) {
-  const groupRegistry = yield* registry();
-  for (let tries = 0; tries < 10; tries++) {
-    const publicId = randomId(6, "abcdefghijklmnopqrstuvwxyz0123456789");
-    const result = yield* attempt(() => groupRegistry.reservePublicId(publicId, groupId));
-    if (result.ok) return publicId;
-  }
-  return yield* new ServiceUnavailable({ error: "id_exhausted" });
-});
-
-export const resolveGroup = Effect.fn("GroupHandlers.resolveGroup")(function* (groupRef: string) {
-  const publicId = publicIdFromGroupUrl(groupRef);
-  if (!publicId) return yield* new NotFound({ error: "not_found" });
-  const env = yield* CloudflareEnv;
-  const groupRegistry = yield* registry();
-  const groupId = yield* attempt(() => groupRegistry.resolvePublicId(publicId));
-  if (!groupId) return yield* new NotFound({ error: "not_found" });
-  const group = yield* attempt(() => getAgentByName(env.GroupAgent, groupId));
-  const summary = yield* attempt(() => group.getSummary());
-  if (!summary) return yield* new NotFound({ error: "not_found" });
-  return { group, summary };
-});
-
-const ensurePublicUrl = Effect.fn("GroupHandlers.ensurePublicUrl")(function* (
-  group: Group,
-  summary: GroupSummary,
-) {
-  if (summary.publicId !== "") return summary;
-  const publicId = yield* reservePublicId(summary.groupId);
-  const updated = yield* attempt(() => group.assignPublicUrl(publicId));
-  return updated ?? summary;
-});
-
-const titleResult = Effect.fn("GroupHandlers.titleResult")(function* (
+/** Runs a member's change against the club behind `groupRef` and answers with the new summary. */
+const changeGroup = Effect.fn("changeGroup")(function* (
   groupRef: string,
-  rename: (callerId: string, group: Group) => Promise<RenameResult | RenameGroupResult>,
+  change: (
+    group: DurableObjectStub<GroupAgent>,
+    callerId: string,
+  ) => ReturnType<GroupAgent["renameGroup"]> | Promise<ReturnType<GroupAgent["renameGroup"]>>,
 ) {
   const me = yield* CurrentIdentity;
   const { group } = yield* resolveGroup(groupRef);
-  const result = yield* attempt(() => rename(me.id, group));
-  if (!result.ok) return yield* failure(result.reason);
-  return { group: result.summary };
+  const { summary } = yield* groupCall(async () => await change(group, me.id));
+  return { group: summary };
 });
 
-export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (handlers) =>
+export const GroupHandlers = HttpApiBuilder.group(BookclubHttp, "groups", (handlers) =>
   handlers
     .handle("list", () =>
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
-        const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
-        const ids = yield* attempt(() => auth.getGroupIds());
+        const auth = yield* authAgent(me.email);
+        const ids = yield* io(() => auth.getGroupIds());
         const groups = yield* Effect.forEach(ids, (id) =>
           Effect.gen(function* () {
-            const group = yield* attempt(() => getAgentByName(env.GroupAgent, id));
-            const summary = yield* attempt(() => group.getSummary());
+            const group = yield* groupAgent(id);
+            const summary = yield* io(() => group.getSummary());
             return summary ? yield* ensurePublicUrl(group, summary) : null;
           }),
         );
@@ -155,42 +60,20 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
     )
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
-        const displayName = payload.displayName.trim();
-        if (!displayName) return yield* new BadRequest({ error: "invalid_name", reason: "empty" });
-        if (displayName.length > MAX_GROUP_TITLE_LENGTH) {
-          return yield* new BadRequest({ error: "invalid_name", reason: "too_long" });
-        }
-        const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
         const groupId = ulid();
         const publicId = yield* reservePublicId(groupId);
-        const group = yield* attempt(() => getAgentByName(env.GroupAgent, groupId));
-        const result = yield* attempt(() => group.create(displayName, publicId, me));
-        if (!result.ok) return yield* failure(result.reason);
-        return { group: result.summary };
+        const group = yield* groupAgent(groupId);
+        const { summary } = yield* groupCall(() => group.create(payload.displayName, publicId, me));
+        return { group: summary };
       }),
     )
     .handle("get", ({ params }) =>
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
-        const { group, summary } = yield* resolveGroup(params.groupRef);
-        const membership = yield* attempt(() => group.membership(me.id));
-        if (membership.isMember) {
-          yield* attempt(() => group.reindexMember(me));
-          const auth = yield* attempt(() => getAgentByName(env.AuthAgent, me.email));
-          const profile = yield* attempt(() => auth.getClubProfile(summary.groupId));
-          if (profile) {
-            yield* attempt(() =>
-              group.setMemberProfile(me.id, profile.displayName, profile.avatarImageId),
-            );
-          }
-        }
-        return {
-          group: summary,
-          membership,
-          members: membership.isMember ? yield* attempt(() => group.roster()) : [],
-        };
+        const { group } = yield* resolveGroup(params.groupRef);
+        const view = yield* io(() => group.view(me));
+        return view ?? (yield* new NotFound({ error: "not_found" }));
       }),
     )
     .handle("inviteLink", ({ params, query }) =>
@@ -198,143 +81,86 @@ export const GroupHandlers = HttpApiBuilder.group(GroupsApi, "migratedGroups", (
         const me = yield* CurrentIdentity;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() =>
+        const { token } = yield* groupCall(() =>
           query.rotate === "1" ? group.rotateOpenInvite(me.id) : group.ensureOpenInvite(me.id),
         );
-        if (!result.ok) return yield* failure(result.reason);
-        return {
-          token: result.token,
-          link: groupInviteUrl(
-            request,
-            summary,
-            result.token,
-            invitedSource(summary, query.sourceId),
-          ),
-        };
+        return { token, link: groupInviteUrl(request, summary, token, query.sourceId) };
       }),
     )
     .handle("rename", ({ params, payload }) =>
-      titleResult(params.groupRef, (callerId, group) => group.renameGroup(callerId, payload.title)),
+      changeGroup(params.groupRef, (group, callerId) => group.renameGroup(callerId, payload.title)),
     )
     .handle("renameBook", ({ params, payload }) =>
-      titleResult(params.groupRef, (callerId, group) =>
+      changeGroup(params.groupRef, (group, callerId) =>
         group.renameBook(callerId, payload.sourceId, payload.title),
       ),
     )
     .handle("resolveBookTitle", ({ params, payload }) =>
-      titleResult(params.groupRef, (callerId, group) =>
+      changeGroup(params.groupRef, (group, callerId) =>
         group.resolveBookTitle(callerId, payload.sourceId, payload.title),
       ),
     )
     .handle("invite", ({ params, payload }) =>
       Effect.gen(function* () {
-        const email = normalizeEmail(payload.email);
-        if (!email) return yield* new BadRequest({ error: "invalid_email" });
         const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
         const request = yield* HttpServerRequest.HttpServerRequest;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() => group.invite(me.id, email));
-        if (!result.ok) return yield* failure(result.reason);
-        yield* attempt(() =>
-          sendInvite(
-            env,
-            email,
-            summary.displayName,
-            groupInviteUrl(
-              request,
-              summary,
-              result.token,
-              invitedSource(summary, payload.sourceId),
-            ),
-          ),
-        );
+        const { token } = yield* groupCall(() => group.invite(me.id, payload.email));
+        const link = groupInviteUrl(request, summary, token, payload.sourceId);
+        yield* io(() => sendInvite(env, payload.email, summary.displayName, link));
       }),
     )
     .handle("setMemberRole", ({ params, payload }) =>
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
-        const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() =>
+        const { group } = yield* resolveGroup(params.groupRef);
+        const { roster } = yield* groupCall(() =>
           group.setMemberRole(me.id, params.memberId, payload.role),
         );
-        if (!result.ok) return yield* failure(result.reason);
-        const notes = yield* attempt(() => getAgentByName(env.NoteAgent, summary.groupId));
-        yield* attempt(() => notes.updateMemberRole(params.memberId, payload.role));
-        return { members: result.roster };
+        return { members: roster };
       }),
     )
     .handle("join", ({ params, payload }) =>
       Effect.gen(function* () {
         const me = yield* CurrentIdentity;
         const { group } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() => group.redeem(payload.token, me));
-        if (!result.ok) return yield* failure(result.reason);
-        return { group: result.summary };
+        const { summary } = yield* groupCall(() => group.redeem(payload.token, me));
+        return { group: summary };
       }),
     )
     .handle("deleteBook", ({ params }) =>
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
         const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() => group.deleteSource(me.id, params.sourceId));
-        if (!result.ok) return yield* failure(result.reason);
-        const notes = yield* attempt(() => getAgentByName(env.NoteAgent, summary.groupId));
-        yield* attempt(() => notes.removeSource(params.sourceId));
+        const result = yield* groupCall(() => group.deleteSource(me.id, params.sourceId));
+        const notes = yield* noteAgent(summary.groupId);
+        yield* io(() => notes.removeSource(params.sourceId));
         return { group: result.summary };
       }),
     )
     .handle("updateBookMetadata", ({ params, payload }) =>
-      Effect.gen(function* () {
-        const patch: BookMetadataPatch = {};
-        if (Object.hasOwn(payload, "author")) {
-          const author = payload.author?.trim();
-          patch.author = author ? author.slice(0, 200) : null;
-        }
-        if (Object.hasOwn(payload, "wordCount")) {
-          if (
-            payload.wordCount === undefined ||
-            (payload.wordCount !== null &&
-              (!Number.isSafeInteger(payload.wordCount) || payload.wordCount < 0))
-          ) {
-            return yield* new BadRequest({ error: "invalid_request" });
-          }
-          patch.wordCount = payload.wordCount;
-        }
-        if (!Object.hasOwn(patch, "author") && !Object.hasOwn(patch, "wordCount")) {
-          return yield* new BadRequest({ error: "invalid_request" });
-        }
-        const me = yield* CurrentIdentity;
-        const { group } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() =>
-          group.updateBookMetadata(me.id, params.sourceId, patch),
-        );
-        if (!result.ok) return yield* failure(result.reason);
-        return { group: result.summary };
-      }),
+      changeGroup(params.groupRef, (group, callerId) =>
+        group.updateBookMetadata(callerId, params.sourceId, payload),
+      ),
     )
     .handle("delete", ({ params }) =>
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
         const me = yield* CurrentIdentity;
-        const { group, summary } = yield* resolveGroup(params.groupRef);
-        const result = yield* attempt(() => group.deleteGroup(me.id));
-        if (!result.ok) return yield* failure(result.reason);
-        const groupRegistry = yield* registry();
-        yield* attempt(() => groupRegistry.releaseGroup(result.groupId));
-        yield* Effect.forEach(result.members, (member) =>
-          Effect.gen(function* () {
-            const auth = yield* attempt(() =>
-              getAgentByName(env.AuthAgent, canonicalEmail(member.email)),
-            );
-            yield* attempt(() => auth.removeGroup(result.groupId));
-          }),
-        );
-        const notes = yield* attempt(() => getAgentByName(env.NoteAgent, summary.groupId));
-        yield* attempt(() => notes.clear());
-        yield* attempt(() => deleteImagesForScope(env, summary.groupId));
+        const { group } = yield* resolveGroup(params.groupRef);
+        yield* groupCall(() => group.deleteGroup(me.id));
       }),
+    )
+    .handle("uploadBook", ({ params, headers, payload }) =>
+      GroupData.uploadBook(params.groupRef, headers, payload),
+    )
+    .handleRaw("book", ({ params, query }) => GroupData.book(params.groupRef, query.sourceId))
+    .handle("uploadImage", ({ params, payload }) => GroupData.uploadImage(params.groupRef, payload))
+    .handle("images", ({ params }) => GroupData.images(params.groupRef))
+    .handle("deleteImage", ({ params }) => GroupData.deleteImage(params.groupRef, params.imageId))
+    .handleRaw("image", ({ params }) => GroupData.image(params.groupRef, params.imageId))
+    .handleRaw("exportBackup", ({ params }) => GroupData.exportBackup(params.groupRef))
+    .handle("restoreBackup", ({ params, payload }) =>
+      GroupData.restoreBackup(params.groupRef, payload),
     ),
 );

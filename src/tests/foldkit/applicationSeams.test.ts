@@ -3,7 +3,6 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  Club,
   LoadedGroup,
   Model,
   Navigated,
@@ -11,8 +10,8 @@ import {
   RequestedBookRename,
   init,
   update,
-  type Message,
 } from "../../client/foldkit/application.ts";
+import { Club } from "../../client/foldkit/routes.ts";
 import { NotesMessage, isNotesMessage } from "../../client/foldkit/notes.ts";
 import {
   ClickedEpubHighlight,
@@ -155,7 +154,6 @@ describe("Foldkit application slice seams", () => {
     expect(readerTags.filter((tag) => notesTags.includes(tag))).toEqual([]);
 
     // The guards must agree with the unions they were derived from.
-    expect(readerTags.every((tag) => !notesTags.includes(tag))).toBe(true);
     expect(
       isReaderMessage(
         SelectedReaderSource({ groupRef: "club-alpha", sourceId: "source-1", kind: "epub" }),
@@ -176,8 +174,8 @@ describe("Foldkit application slice seams", () => {
       initial,
       SelectedReaderSource({ groupRef: "club-alpha", sourceId: "source-1", kind: "epub" }),
     );
-    // A club is its open book: opening one stays on the club's own route.
-    expect(opened.route).toEqual(Club({ groupRef: "club-alpha" }));
+    // Opening a book is not a navigation; only a URL moves the route.
+    expect(opened.route).toEqual(initial.route);
     expect(opened.reader?.sourceId).toBe("source-1");
     expect(opened.reader?.loading).toBe(true);
 
@@ -265,16 +263,6 @@ describe("Foldkit application slice seams", () => {
       FailedNoteAgentConnection({ groupId: "club-alpha", reason: "socket refused" }),
     );
     expect(failed.notes.connectionKey).toBeNull();
-  });
-
-  it("leaves application-owned messages to the application switch", () => {
-    const [initial] = init();
-    const navigated: Message = Navigated({ route: { _tag: "Home" } });
-    expect(isReaderMessage(navigated)).toBe(false);
-    expect(isNotesMessage(navigated)).toBe(false);
-
-    const [next] = update(initial, navigated);
-    expect(next.route._tag).toBe("Home");
   });
 
   const openedReader = () => {

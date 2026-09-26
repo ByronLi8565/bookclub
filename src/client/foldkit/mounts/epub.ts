@@ -24,6 +24,13 @@ import {
   putCachedEpubPagination,
 } from "../../logic/reader/epubPaginationCache.ts";
 import { makeEpubReader } from "../../logic/reader/epubReader.ts";
+import { makeLayoutQueue } from "../../logic/reader/layoutQueue.ts";
+import {
+  failureMessage,
+  makeLiveSlot,
+  nextFrames,
+  onForegroundResume,
+} from "../../logic/mountSupport.ts";
 
 declare module "epubjs/types/utils/queue" {
   export default interface Queue {
@@ -78,6 +85,8 @@ export const OpenedEpub = m("OpenedEpub", {
   place: Schema.NullOr(EpubPlace),
 });
 export const MovedEpub = m("MovedEpub", { sourceId: Schema.String, place: EpubPlace });
+/** The same place, counted again after the layout changed under it. */
+export const RelaidOutEpub = m("RelaidOutEpub", { sourceId: Schema.String, place: EpubPlace });
 export const SelectedEpubText = m("SelectedEpubText", {
   sourceId: Schema.String,
   cfi: Schema.String,
@@ -97,6 +106,7 @@ export const FailedEpubLoad = m("FailedEpubLoad", {
 export type EpubMountMessage =
   | typeof OpenedEpub.Type
   | typeof MovedEpub.Type
+  | typeof RelaidOutEpub.Type
   | typeof SelectedEpubText.Type
   | typeof ClearedEpubSelection.Type
   | typeof ClickedEpubHighlight.Type
@@ -119,7 +129,7 @@ export interface EpubSession {
   onMoved(handler: () => void): () => void;
   turnPage(direction: "next" | "previous"): Promise<void>;
   goTo(cfi: string): Promise<void>;
-  setFontSize(points: number): void;
+  setFontSize(points: number): Promise<void>;
   setColors(colors: EpubColors): void;
   clearSelection(): void;
   /** Paint the given highlights and erase every other painted one. epub.js
@@ -129,13 +139,11 @@ export interface EpubSession {
   /** The one search match the reader is standing on, painted in its own class
    *  so it survives independently of committed highlights. */
   setSearchHighlight(cfi: string | null): void;
-  /** Relayout in place. A remount would reload the book and lose the reader's
-   *  place, so a spread change redisplays the current CFI and repaints the
-   *  annotations the relayout dropped. */
   setSpread(spread: EpubSpread): Promise<void>;
-  /** Measure the whole book at the current viewport and zoom. Resolves false
-   *  when a newer measurement superseded this one. */
-  measurePagination(isCancelled: () => boolean): Promise<boolean>;
+  /** Every layout change (spread, text size, viewport) relayouts in place, and
+   *  once the book is counted again at the new layout the handler gets the
+   *  re-counted place. */
+  onRelaidOut(handler: (place: EpubPlace) => void): () => void;
   destroy(): void;
 }
 
@@ -165,6 +173,20 @@ export interface EpubSessionOptions {
 // Test engines are synchronous; the browser engine loads epub.js on demand.
 // The Mount awaits either form before opening bytes and owns teardown from then on.
 export type EpubEngine = (options: EpubSessionOptions) => EpubSession | Promise<EpubSession>;
+
+/** Everything that decides where text falls on the page. */
+interface EpubLayout {
+  readonly spread: EpubSpread;
+  readonly fontSize: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+const sameLayout = (a: EpubLayout, b: EpubLayout): boolean =>
+  a.spread === b.spread &&
+  a.fontSize === b.fontSize &&
+  a.width === b.width &&
+  a.height === b.height;
 
 const SELECTION_POLL = Schedule.spaced("300 millis");
 
@@ -241,8 +263,8 @@ function clearContentSelections(rendition: Rendition): void {
   }
 }
 
-export const HIGHLIGHT_CLASS = "bc-highlight";
-export const SEARCH_HIGHLIGHT_CLASS = "bc-search";
+const HIGHLIGHT_CLASS = "bc-highlight";
+const SEARCH_HIGHLIGHT_CLASS = "bc-search";
 
 /** Re-registers the whole "default" theme, since epub.js has no way to patch
  *  just the color rules within it — every call must restate the selection
@@ -298,14 +320,13 @@ export const epubJsEngine = async ({
   const forwardPress = () => {
     element.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
   };
-  const bridgedDocuments = new Set<Document>();
+  // Listen on the iframe document itself: no event from this browsing context
+  // can bubble to the application's document-level Foldkit Subscriptions. The
+  // listeners die with the iframe, so there is nothing to remove on teardown.
   const bridgeContent = (content: Contents) => {
-    // Listen on the iframe document itself: no event from this browsing context
-    // can bubble to the application's document-level Foldkit Subscriptions.
     content.document.addEventListener("keydown", forwardKey);
     content.document.addEventListener("mousedown", forwardPress, { passive: true });
     content.document.addEventListener("touchstart", forwardPress, { passive: true });
-    bridgedDocuments.add(content.document);
   };
   rendition.hooks.content.register(bridgeContent);
   let destroyed = false;
@@ -319,24 +340,9 @@ export const epubJsEngine = async ({
   rendition.resize = (width, height) => {
     if (!destroyed && renditionState.manager) resizeRendition(width, height);
   };
-  const resizeObserver =
-    typeof ResizeObserver === "function"
-      ? new ResizeObserver(() => {
-          // A resize notification can already be queued when disconnect runs.
-          // epub.js drops its manager during teardown, so that stale callback
-          // must not resize the dead rendition.
-          if (destroyed) return;
-          const width = element.clientWidth;
-          const height = element.clientHeight;
-          if (width > 0 && height > 0) rendition.resize(width, height);
-        })
-      : null;
-  resizeObserver?.observe(element);
   const drawn = new Map<string, string>();
   let searchCfi: string | null = null;
   let pagination: EpubPagination | null = null;
-  let currentSpread: EpubSpread = spread;
-  let currentFontSize = fontSizePoints;
   applyEpubTheme(rendition, colors);
   const fontSize = makeEpubFontSize(rendition, fontSizePoints);
 
@@ -347,30 +353,11 @@ export const epubJsEngine = async ({
   let opening: Promise<unknown> | null = null;
   let ready: Promise<void> | null = null;
   let lastTarget: string | null = null;
-  let resumeFrame: number | null = null;
 
-  const resume = () => {
-    if (destroyed || document.visibilityState !== "visible" || ready === null) return;
-    if (resumeFrame !== null) cancelAnimationFrame(resumeFrame);
-    resumeFrame = requestAnimationFrame(() => {
-      resumeFrame = requestAnimationFrame(() => {
-        resumeFrame = null;
-        void ready
-          ?.then(async () => {
-            if (destroyed || !renditionState.manager) return;
-            const width = element.clientWidth;
-            const height = element.clientHeight;
-            if (width <= 0 || height <= 0) return;
-            const target = readPlace(rendition, pagination)?.cfi ?? lastTarget;
-            rendition.resize(width, height);
-            if (target) await display(target);
-          })
-          .catch(() => {});
-      });
-    });
-  };
-  document.addEventListener("visibilitychange", resume);
-  window.addEventListener("pageshow", resume);
+  const paintHighlight = (id: string, cfi: string) =>
+    rendition.annotations.highlight(cfi, { id }, () => onHighlightClick(id), HIGHLIGHT_CLASS);
+  const paintSearch = (cfi: string) =>
+    rendition.annotations.highlight(cfi, {}, () => {}, SEARCH_HIGHLIGHT_CLASS);
 
   const syncHighlights = (highlights: readonly PaintedHighlight[]): void => {
     const wanted = new Map(highlights.map((highlight) => [highlight.id, highlight.cfi]));
@@ -381,7 +368,7 @@ export const epubJsEngine = async ({
     }
     for (const [id, cfi] of wanted) {
       if (drawn.has(id)) continue;
-      rendition.annotations.highlight(cfi, { id }, () => onHighlightClick(id), HIGHLIGHT_CLASS);
+      paintHighlight(id, cfi);
       drawn.set(id, cfi);
     }
   };
@@ -392,21 +379,96 @@ export const epubJsEngine = async ({
       // Removing by CFI takes the committed annotation with it when both sit
       // on the same passage, so that one is drawn again.
       const committed = [...drawn].find(([, drawnCfi]) => drawnCfi === searchCfi);
-      if (committed) {
-        const [id, drawnCfi] = committed;
-        rendition.annotations.highlight(
-          drawnCfi,
-          { id },
-          () => onHighlightClick(id),
-          HIGHLIGHT_CLASS,
-        );
-      }
+      if (committed) paintHighlight(...committed);
     }
     searchCfi = cfi;
-    if (cfi !== null) {
-      rendition.annotations.highlight(cfi, {}, () => {}, SEARCH_HIGHLIGHT_CLASS);
-    }
+    if (cfi !== null) paintSearch(cfi);
   };
+
+  // Everything that moves text on the page funnels into one relayout: the
+  // layout the reader wants is recorded here, and a pass applies whatever
+  // differs from what is drawn, redisplays the reader's place, and counts the
+  // pages again at exactly that layout. The redisplay is also what moves every
+  // highlight: epub.js re-injects each registered annotation, from the reflowed
+  // text's geometry, whenever it renders a view.
+  let wantedSpread = spread;
+  let wantedFontSize = fontSizePoints;
+  let drawnLayout: EpubLayout | null = null;
+  let redrawRequired = false;
+  let measureSeq = 0;
+  const relaidOut = new Set<(place: EpubPlace) => void>();
+
+  const countPages = async (layout: EpubLayout, superseded: () => boolean) => {
+    const key = `${sourceId}:${Math.round(layout.width)}x${Math.round(layout.height)}:${layout.fontSize}:${layout.spread}`;
+    const counted =
+      getCachedEpubPagination(key) ??
+      (await measureEpubPagination(
+        book,
+        layout.width,
+        layout.height,
+        layout.fontSize,
+        layout.spread,
+        superseded,
+      ));
+    if (counted === null || superseded()) return;
+    pagination = counted;
+    putCachedEpubPagination(key, counted);
+    const place = readPlace(rendition, pagination);
+    if (place) for (const handler of relaidOut) handler(place);
+  };
+
+  /** Measurement is expensive, so a newer layout abandons the count in flight. */
+  const recount = (layout: EpubLayout) => {
+    const seq = ++measureSeq;
+    void countPages(layout, () => destroyed || seq !== measureSeq).catch(() => {});
+  };
+
+  const relayout = makeLayoutQueue(async () => {
+    // A layout change can also move the reader pane's width, and the real
+    // workspace animates it: let Foldkit patch the DOM and the pane settle
+    // before epub.js measures its stage.
+    await nextFrames();
+    const pane = element.closest(".split-pane");
+    if (pane) await Promise.allSettled(pane.getAnimations().map((animation) => animation.finished));
+    if (
+      ready === null ||
+      !(await ready.then(
+        () => true,
+        () => false,
+      ))
+    )
+      return;
+    if (destroyed || !renditionState.manager) return;
+    const next: EpubLayout = {
+      spread: wantedSpread,
+      fontSize: wantedFontSize,
+      width: element.clientWidth,
+      height: element.clientHeight,
+    };
+    if (next.width <= 0 || next.height <= 0) return;
+    if (!redrawRequired && drawnLayout !== null && sameLayout(drawnLayout, next)) return;
+    const target = readPlace(rendition, pagination)?.cfi ?? lastTarget;
+    if (next.spread !== drawnLayout?.spread) rendition.spread(next.spread);
+    if (next.fontSize !== drawnLayout?.fontSize) fontSize.set(next.fontSize);
+    rendition.resize(next.width, next.height);
+    if (target) await display(target);
+    // Committed only once the redisplay drew, so a failed pass is retried by the next request.
+    drawnLayout = next;
+    redrawRequired = false;
+    recount(next);
+  });
+  const requestRelayout = () => void relayout().catch(() => {});
+
+  // A notification can already be queued when disconnect runs; the pass
+  // checks `destroyed` before touching the dead rendition.
+  const resizeObserver =
+    typeof ResizeObserver === "function" ? new ResizeObserver(requestRelayout) : null;
+  resizeObserver?.observe(element);
+  // WebKit can discard a backgrounded page's rendering without resizing it.
+  const stopResuming = onForegroundResume(() => {
+    redrawRequired = true;
+    requestRelayout();
+  });
 
   return {
     book,
@@ -434,6 +496,13 @@ export const epubJsEngine = async ({
           try {
             await display(target);
             lastTarget = readPlace(rendition, pagination)?.cfi ?? target;
+            drawnLayout = {
+              spread,
+              fontSize: fontSizePoints,
+              width: element.clientWidth,
+              height: element.clientHeight,
+            };
+            recount(drawnLayout);
             return metadata?.title?.trim() || null;
           } catch {
             continue;
@@ -441,7 +510,11 @@ export const epubJsEngine = async ({
         }
         throw new Error("No displayable section found in epub");
       })();
-      ready = loading.then(() => {});
+      const loaded = loading.then(() => {});
+      // The caller of `load` reports the failure; `ready` only gates later
+      // commands, which each handle a failed load themselves.
+      loaded.catch(() => {});
+      ready = loaded;
       return await loading;
     },
     place: () => readPlace(rendition, pagination),
@@ -470,8 +543,8 @@ export const epubJsEngine = async ({
     },
     goTo: (cfi) => display(linearSpineTarget(book, cfi) ?? firstLinearSpineTarget(book)),
     setFontSize(points) {
-      currentFontSize = points;
-      fontSize.set(points);
+      wantedFontSize = points;
+      return relayout();
     },
     setColors(next) {
       applyEpubTheme(rendition, next);
@@ -479,72 +552,19 @@ export const epubJsEngine = async ({
     clearSelection: () => clearContentSelections(rendition),
     syncHighlights,
     setSearchHighlight,
-    async setSpread(next) {
-      if (next === currentSpread) return;
-      const place = readPlace(rendition, pagination);
-      // ChangedReaderLayout also changes the reader pane's minimum width. The
-      // Command can start before Foldkit's DOM patch, and the real workspace
-      // then animates that width. Dev has no such transition, which hid the
-      // production race: wait for both the patch and the settled pane before
-      // letting epub.js measure its stage.
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-      const pane = element.closest(".split-pane");
-      if (pane)
-        await Promise.allSettled(pane.getAnimations().map((animation) => animation.finished));
-      if (destroyed || !renditionState.manager) return;
-      rendition.spread(next);
-      rendition.resize(element.clientWidth, element.clientHeight);
-      if (place?.cfi) await display(place.cfi);
-      // The relayout rebuilds the content documents, so every annotation the
-      // rendition had drawn is gone with them.
-      const painted = [...drawn].map(([id, cfi]) => ({ id, cfi }));
-      drawn.clear();
-      const search = searchCfi;
-      searchCfi = null;
-      syncHighlights(painted);
-      setSearchHighlight(search);
-      // A failed redisplay must remain retryable: the model already records
-      // the requested layout, so only commit the imperative state once the
-      // replacement content and its annotations are ready.
-      currentSpread = next;
+    setSpread(next) {
+      wantedSpread = next;
+      return relayout();
     },
-    async measurePagination(isCancelled) {
-      const width = element.clientWidth;
-      const height = element.clientHeight;
-      const key = `${sourceId}:${Math.round(width)}x${Math.round(height)}:${currentFontSize}:${currentSpread}`;
-      const cached = getCachedEpubPagination(key);
-      if (cached !== null) {
-        pagination = cached;
-        return true;
-      }
-      const measured = await measureEpubPagination(
-        book,
-        width,
-        height,
-        currentFontSize,
-        currentSpread,
-        isCancelled,
-      );
-      if (measured === null || isCancelled()) return false;
-      pagination = measured;
-      putCachedEpubPagination(key, measured);
-      return true;
+    onRelaidOut(handler) {
+      relaidOut.add(handler);
+      return () => relaidOut.delete(handler);
     },
     destroy() {
       destroyed = true;
-      if (resumeFrame !== null) cancelAnimationFrame(resumeFrame);
-      document.removeEventListener("visibilitychange", resume);
-      window.removeEventListener("pageshow", resume);
+      stopResuming();
       fontSize.destroy();
       rendition.hooks.content.deregister(bridgeContent);
-      for (const document of bridgedDocuments) {
-        document.removeEventListener("keydown", forwardKey);
-        document.removeEventListener("mousedown", forwardPress);
-        document.removeEventListener("touchstart", forwardPress);
-      }
-      bridgedDocuments.clear();
       resizeObserver?.disconnect();
       // The replacement Mount may acquire before epub.js is safe to destroy.
       // Release the old session's visible DOM immediately so two renditions
@@ -587,49 +607,16 @@ export interface EpubMountOptions {
   engine?: EpubEngine;
 }
 
-// Effect wraps a rejected promise, so the message a reader can act on is the
-// original rejection rather than the wrapper's own text.
-function failureMessage(error: unknown): string {
-  // SAFETY: reading an optional property off an unknown value is a presence check, not a claim.
-  const cause: unknown = (error as { cause?: unknown } | null)?.cause;
-  if (cause instanceof Error) return cause.message;
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
 // One EPUB adapter instance: a Mount that owns the live Book, Rendition, iframes
 // and listeners for whichever source is currently displayed, plus the Commands
 // surface (navigation, zoom, search) that acts on that live session. The Model
 // keeps none of it — the Mount publishes domain Messages instead.
 export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOptions) {
-  let live: EpubSession | null = null;
-  let measureSeq = 0;
-  let requestedSpread: EpubSpread | null = null;
-  let spreadSession: EpubSession | null = null;
-  let spreadTask: Promise<void> | null = null;
-
-  const applyRequestedSpread = (session: EpubSession): Promise<void> => {
-    if (spreadTask !== null && spreadSession === session) return spreadTask;
-    spreadSession = session;
-    const applyLatest = async (): Promise<void> => {
-      if (live !== session || requestedSpread === null) return;
-      const next = requestedSpread;
-      await session.setSpread(next);
-      if (requestedSpread !== next) await applyLatest();
-    };
-    const task = applyLatest();
-    spreadTask = task.finally(() => {
-      if (spreadSession === session) {
-        spreadSession = null;
-        spreadTask = null;
-      }
-    });
-    return spreadTask;
-  };
+  const live = makeLiveSlot<EpubSession>();
 
   const onLiveSession = <A>(fallback: A, use: (session: EpubSession) => Promise<A>) =>
     Effect.suspend(() => {
-      const session = live;
+      const session = live.get();
       return session === null
         ? Effect.succeed(fallback)
         : // The rejection is the failure. Left to `tryPromise`'s own wrapper the
@@ -656,6 +643,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
     },
     OpenedEpub,
     MovedEpub,
+    RelaidOutEpub,
     SelectedEpubText,
     ClearedEpubSelection,
     ClickedEpubHighlight,
@@ -677,50 +665,56 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
               return pending;
             });
 
-            const session = yield* Effect.acquireRelease(
-              Effect.promise(async () => {
-                requestedSpread = spread;
-                const created = await engine({
-                  sourceId,
-                  element,
-                  spread,
-                  fontSizePoints,
-                  colors,
-                  onHighlightClick: (highlightId) =>
-                    emit(ClickedEpubHighlight({ sourceId, highlightId })),
-                });
-                live = created;
-                return created;
-              }),
-              (created) =>
-                Effect.sync(() => {
-                  if (live === created) live = null;
-                  created.destroy();
+            // Keep the rejection itself, so what the reader is told is what
+            // actually went wrong with the book.
+            const reportFailure = (error: unknown) =>
+              Effect.sync(() => emit(FailedEpubLoad({ sourceId, message: failureMessage(error) })));
+
+            // The browser engine imports epub.js on demand, and that chunk can
+            // fail to load (offline, or replaced by a newer deploy).
+            const session = yield* live
+              .acquire(
+                Effect.tryPromise({
+                  try: () =>
+                    Promise.resolve(
+                      engine({
+                        sourceId,
+                        element,
+                        spread,
+                        fontSizePoints,
+                        colors,
+                        onHighlightClick: (highlightId) =>
+                          emit(ClickedEpubHighlight({ sourceId, highlightId })),
+                      }),
+                    ),
+                  catch: (cause) => cause,
                 }),
-            );
+                (created) => created.destroy(),
+              )
+              .pipe(
+                Effect.tapError(reportFailure),
+                Effect.orElseSucceed(() => null),
+              );
+            if (session === null) return yield* Effect.never;
 
             yield* Effect.acquireRelease(
-              Effect.sync(() =>
+              Effect.sync(() => [
                 session.onMoved(() => {
                   const place = session.place();
                   if (place) emit(MovedEpub({ sourceId, place }));
                 }),
-              ),
-              (unsubscribe) => Effect.sync(unsubscribe),
+                session.onRelaidOut((place) => emit(RelaidOutEpub({ sourceId, place }))),
+              ]),
+              (unsubscribes) =>
+                Effect.sync(() => unsubscribes.forEach((unsubscribe) => unsubscribe())),
             );
 
             const opened = yield* Effect.tryPromise({
               try: () => sourceBytes.then((bytes) => session.load(bytes, initialCfi)),
-              // Keep the rejection itself, so what the reader is told is what
-              // actually went wrong with the book.
               catch: (cause) => cause,
             }).pipe(
               Effect.map((title) => ({ title })),
-              Effect.tapError((error) =>
-                Effect.sync(() =>
-                  emit(FailedEpubLoad({ sourceId, message: failureMessage(error) })),
-                ),
-              ),
+              Effect.tapError(reportFailure),
               Effect.orElseSucceed(() => null),
             );
             // A failed load keeps the scope open so the element's unmount, not
@@ -748,7 +742,7 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
         ),
   );
 
-  const reader: SourceReader = makeEpubReader(() => live?.book ?? null);
+  const reader: SourceReader = makeEpubReader(() => live.get()?.book ?? null);
 
   return {
     Mount: EpubSource,
@@ -760,45 +754,23 @@ export function makeEpubMount({ loadSource, engine = epubJsEngine }: EpubMountOp
         ? onLiveSession(undefined, (session) => session.goTo(anchor.value))
         : Effect.void,
     setFontSize: (points: number) =>
-      Effect.sync(() => {
-        live?.setFontSize(points);
-      }),
+      onLiveSession(undefined, (session) => session.setFontSize(points)),
     setColors: (colors: EpubColors) =>
       Effect.sync(() => {
-        live?.setColors(colors);
+        live.get()?.setColors(colors);
       }),
     dismissSelection: Effect.sync(() => {
-      live?.clearSelection();
+      live.get()?.clearSelection();
     }),
     syncHighlights: (highlights: readonly PaintedHighlight[]) =>
       Effect.sync(() => {
-        live?.syncHighlights(highlights);
+        live.get()?.syncHighlights(highlights);
       }),
     setSearchHighlight: (anchor: HighlightAnchor | null) =>
       Effect.sync(() => {
-        live?.setSearchHighlight(anchor?.kind === "epub-cfi" ? anchor.value : null);
+        live.get()?.setSearchHighlight(anchor?.kind === "epub-cfi" ? anchor.value : null);
       }),
     setSpread: (spread: EpubSpread) =>
-      Effect.tryPromise({
-        try: async () => {
-          requestedSpread = spread;
-          const session = live;
-          if (session !== null) await applyRequestedSpread(session);
-        },
-        catch: (cause) => cause,
-      }),
-    /** Measurement is expensive and viewport-dependent, so a newer request
-     *  cancels the one in flight rather than queueing behind it. */
-    measurePagination: Effect.suspend(() => {
-      const session = live;
-      if (session === null) return Effect.succeed(null);
-      const seq = ++measureSeq;
-      return Effect.tryPromise(() => session.measurePagination(() => seq !== measureSeq)).pipe(
-        Effect.map((measured) => (measured ? session.place() : null)),
-        Effect.orElseSucceed(() => null),
-      );
-    }),
+      onLiveSession(undefined, (session) => session.setSpread(spread)),
   };
 }
-
-export type EpubMountAdapter = ReturnType<typeof makeEpubMount>;

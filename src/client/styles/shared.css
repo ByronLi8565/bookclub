@@ -166,10 +166,6 @@
   background: var(--color-text);
 }
 
-.loading--app {
-  height: 100%;
-}
-
 .loading--home-clubs {
   align-items: flex-start;
 }
@@ -181,10 +177,6 @@
 .loading--reader {
   position: absolute;
   inset: 0;
-}
-
-.loading--invite-people {
-  min-height: 64px;
 }
 
 .loading--invite-link,

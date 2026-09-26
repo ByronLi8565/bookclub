@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import { SourceKind } from "./sources.ts";
 
 type SchemaType<S extends Schema.Top> = S["Type"];
@@ -45,15 +46,29 @@ export const SourceMeta = Schema.Struct({
 
 export interface SourceMeta extends SchemaType<typeof SourceMeta> {}
 
-export const BookMetadataPatchSchema = Schema.Struct({
-  author: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-});
+const MAX_AUTHOR_LENGTH = 200;
 
-export interface BookMetadataPatch {
-  author?: string | null;
-  wordCount?: number | null;
-}
+/** A cleared author is `null`; a present one is trimmed and bounded. Parsed on
+ *  the server only, so the client sends what the reader typed. */
+const Author = Schema.NullOr(Schema.String).pipe(
+  Schema.decode({
+    decode: SchemaGetter.transform((raw: string | null) =>
+      raw === null ? null : raw.trim().slice(0, MAX_AUTHOR_LENGTH) || null,
+    ),
+    encode: SchemaGetter.passthrough(),
+  }),
+);
+
+export const BookMetadataPatchSchema = Schema.Struct({
+  author: Schema.optionalKey(Author),
+  wordCount: Schema.optionalKey(Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))),
+}).check(
+  Schema.makeFilter((patch) => "author" in patch || "wordCount" in patch, {
+    message: "a metadata patch changes at least one field",
+  }),
+);
+
+export interface BookMetadataPatch extends SchemaType<typeof BookMetadataPatchSchema> {}
 
 export const GroupSummary = Schema.Struct({
   groupId: Schema.String,

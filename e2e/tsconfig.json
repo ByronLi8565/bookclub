@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node", "ws", "@cloudflare/workers-types"]
   },
-  "include": ["src", "setup", "scenarios", "vitest.config.ts"]
+  "include": ["src", "setup", "scenarios", "browser", "vitest.config.ts", "../playwright.config.ts"]
 }

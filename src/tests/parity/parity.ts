@@ -9,11 +9,8 @@ export * from "./render.ts";
 
 const SIGNATURES = join(import.meta.dirname, "signatures");
 
-/**
- * A surface's recorded signature. These began as React's rendering, captured on
- * the day it was deleted, and remain the interface the Foldkit client is held
- * to until one is re-recorded on purpose.
- */
+/** A surface's recorded signature: the interface the client is held to until
+ *  it is re-recorded on purpose. */
 const pathFor = (name: string): string => join(SIGNATURES, `${name}.txt`);
 
 export const recordedSignature = (name: string): string => {
@@ -25,15 +22,13 @@ export const recordedSignature = (name: string): string => {
 };
 
 /**
- * The claim the whole suite is built on: the Foldkit tree still describes the
- * interface React rendered. The diff vitest prints is the tree itself, so a
- * failure names the element that drifted.
+ * The rendered tree still describes the recorded interface. The diff vitest
+ * prints is the tree itself, so a failure names the element that drifted.
  *
- * `RECORD_PARITY=1` rewrites the signature from what Foldkit renders now
- * instead of asserting against it. React is gone, so this is the only way to
- * move a baseline — which makes it a deliberate act: it blesses whatever is on
- * screen, and the git diff of `signatures/` is the review. Use it when the
- * interface changed on purpose, never to make a red test go green.
+ * `RECORD_PARITY=1` rewrites the signature from what renders now instead of
+ * asserting against it. That blesses whatever is on screen, so the diff of
+ * `signatures/` is the review: use it when the interface changed on purpose,
+ * never to make a red test go green.
  */
 export const expectRecordedParity = (
   name: string,

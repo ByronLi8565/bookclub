@@ -6,73 +6,66 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { getAgentByName, routeAgentRequest } from "agents";
+import { routeAgentRequest } from "agents";
 import type { Env } from "../env.ts";
-import { currentIdentity } from "../auth/cookies.ts";
-import { AccountHandlers, AccountsApi } from "./accountHandlers.ts";
-import { AdminApi, AdminHandlers } from "./adminHandlers.ts";
+import { BookclubHttp } from "../../shared/http/BookclubHttp.ts";
+import { socketIdentity } from "../auth/cookies.ts";
+import { AccountHandlers } from "./accountHandlers.ts";
+import { AdminHandlers } from "./adminHandlers.ts";
 import { AdministrationLive } from "./administration.ts";
-import { AuthApi, AuthHandlers } from "./authHandlers.ts";
+import { AuthHandlers } from "./authHandlers.ts";
 import { AuthenticationLive } from "./authentication.ts";
-import { CloudflareEnv, CloudflareRequest } from "./cloudflare.ts";
-import { GroupHandlers, GroupsApi } from "./groupHandlers.ts";
-import { GroupDataApi, GroupDataHandlers } from "./groupDataHandlers.ts";
+import { CloudflareEnv } from "./cloudflare.ts";
+import { GroupHandlers } from "./groupHandlers.ts";
+import { groupAgent, io } from "./io.ts";
+import { FieldFailuresLayer } from "./fieldFailures.ts";
 import { NativeCorsLayer } from "./nativeCors.ts";
 
-const rawResponse = (response: Response) => HttpServerResponse.raw(response);
-const platformIo = <A>(run: () => Promise<A>) =>
-  Effect.tryPromise({
-    try: run,
-    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-  });
+const API_PREFIXES = ["/auth", "/me", "/users", "/groups", "/admin"] as const;
+
+const webRequest = Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+  HttpServerRequest.toWeb(request),
+);
 
 const noteGate = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const source = request.source;
-  if (!(source instanceof CloudflareRequest))
-    return HttpServerResponse.text("not found", { status: 404 });
-  const me = yield* platformIo(() => currentIdentity(source, source.env));
+  const request = yield* webRequest;
+  const env = yield* CloudflareEnv;
+  const me = yield* io(() => socketIdentity(request, env));
   if (!me) return HttpServerResponse.text("unauthenticated", { status: 401 });
-  const params = yield* HttpRouter.params;
-  const groupId = params.groupId;
+  const { groupId } = yield* HttpRouter.params;
   if (!groupId) return HttpServerResponse.text("not found", { status: 404 });
-  const group = yield* platformIo(() => getAgentByName(source.env.GroupAgent, groupId));
-  const membership = yield* platformIo(() => group.membership(me.id));
-  if (!membership.isMember) return HttpServerResponse.text("forbidden", { status: 403 });
-  const response = yield* platformIo(() => routeAgentRequest(source, source.env));
-  return response ? rawResponse(response) : HttpServerResponse.text("not found", { status: 404 });
-});
+  const group = yield* groupAgent(groupId);
+  const { isMember } = yield* io(() => group.membership(me.id));
+  if (!isMember) return HttpServerResponse.text("forbidden", { status: 403 });
+  const response = yield* io(() => routeAgentRequest(request, env));
+  return response
+    ? HttpServerResponse.raw(response)
+    : HttpServerResponse.text("not found", { status: 404 });
+}).pipe(Effect.catch(() => Effect.succeed(HttpServerResponse.text("error", { status: 500 }))));
 
 const fallbackRoute = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const source = request.source;
-  if (!(source instanceof CloudflareRequest))
-    return HttpServerResponse.text("not found", { status: 404 });
-  const pathname = new URL(source.url).pathname;
-  if (
-    BOOKCLUB_HTTP_PREFIXES.some(
-      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-    )
-  ) {
+  const request = yield* webRequest;
+  const env = yield* CloudflareEnv;
+  const pathname = new URL(request.url).pathname;
+  if (API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
     return HttpServerResponse.jsonUnsafe({ error: "not_found" }, { status: 404 });
   }
-  const agentResponse = yield* platformIo(() => routeAgentRequest(source, source.env));
-  if (agentResponse) return rawResponse(agentResponse);
-  const assets = source.env.ASSETS;
+  const assets = env.ASSETS;
   if (!assets) {
-    return HttpServerResponse.text("Run the client via the vite dev server (npm run dev).", {
+    return HttpServerResponse.text("Run the client via the vite dev server (bun run dev).", {
       status: 404,
     });
   }
-  const assetResponse = yield* platformIo(() => assets.fetch(source));
+  const assetResponse = yield* io(() => assets.fetch(request));
+  // A missing hashed asset must not fall through to the SPA shell as HTML.
   if (
     pathname.startsWith("/assets/") &&
     assetResponse.headers.get("content-type")?.includes("text/html")
   ) {
     return HttpServerResponse.text("not found", { status: 404 });
   }
-  return rawResponse(assetResponse);
-});
+  return HttpServerResponse.raw(assetResponse);
+}).pipe(Effect.catch(() => Effect.succeed(HttpServerResponse.text("error", { status: 500 }))));
 
 const decodeError = (method: string, path: string): string => {
   if (method === "POST" && path === "/auth/start") return "invalid_email";
@@ -80,32 +73,18 @@ const decodeError = (method: string, path: string): string => {
   return "invalid_request";
 };
 
-export const BOOKCLUB_HTTP_PREFIXES = ["/auth", "/me", "/users", "/groups", "/admin"] as const;
-
 const Routes = Layer.mergeAll(
-  HttpApiBuilder.layer(AdminApi).pipe(
-    Layer.provide(AdminHandlers),
-    Layer.provide(AdministrationLive),
-  ),
-  HttpApiBuilder.layer(AccountsApi).pipe(
-    Layer.provide(AccountHandlers),
-    Layer.provide(AuthenticationLive),
-  ),
-  HttpApiBuilder.layer(AuthApi).pipe(
-    Layer.provide(AuthHandlers),
-    Layer.provide(AuthenticationLive),
-  ),
-  HttpApiBuilder.layer(GroupsApi).pipe(
-    Layer.provide(GroupHandlers),
-    Layer.provide(AuthenticationLive),
-  ),
-  HttpApiBuilder.layer(GroupDataApi).pipe(
-    Layer.provide(GroupDataHandlers),
-    Layer.provide(AuthenticationLive),
+  HttpApiBuilder.layer(BookclubHttp).pipe(
+    Layer.provide([AuthHandlers, AccountHandlers, GroupHandlers, AdminHandlers]),
+    Layer.provide([AuthenticationLive, AdministrationLive]),
   ),
   HttpRouter.add("*", "/agents/note-agent/:groupId/*", noteGate),
   HttpRouter.add("*", "/*", fallbackRoute),
-).pipe(Layer.provide(HttpServer.layerServices), Layer.provide(NativeCorsLayer));
+).pipe(
+  Layer.provide(HttpServer.layerServices),
+  Layer.provide(NativeCorsLayer),
+  Layer.provide(FieldFailuresLayer),
+);
 
 const fallback = HttpRouter.toWebHandler(Routes, { disableLogger: true });
 
@@ -116,13 +95,16 @@ const errorEnvelope = async (request: Request, response: Response): Promise<Resp
       .json()
       .catch(() => null);
     if (typeof body === "object" && body !== null && "error" in body) {
-      const error = body.error;
+      const { error } = body;
       const reason = "reason" in body ? body.reason : undefined;
+      // `_tag` lets the generated client decode the typed failure; `error` is what
+      // the native app reads. Nothing else a handler put in the body goes out.
+      const tag = "_tag" in body && typeof body._tag === "string" ? { _tag: body._tag } : {};
       if (typeof error === "string") {
-        return Response.json(typeof reason === "string" ? { error, reason } : { error }, {
-          status: response.status,
-          headers: response.headers,
-        });
+        return Response.json(
+          typeof reason === "string" ? { ...tag, error, reason } : { ...tag, error },
+          { status: response.status, headers: response.headers },
+        );
       }
     }
     return response;
@@ -138,13 +120,7 @@ const errorEnvelope = async (request: Request, response: Response): Promise<Resp
 };
 
 export const bookclubHttpFallback = {
-  handler: async (request: Request, env: Env, _executionContext?: ExecutionContext) =>
-    await errorEnvelope(
-      request,
-      await fallback.handler(
-        new CloudflareRequest(request, env, _executionContext),
-        Context.make(CloudflareEnv, env),
-      ),
-    ),
+  handler: async (request: Request, env: Env) =>
+    await errorEnvelope(request, await fallback.handler(request, Context.make(CloudflareEnv, env))),
   dispose: fallback.dispose,
 };

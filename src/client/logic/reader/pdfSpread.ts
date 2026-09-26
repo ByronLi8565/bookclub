@@ -33,6 +33,12 @@ export function spreadPages(left: number, enabled: boolean, numPages: number): n
   return [left, left + 1];
 }
 
+// The scale at which the spread's full page width (a pair shares the width
+// left after the gutter) fills `available` CSS px; zoom multiplies onto it.
+export function fitScale(available: number, baseWidth: number, pageCount: number): number {
+  return pageCount > 1 ? (available - SPREAD_GUTTER_PX) / (2 * baseWidth) : available / baseWidth;
+}
+
 // The right-most page in the spread starting at `left` (== left when solo).
 export function spreadEnd(left: number, enabled: boolean, numPages: number): number {
   const pages = spreadPages(left, enabled, numPages);

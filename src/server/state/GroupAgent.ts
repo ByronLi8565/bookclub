@@ -1,4 +1,5 @@
-import { Agent, getAgentByName } from "agents";
+import { getAgentByName } from "agents";
+import { ServerOwnedAgent } from "./serverOwnedAgent.ts";
 import * as Encoding from "effect/Encoding";
 import {
   GroupFailureReason,
@@ -10,6 +11,8 @@ import {
 } from "../../shared/types/groups.ts";
 import { slugForGroup } from "../../shared/groupUrls.ts";
 import { canonicalEmail } from "../../shared/email.ts";
+import { deleteImagesForScope } from "../services/images.ts";
+import { REGISTRY_ID } from "./registryId.ts";
 import type { Env } from "../env.ts";
 import { GroupAction, permits } from "../../shared/groupPermissions.ts";
 
@@ -39,6 +42,8 @@ export interface GroupState {
   openInvite: string;
   bookTitles: Record<string, string>;
   createdAt: string;
+  /** Set when the Group is deleted: who still holds it in their account index. */
+  pendingDeletion?: { members: Identity[] };
 }
 
 export interface Identity {
@@ -47,46 +52,16 @@ export interface Identity {
   email: string;
 }
 
-type GroupFailure<R extends GroupFailureReason> = { ok: false; reason: R };
-type AccessFailureReason =
-  | typeof GroupFailureReason.NotMember
-  | typeof GroupFailureReason.NotFound
-  | typeof GroupFailureReason.Forbidden;
+type GroupFailure = { ok: false; reason: GroupFailureReason };
 
-export type CreateResult =
-  | { ok: true; summary: GroupSummary }
-  | GroupFailure<typeof GroupFailureReason.Exists | typeof GroupFailureReason.Empty>;
-export type InviteResult = { ok: true; token: string } | GroupFailure<AccessFailureReason>;
-export type RedeemResult =
-  | { ok: true; summary: GroupSummary }
-  | GroupFailure<
-      | typeof GroupFailureReason.NotFound
-      | typeof GroupFailureReason.BadInvite
-      | typeof GroupFailureReason.WrongEmail
-    >;
-export type AddSourceResult =
-  | { ok: true; summary: GroupSummary }
-  | GroupFailure<AccessFailureReason>;
-export type InviteLinkResult = { ok: true; token: string } | GroupFailure<AccessFailureReason>;
-export type RenameResult =
-  | { ok: true; summary: GroupSummary }
-  | GroupFailure<
-      AccessFailureReason | typeof GroupFailureReason.BadSource | typeof GroupFailureReason.Empty
-    >;
-export type RenameGroupResult =
-  | { ok: true; summary: GroupSummary }
-  | GroupFailure<AccessFailureReason | typeof GroupFailureReason.Empty>;
-export type SetRoleResult =
-  | { ok: true; roster: RosterEntry[] }
-  | GroupFailure<AccessFailureReason | typeof GroupFailureReason.BadMember>;
-export type DeleteSourceResult =
-  | { ok: true; summary: GroupSummary }
-  | GroupFailure<AccessFailureReason | typeof GroupFailureReason.BadSource>;
-export type DeleteGroupResult =
-  | { ok: true; groupId: string; publicId: string; members: Identity[] }
-  | GroupFailure<AccessFailureReason>;
+/** A Group Control Plane answer: the payload on success, else the refusal the HTTP seam translates. */
+export type GroupResult<A extends object = object> = ({ ok: true } & A) | GroupFailure;
 
-const MAX_TITLE_LENGTH = 100;
+export interface GroupView {
+  group: GroupSummary;
+  membership: { isMember: boolean; role: GroupRole | null };
+  members: RosterEntry[];
+}
 
 function token(): string {
   return Encoding.encodeHex(crypto.getRandomValues(new Uint8Array(16)));
@@ -97,7 +72,7 @@ function rosterEntry(id: string, member: Member): RosterEntry {
   return member.avatarImageId ? { ...entry, avatarImageId: member.avatarImageId } : entry;
 }
 
-export class GroupAgent extends Agent<Env, GroupState> {
+export class GroupAgent extends ServerOwnedAgent<Env, GroupState> {
   initialState: GroupState = {
     groupId: "",
     name: "",
@@ -113,17 +88,18 @@ export class GroupAgent extends Agent<Env, GroupState> {
     createdAt: "",
   };
 
-  async create(displayName: string, publicId: string, owner: Identity): Promise<CreateResult> {
+  async create(
+    displayName: string,
+    publicId: string,
+    owner: Identity,
+  ): Promise<GroupResult<{ summary: GroupSummary }>> {
     if (this.state.groupId !== "") return { ok: false, reason: GroupFailureReason.Exists };
-    const title = displayName.trim();
-    if (title === "") return { ok: false, reason: GroupFailureReason.Empty };
-
     const now = new Date().toISOString();
     this.setState({
       groupId: this.name,
-      name: slugForGroup(title),
+      name: slugForGroup(displayName),
       publicId,
-      displayName: title.slice(0, MAX_TITLE_LENGTH),
+      displayName,
       ownerId: owner.id,
       members: {
         [owner.id]: { role: GroupRole.Owner, name: owner.name, email: owner.email, joinedAt: now },
@@ -135,28 +111,21 @@ export class GroupAgent extends Agent<Env, GroupState> {
       bookTitles: {},
       createdAt: now,
     });
-    await this.indexFor(owner);
+    await this.indexMember(owner);
     return { ok: true, summary: this.summary() };
   }
 
   // The shared precondition for every member-only mutation: the group must
   // exist and the caller must already belong to it. Returning the failure shape
   // directly lets callers `if (!guard.ok) return guard;`.
-  private requireMember(
-    callerId: string,
-  ):
-    | { ok: true; role: GroupRole }
-    | GroupFailure<typeof GroupFailureReason.NotFound | typeof GroupFailureReason.NotMember> {
+  private requireMember(callerId: string): GroupResult<{ role: GroupRole }> {
     if (this.state.groupId === "") return { ok: false, reason: GroupFailureReason.NotFound };
     const member = this.state.members[callerId];
     if (!member) return { ok: false, reason: GroupFailureReason.NotMember };
     return { ok: true, role: member.role };
   }
 
-  private requireAction(
-    callerId: string,
-    action: GroupAction,
-  ): { ok: true; role: GroupRole } | GroupFailure<AccessFailureReason> {
+  private requireAction(callerId: string, action: GroupAction): GroupResult<{ role: GroupRole }> {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
     return permits(guard.role, action)
@@ -164,7 +133,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
       : { ok: false, reason: GroupFailureReason.Forbidden };
   }
 
-  invite(callerId: string, email: string): InviteResult {
+  invite(callerId: string, email: string): GroupResult<{ token: string }> {
     const guard = this.requireAction(callerId, GroupAction.InviteMember);
     if (!guard.ok) return guard;
 
@@ -180,7 +149,7 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, token: t };
   }
 
-  async redeem(t: string, user: Identity): Promise<RedeemResult> {
+  async redeem(t: string, user: Identity): Promise<GroupResult<{ summary: GroupSummary }>> {
     if (this.state.groupId === "") return { ok: false, reason: GroupFailureReason.NotFound };
     if (this.state.members[user.id]) return { ok: true, summary: this.summary() };
 
@@ -200,14 +169,14 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
-  ensureOpenInvite(callerId: string): InviteLinkResult {
+  ensureOpenInvite(callerId: string): GroupResult<{ token: string }> {
     const guard = this.requireAction(callerId, GroupAction.InviteMember);
     if (!guard.ok) return guard;
     if (this.state.openInvite === "") this.setState({ ...this.state, openInvite: token() });
     return { ok: true, token: this.state.openInvite };
   }
 
-  rotateOpenInvite(callerId: string): InviteLinkResult {
+  rotateOpenInvite(callerId: string): GroupResult<{ token: string }> {
     const guard = this.requireAction(callerId, GroupAction.InviteMember);
     if (!guard.ok) return guard;
     const t = token();
@@ -224,27 +193,48 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return member ? rosterEntry(userId, member) : null;
   }
 
-  setMemberProfile(userId: string, name: string, avatarImageId?: string): RosterEntry | null {
+  /** What `userId` may see of the Group: everything for a member; for anyone
+   *  else only enough to recognise the club and redeem an invite to it. */
+  view(user: Identity): GroupView | null {
+    if (this.state.groupId === "") return null;
+    const member = this.state.members[user.id];
+    if (!member) {
+      return {
+        group: { ...this.summary(), sources: [], bookTitles: {}, sourceMeta: {} },
+        membership: { isMember: false, role: null },
+        members: [],
+      };
+    }
+    // Re-links a club list that drifted before joins reconciled durably. Off
+    // the response path: the add is a no-op once the index holds the Group.
+    this.ctx.waitUntil(this.indexMember(user));
+    return {
+      group: this.summary(),
+      membership: { isMember: true, role: member.role },
+      members: this.roster(),
+    };
+  }
+
+  async setMemberProfile(
+    userId: string,
+    name: string,
+    avatarImageId?: string,
+  ): Promise<RosterEntry | null> {
     const member = this.state.members[userId];
     if (!member) return null;
     const { avatarImageId: _oldAvatar, ...base } = member;
     const next = avatarImageId ? { ...base, name, avatarImageId } : { ...base, name };
     if (next.name !== member.name || avatarImageId !== member.avatarImageId) {
       this.setState({ ...this.state, members: { ...this.state.members, [userId]: next } });
+      await this.projectMember(userId);
     }
     return rosterEntry(userId, next);
   }
 
-  renameGroup(callerId: string, rawTitle: string): RenameGroupResult {
+  renameGroup(callerId: string, title: string): GroupResult<{ summary: GroupSummary }> {
     const guard = this.requireAction(callerId, GroupAction.RenameClub);
     if (!guard.ok) return guard;
-    const title = rawTitle.trim();
-    if (title === "") return { ok: false, reason: GroupFailureReason.Empty };
-    this.setState({
-      ...this.state,
-      name: slugForGroup(title),
-      displayName: title.slice(0, MAX_TITLE_LENGTH),
-    });
+    this.setState({ ...this.state, name: slugForGroup(title), displayName: title });
     return { ok: true, summary: this.summary() };
   }
 
@@ -255,35 +245,33 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return this.summary();
   }
 
-  renameBook(callerId: string, sourceId: string, rawTitle: string): RenameResult {
+  renameBook(
+    callerId: string,
+    sourceId: string,
+    title: string,
+  ): GroupResult<{ summary: GroupSummary }> {
     const guard = this.requireAction(callerId, GroupAction.RenameBook);
     if (!guard.ok) return guard;
     if (!this.state.sources.includes(sourceId))
       return { ok: false, reason: GroupFailureReason.BadSource };
-    const title = rawTitle.trim();
-    if (title === "") return { ok: false, reason: GroupFailureReason.Empty };
-    this.setState({
-      ...this.state,
-      bookTitles: { ...this.state.bookTitles, [sourceId]: title.slice(0, MAX_TITLE_LENGTH) },
-    });
+    this.setState({ ...this.state, bookTitles: { ...this.state.bookTitles, [sourceId]: title } });
     return { ok: true, summary: this.summary() };
   }
 
-  resolveBookTitle(callerId: string, sourceId: string, rawTitle: string): RenameResult {
+  resolveBookTitle(
+    callerId: string,
+    sourceId: string,
+    title: string,
+  ): GroupResult<{ summary: GroupSummary }> {
     const guard = this.requireAction(callerId, GroupAction.RenameBook);
     if (!guard.ok) return guard;
     if (!this.state.sources.includes(sourceId))
       return { ok: false, reason: GroupFailureReason.BadSource };
-    const title = rawTitle.trim();
-    if (title === "") return { ok: false, reason: GroupFailureReason.Empty };
     const meta = this.state.sourceMeta[sourceId];
     if (!meta || (meta.title ?? "") !== "") return { ok: true, summary: this.summary() };
     this.setState({
       ...this.state,
-      sourceMeta: {
-        ...this.state.sourceMeta,
-        [sourceId]: { ...meta, title: title.slice(0, MAX_TITLE_LENGTH) },
-      },
+      sourceMeta: { ...this.state.sourceMeta, [sourceId]: { ...meta, title } },
     });
     return { ok: true, summary: this.summary() };
   }
@@ -298,10 +286,14 @@ export class GroupAgent extends Agent<Env, GroupState> {
       },
       invites,
     });
-    await this.indexFor(user);
+    await this.indexMember(user);
   }
 
-  addSource(callerId: string, sourceId: string, meta: SourceMeta): AddSourceResult {
+  addSource(
+    callerId: string,
+    sourceId: string,
+    meta: SourceMeta,
+  ): GroupResult<{ summary: GroupSummary }> {
     const guard = this.requireAction(callerId, GroupAction.UploadBook);
     if (!guard.ok) return guard;
     if (this.state.sources.includes(sourceId)) return { ok: true, summary: this.summary() };
@@ -319,7 +311,11 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return member ? { isMember: true, role: member.role } : { isMember: false, role: null };
   }
 
-  setMemberRole(callerId: string, memberId: string, role: GroupRole): SetRoleResult {
+  async setMemberRole(
+    callerId: string,
+    memberId: string,
+    role: GroupRole,
+  ): Promise<GroupResult<{ roster: RosterEntry[] }>> {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
     const target = this.state.members[memberId];
@@ -336,10 +332,11 @@ export class GroupAgent extends Agent<Env, GroupState> {
       ...this.state,
       members: { ...this.state.members, [memberId]: { ...target, role } },
     });
+    await this.projectMember(memberId);
     return { ok: true, roster: this.roster() };
   }
 
-  deleteSource(callerId: string, sourceId: string): DeleteSourceResult {
+  deleteSource(callerId: string, sourceId: string): GroupResult<{ summary: GroupSummary }> {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
     const meta = this.state.sourceMeta[sourceId];
@@ -364,7 +361,11 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
-  updateBookMetadata(callerId: string, sourceId: string, patch: BookMetadataPatch): RenameResult {
+  updateBookMetadata(
+    callerId: string,
+    sourceId: string,
+    patch: BookMetadataPatch,
+  ): GroupResult<{ summary: GroupSummary }> {
     const guard = this.requireMember(callerId);
     if (!guard.ok) return guard;
     const meta = this.state.sourceMeta[sourceId];
@@ -385,28 +386,43 @@ export class GroupAgent extends Agent<Env, GroupState> {
     return { ok: true, summary: this.summary() };
   }
 
-  deleteGroup(callerId: string): DeleteGroupResult {
+  /**
+   * Deletion commits here first, so the Group is gone the moment this returns;
+   * everything that still refers to it is released afterwards by
+   * `finishDeletion`, which this object keeps retrying until it succeeds.
+   */
+  async deleteGroup(callerId: string): Promise<GroupResult> {
     const guard = this.requireAction(callerId, GroupAction.DeleteClub);
     if (!guard.ok) return guard;
-    const result = {
-      ok: true as const,
-      groupId: this.state.groupId,
-      publicId: this.state.publicId,
-      members: Object.entries(this.state.members).map(([id, member]) => ({
-        id,
-        name: member.name,
-        email: member.email,
-      })),
-    };
-    this.setState({
-      ...this.initialState,
-      members: {},
-      sources: [],
-      sourceMeta: {},
-      invites: {},
-      bookTitles: {},
+    const members = Object.entries(this.state.members).map(([id, member]) => ({
+      id,
+      name: member.name,
+      email: member.email,
+    }));
+    this.setState({ ...this.initialState, pendingDeletion: { members } });
+    await this.schedule(0, "finishDeletion");
+    return { ok: true };
+  }
+
+  // Every step is idempotent, and the tombstone is cleared last, so a retry
+  // after any partial failure finishes the same work rather than orphaning it.
+  async finishDeletion(): Promise<void> {
+    const pending = this.state.pendingDeletion;
+    if (!pending) return;
+    await this.reconcile("finishDeletion", undefined, async () => {
+      const registry = await getAgentByName(this.env.GroupRegistry, REGISTRY_ID);
+      await registry.releaseGroup(this.name);
+      await Promise.all(
+        pending.members.map(async (member) => {
+          const auth = await getAgentByName(this.env.AuthAgent, canonicalEmail(member.email));
+          await auth.removeGroup(this.name);
+        }),
+      );
+      await (await getAgentByName(this.env.NoteAgent, this.name)).clear();
+      await deleteImagesForScope(this.env, this.name);
+      const { pendingDeletion: _finished, ...state } = this.state;
+      this.setState(state);
     });
-    return result;
   }
 
   getSummary(): GroupSummary | null {
@@ -452,15 +468,22 @@ export class GroupAgent extends Agent<Env, GroupState> {
     );
   }
 
-  // Re-link this group into a member's account index. Safe to call repeatedly
-  // (AuthAgent.addGroup dedupes); lets a member's club list self-heal on view
-  // if it ever drifted out of sync with actual membership.
-  async reindexMember(user: Identity): Promise<void> {
-    if (this.state.members[user.id]) await this.indexFor(user);
+  /** Links this Group into a member's account index (AuthAgent.addGroup dedupes). */
+  async indexMember(user: Identity): Promise<void> {
+    await this.reconcile("indexMember", user, async () => {
+      if (!this.state.members[user.id]) return;
+      const auth = await getAgentByName(this.env.AuthAgent, canonicalEmail(user.email));
+      await auth.addGroup(this.name, user);
+    });
   }
 
-  private async indexFor(user: Identity): Promise<void> {
-    const auth = await getAgentByName(this.env.AuthAgent, canonicalEmail(user.email));
-    await auth.addGroup(this.name, user);
+  /** Carries a member's current name, role, and avatar into live note connections. */
+  async projectMember(memberId: string): Promise<void> {
+    await this.reconcile("projectMember", memberId, async () => {
+      const member = this.state.members[memberId];
+      if (!member) return;
+      const notes = await getAgentByName(this.env.NoteAgent, this.name);
+      await notes.updateMember(memberId, member.name, member.role, member.avatarImageId);
+    });
   }
 }

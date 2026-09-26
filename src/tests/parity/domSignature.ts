@@ -54,8 +54,7 @@ const attributeSignature = (element: Element): string => {
   for (const name of SIGNIFICANT_ATTRIBUTES) {
     const value = element.getAttribute(name);
     if (value === null) continue;
-    // A boolean attribute is present or absent; React writes "" and Foldkit
-    // writes "true" for the same fact.
+    // A boolean attribute is present or absent; "" and "true" state the same fact.
     parts.push(value === "" || value === "true" ? name : `${name}=${value}`);
   }
   const src = element.getAttribute("src");

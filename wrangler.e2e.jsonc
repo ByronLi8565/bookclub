@@ -17,12 +17,12 @@
   "main": "src/server/worker.ts",
   "compatibility_date": "2026-03-17",
   "compatibility_flags": ["nodejs_compat"],
-  // A directory must exist for the ASSETS binding; the e2e suite drives the API
-  // and websocket surfaces, not the SPA, so any real dir works. `public/` holds
-  // the PWA icons and is always present.
+  // The production client bundle, so browser journeys meet what users meet.
+  // The harness runs `vite build` before booting (e2e/src/worker.ts).
   "assets": {
     "binding": "ASSETS",
-    "directory": "public",
+    "directory": "dist/client",
+    "html_handling": "auto-trailing-slash",
     "not_found_handling": "single-page-application",
   },
   // NOTE: intentionally NO `send_email` binding and NO EMAIL_FROM var. DEV_AUTH

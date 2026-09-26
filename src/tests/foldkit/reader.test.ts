@@ -20,7 +20,6 @@ import {
   FailedReaderSearch,
   RequestedPositionSync,
   ShowedReaderSnapshot,
-  MeasuredReaderPagination,
   SelectedReaderSource,
   ShowedReaderHighlights,
   SteppedReaderZoom,
@@ -32,7 +31,7 @@ import {
   type ReaderWorkspace,
 } from "../../client/foldkit/reader.ts";
 import { PdfSpreadRendered } from "../../client/foldkit/mounts/pdf.ts";
-import { MovedEpub, OpenedEpub } from "../../client/foldkit/mounts/epub.ts";
+import { MovedEpub, OpenedEpub, RelaidOutEpub } from "../../client/foldkit/mounts/epub.ts";
 import { epubPageCount } from "../../client/logic/reader/epubPagination.ts";
 
 /** The slice owns live library handles, so a test builds its own with a byte
@@ -166,7 +165,10 @@ describe("reader annotations", () => {
 
     const [sized, commands] = update(epubReader, SteppedReaderZoom({ direction: "in" }));
     expect(sized.fontSizePoints).toBe(epubReader.fontSizePoints + 2);
-    expect(commandNames(commands)).toEqual(["SetEpubFontSize", "MeasureEpubPagination"]);
+    expect(
+      commandNames(commands),
+      "the relayout itself recounts the pages, so zoom asks for nothing else",
+    ).toEqual(["SetEpubFontSize"]);
   });
 });
 
@@ -326,10 +328,11 @@ describe("reader search state", () => {
 });
 
 describe("reader pagination", () => {
-  it("shows the measured place once a measurement lands", () => {
-    const [model] = update(
+  it("shows the re-counted pages after a relayout without recording a move", () => {
+    const [model, commands] = update(
       epubReader,
-      MeasuredReaderPagination({
+      RelaidOutEpub({
+        sourceId: epubReader.sourceId,
         place: {
           spineIndex: 2,
           cfi: "epubcfi(/6/8)",
@@ -343,6 +346,7 @@ describe("reader pagination", () => {
     expect(model.page).toBe(42);
     expect(model.totalPages).toBe(200);
     expect(model.position).toEqual({ kind: "epub", cfi: "epubcfi(/6/8)", percentage: 0.21 });
+    expect(commandNames(commands), "a relayout is not a reading-position change").toEqual([]);
   });
 
   it("counts a place as presses through the sections before it", () => {

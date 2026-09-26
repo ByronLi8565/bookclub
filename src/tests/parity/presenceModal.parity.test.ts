@@ -73,11 +73,11 @@ describe("presence modal parity", () => {
     vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}", { status: 200 })));
   });
 
-  it("renders the people page React rendered", async () => {
+  it("renders the people page", async () => {
     expectRecordedParity("presence-people", await foldkitPresence({}));
   });
 
-  it("renders the books page React rendered", async () => {
+  it("renders the books page", async () => {
     const [initial] = init();
     expectRecordedParity(
       "presence-books",

@@ -48,9 +48,13 @@ export const renderFoldkit = async <Model, Message extends { readonly _tag: stri
       slow: false,
     }),
   );
-  await new Promise((resolve) => {
-    setTimeout(resolve, 350);
-  });
+  // The first paint replaces the id-bearing container, so its absence marks the render.
+  await vi.waitFor(
+    () => {
+      if (document.getElementById(container.id)) throw new Error("not painted yet");
+    },
+    { interval: 1 },
+  );
   const html = document.body.innerHTML;
   handle.dispose();
   document.body.replaceChildren();

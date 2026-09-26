@@ -47,15 +47,12 @@ import {
   type InfoMessage,
 } from "./info.ts";
 import {
-  DismissedSettingsNotice,
   SettingsModel,
   initialSettingsModel,
   isSettingsMessage,
   ChosePdfPageLayout,
   LoadUserPrefs,
   OpenedSettings,
-  settingsPrefs,
-  settingsNotice,
   settingsView,
   updateSettings,
   type SettingsMessage,
@@ -121,6 +118,7 @@ import {
   openReader,
   SelectedReaderSource,
   PendingJump,
+  type ReaderUpdate,
   type ReaderMessage,
   type ReaderSelection,
 } from "./reader.ts";
@@ -132,14 +130,6 @@ const reader = makeReaderSlice(browserReaderEnvironment);
 const { update: updateReader, view: readerView } = reader;
 
 export const FOLDKIT_RUNTIME_ID = "bookclub-foldkit";
-
-/** React routes `/` and `/clubs/:groupRef` and nothing else: signing in and the
- *  account live in overlays over whichever page is showing, and a club with a
- *  book open *is* the workspace rather than a page of its own. The table itself
- *  is in `routes.ts`, which owns parsing and link building too. */
-export { Club, Home, hrefFor } from "./routes.ts";
-export const Route = AppRoute;
-export type Route = AppRoute;
 
 const SessionUser = Schema.Struct({
   id: Schema.String,
@@ -179,11 +169,6 @@ export const Overlay = Schema.Union([
 ]);
 export type Overlay = typeof Overlay.Type;
 
-export const UnavailableAccount = ts("UnavailableAccount");
-export const ReadyAccount = ts("ReadyAccount", { user: SessionUser });
-export const Account = Schema.Union([UnavailableAccount, ReadyAccount]);
-export type Account = typeof Account.Type;
-
 /** Which workspace layout the viewport asks for. The reader and notes sit side
  *  by side on a wide screen and page past each other on a phone. */
 export const Viewport = Schema.Literals(["wide", "narrow"]);
@@ -194,15 +179,12 @@ export const MOBILE_VIEWPORT_QUERY = "(max-width: 720px)";
 export const currentViewport = (): Viewport =>
   globalThis.matchMedia?.(MOBILE_VIEWPORT_QUERY).matches ? "narrow" : "wide";
 
-/** React's toast store, as Model state: several toasts at once, each with its
- *  own kind, its own dwell time, and an optional link. */
-export const ToastAction = Schema.Struct({ label: Schema.String, href: Schema.String });
+/** Several toasts at once, each with its own kind and its own dwell time. */
 export const Toast = Schema.Struct({
   id: Schema.String,
   type: Schema.Literals(["info", "error"]),
   title: Schema.String,
   message: Schema.String,
-  action: Schema.NullOr(ToastAction),
   durationMs: Schema.Number,
 });
 export type Toast = typeof Toast.Type;
@@ -214,7 +196,6 @@ export const errorToast = (title: string, message: string): Toast => ({
   type: "error",
   title,
   message,
-  action: null,
   durationMs: 6000,
 });
 
@@ -223,7 +204,6 @@ export const infoToast = (title: string, message: string): Toast => ({
   type: "info",
   title,
   message,
-  action: null,
   durationMs: DEFAULT_TOAST_MS,
 });
 
@@ -233,9 +213,8 @@ export const LoginStep = Schema.Literals(["email", "code", "done"]);
 export type LoginStep = typeof LoginStep.Type;
 
 export const Model = Schema.Struct({
-  route: Route,
+  route: AppRoute,
   session: Session,
-  account: Account,
   loginStep: LoginStep,
   loginEmail: Schema.String,
   loginPassword: Schema.String,
@@ -278,7 +257,7 @@ export const Model = Schema.Struct({
   presence: PresenceModel,
   upload: UploadModel,
   invite: InviteModel,
-  renamingTarget: Schema.NullOr(Schema.String),
+  renamingClub: Schema.Boolean,
   renameDraft: Schema.String,
   splitShare: Schema.Number,
   splitDragging: Schema.Boolean,
@@ -294,10 +273,9 @@ export const LoadedSession = m("LoadedSession", { user: SessionUser });
 /** The sign-in check finished and nobody is signed in. Silent on purpose: an
  *  anonymous visitor is an ordinary state, not a failure to report. */
 export const NoSession = m("NoSession");
-export const SpawnedToast = m("SpawnedToast", { toast: Toast });
 export const OpenedOverlay = m("OpenedOverlay", { overlay: Overlay });
 export const ClosedOverlay = m("ClosedOverlay");
-export const StartedRename = m("StartedRename", { target: Schema.String, value: Schema.String });
+export const StartedRename = m("StartedRename", { value: Schema.String });
 export const ChangedRenameDraft = m("ChangedRenameDraft", { value: Schema.String });
 export const CommittedRename = m("CommittedRename");
 export const CancelledRename = m("CancelledRename");
@@ -310,7 +288,7 @@ export const EndedSplitDrag = m("EndedSplitDrag");
 export const DismissedToast = m("DismissedToast", { id: Schema.String });
 export const ChangedOnline = m("ChangedOnline", { online: Schema.Boolean });
 export const ResizedViewport = m("ResizedViewport", { viewport: Viewport });
-export const Navigated = m("Navigated", { route: Route });
+export const Navigated = m("Navigated", { route: AppRoute });
 // One message per field. A message carrying both would have to read the other
 // from the model its handler closed over, and a handler that outlives an edit to
 // the other field then writes a stale value back over it.
@@ -341,18 +319,20 @@ export const LeftTheApp = m("LeftTheApp");
 export const ChangedNewGroupName = m("ChangedNewGroupName", { name: Schema.String });
 export const SubmittedNewGroup = m("SubmittedNewGroup");
 export const CreatedGroup = m("CreatedGroup", { group: GroupSummary });
+export const RenamedGroup = m("RenamedGroup", { group: GroupSummary });
 export const LoadedGroup = m("LoadedGroup", {
   groupRef: Schema.String,
   group: GroupSummary,
   membership: Membership,
   members: Schema.Array(RosterEntry),
 });
-/** The server answered that there is no such club. Authoritative, so it is a
- *  page and not a toast. */
-export const MissingGroup = m("MissingGroup", { groupRef: Schema.String });
-/** The server never answered. If this device has read the club before it opens
- *  from that copy; otherwise the reader is told they are offline. */
-export const UnreachableGroup = m("UnreachableGroup", { groupRef: Schema.String });
+/** The club could not be opened, and each reason is a page rather than a toast:
+ *  "notfound" is the server's authoritative answer, and "offline" means it never
+ *  answered and this device has no copy of the club to open instead. */
+export const FailedGroup = m("FailedGroup", {
+  groupRef: Schema.String,
+  reason: Schema.Literals(["notfound", "offline"]),
+});
 export const LoadedAccountSecurity = m("LoadedAccountSecurity", {
   userId: Schema.String,
   passkeys: Schema.Array(PasskeyInfo),
@@ -378,7 +358,6 @@ export const RestoredSelectedSource = m("RestoredSelectedSource", {
 });
 export const RememberedSelectedSource = m("RememberedSelectedSource");
 export const SignedOut = m("SignedOut");
-export const DeletedGroup = m("DeletedGroup", { groupId: Schema.String });
 export const RequestedSignOut = m("RequestedSignOut");
 export const RequestedSetPassword = m("RequestedSetPassword", {
   password: Schema.String,
@@ -388,10 +367,6 @@ export const RequestedRemovePassword = m("RequestedRemovePassword", {
   currentPassword: Schema.String,
 });
 export const RequestedRemovePasskey = m("RequestedRemovePasskey", { id: Schema.String });
-export const RequestedDeleteGroup = m("RequestedDeleteGroup", {
-  groupRef: Schema.String,
-  groupId: Schema.String,
-});
 export const FailedClientCommand = m("FailedClientCommand", { message: Schema.String });
 export const CompletedPasskeyRegistration = m("CompletedPasskeyRegistration", {
   error: Schema.NullOr(Schema.String),
@@ -402,7 +377,6 @@ export const RequestedPasskeyRegistration = m("RequestedPasskeyRegistration", {
 export type Message =
   | typeof LoadedSession.Type
   | typeof NoSession.Type
-  | typeof SpawnedToast.Type
   | typeof OpenedOverlay.Type
   | typeof ClosedOverlay.Type
   | InfoMessage
@@ -444,9 +418,9 @@ export type Message =
   | typeof ChangedNewGroupName.Type
   | typeof SubmittedNewGroup.Type
   | typeof CreatedGroup.Type
+  | typeof RenamedGroup.Type
   | typeof LoadedGroup.Type
-  | typeof MissingGroup.Type
-  | typeof UnreachableGroup.Type
+  | typeof FailedGroup.Type
   | typeof LoadedAccountSecurity.Type
   | typeof FailedAccountSecurity.Type
   | typeof CompletedAccountAction.Type
@@ -460,12 +434,10 @@ export type Message =
   | typeof RestoredSelectedSource.Type
   | typeof RememberedSelectedSource.Type
   | typeof SignedOut.Type
-  | typeof DeletedGroup.Type
   | typeof RequestedSignOut.Type
   | typeof RequestedSetPassword.Type
   | typeof RequestedRemovePassword.Type
   | typeof RequestedRemovePasskey.Type
-  | typeof RequestedDeleteGroup.Type
   | typeof FailedClientCommand.Type
   | typeof RequestedPasskeyRegistration.Type
   | typeof CompletedPasskeyRegistration.Type
@@ -533,9 +505,11 @@ export const LoadGroups = Command.define("LoadGroups", {
     ),
 });
 
-/** Every API failure carries a code the sign-in form turns into a sentence; a
- *  transport or decode failure has none and reads as the generic apology. */
-const loginErrorCode = (error: unknown): string =>
+/** Every API failure carries a code the forms turn into a sentence; a transport
+ *  or decode failure has none and reads as the generic apology. Read by field
+ *  rather than by tag, so an error body that lost its tag on the way still
+ *  names its code wherever the client managed to decode it. */
+const apiErrorCode = (error: unknown): string =>
   typeof error === "object" && error !== null && "error" in error && typeof error.error === "string"
     ? error.error
     : "unknown";
@@ -555,7 +529,7 @@ export const PasswordLogin = Command.define("PasswordLogin", {
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.passwordLogin({ payload: { email, password } })),
       Effect.flatMap(({ body }) => rememberSession(body)),
-      Effect.catch((error) => Effect.succeed(FailedLogin({ error: loginErrorCode(error) }))),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: apiErrorCode(error) }))),
     ),
 });
 
@@ -571,7 +545,7 @@ export const StartLogin = Command.define("StartLogin", {
         (result): Effect.Effect<typeof LoadedSession.Type | typeof SentLoginCode.Type> =>
           result === undefined ? Effect.succeed(SentLoginCode()) : rememberSession(result.body),
       ),
-      Effect.catch((error) => Effect.succeed(FailedLogin({ error: loginErrorCode(error) }))),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: apiErrorCode(error) }))),
     ),
 });
 
@@ -582,27 +556,23 @@ export const VerifyLoginCode = Command.define("VerifyLoginCode", {
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.verify({ payload: { email, code } })),
       Effect.flatMap(({ body }) => rememberSession(body)),
-      Effect.catch((error) => Effect.succeed(FailedLogin({ error: loginErrorCode(error) }))),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: apiErrorCode(error) }))),
     ),
 });
 
-/** The passkey ceremony runs against the browser's authenticator rather than the
- *  API contract, so it goes through the same client the React modal uses. */
+/** The passkey ceremony brackets the browser's authenticator prompt between two
+ *  contract calls; a dismissed prompt fails the same way a refused call does. */
 export const PasskeyLogin = Command.define("PasskeyLogin", {
   args: { email: Schema.String },
   messages: [LoadedSession, FailedLogin],
   execute: ({ email }) =>
-    Effect.promise(() => passkeyLogin(email)).pipe(
-      Effect.flatMap(
-        (result): Effect.Effect<typeof LoadedSession.Type | typeof FailedLogin.Type> =>
-          result.ok
-            ? rememberSession(result.value)
-            : Effect.succeed(FailedLogin({ error: result.error })),
-      ),
+    passkeyLogin(email).pipe(
+      Effect.flatMap(rememberSession),
+      Effect.catch((error) => Effect.succeed(FailedLogin({ error: apiErrorCode(error) }))),
     ),
 });
 
-/** React's account settings map their own small set of codes. */
+/** Account settings speak their own small set of codes. */
 const ACCOUNT_MESSAGES = new Map([
   ["weak_password", "Password must be at least 8 characters."],
   ["bad_current", "Current password is incorrect."],
@@ -612,16 +582,11 @@ const ACCOUNT_MESSAGES = new Map([
   ["unauthenticated", "Please sign in again."],
 ]);
 
-const accountErrorCode = (error: unknown): string =>
-  typeof error === "object" && error !== null && "error" in error && typeof error.error === "string"
-    ? error.error
-    : "unknown";
-
 const accountErrorMessage = (error: string): string =>
   ACCOUNT_MESSAGES.get(error) ?? "Something went wrong. Try again.";
 
-/** Which book a club opens on is a per-device choice React keeps in local
- *  storage; reading and writing it is a side effect either way. */
+/** Which book a club opens on is a per-device choice kept in local storage;
+ *  reading and writing it is a side effect either way. */
 const selectedSourceKey = (groupId: string): string => `bookclub.selectedSource.${groupId}`;
 
 export const RenameBook = Command.define("RenameBook", {
@@ -661,8 +626,6 @@ export const RememberSelectedSource = Command.define("RememberSelectedSource", {
     }),
 });
 
-/** A link that leaves the app is a full page load, which only the runtime can
- *  perform — an `update` cannot touch the browser itself. */
 /** Navigation the reader did not click: landing on a club just created, or on
  *  the clubs card after signing out. The Model and the address bar move
  *  together or the back button lies. */
@@ -680,6 +643,8 @@ export const ReplaceUrl = Command.define("ReplaceUrl", {
   execute: ({ href }) => Navigation.replaceUrl(href).pipe(Effect.as(LeftTheApp())),
 });
 
+/** A link that leaves the app is a full page load, which only the runtime can
+ *  perform — an `update` cannot touch the browser itself. */
 export const LoadExternalUrl = Command.define("LoadExternalUrl", {
   args: { href: Schema.String },
   // The page is being replaced, so this arrives only if the browser refused the
@@ -695,7 +660,7 @@ export const CreateGroup = Command.define("CreateGroup", {
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.create({ payload: { displayName } })),
       Effect.map(({ group }) => CreatedGroup({ group })),
-      Effect.catch((error) => Effect.succeed(FailedCreateGroup({ error: loginErrorCode(error) }))),
+      Effect.catch((error) => Effect.succeed(FailedCreateGroup({ error: apiErrorCode(error) }))),
     ),
 });
 
@@ -707,7 +672,7 @@ export const CreateGroup = Command.define("CreateGroup", {
  */
 export const LoadGroup = Command.define("LoadGroup", {
   args: { groupRef: Schema.String },
-  messages: [LoadedGroup, MissingGroup, UnreachableGroup],
+  messages: [LoadedGroup, FailedGroup],
   execute: ({ groupRef }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.get({ params: { groupRef } })),
@@ -718,11 +683,12 @@ export const LoadGroup = Command.define("LoadGroup", {
       }),
       Effect.catch((error) =>
         Effect.sync(() => {
-          if (apiFailure(error) === "notfound") return MissingGroup({ groupRef });
+          if (apiFailure(error) === "notfound")
+            return FailedGroup({ groupRef, reason: "notfound" });
           const user = cachedSessionUser();
           const view = user === null ? null : cachedGroupView(user.id, groupRef);
           return view === null
-            ? UnreachableGroup({ groupRef })
+            ? FailedGroup({ groupRef, reason: "offline" })
             : LoadedGroup({ groupRef, ...view });
         }),
       ),
@@ -742,6 +708,16 @@ export const LoadAccountSecurity = Command.define("LoadAccountSecurity", {
     ),
 });
 
+/** Every account change reports the same two ways: a toast that says what now
+ *  holds, or the code the account page turns into a sentence. */
+const settledAccountAction =
+  (done: { readonly title: string; readonly message: string }) =>
+  <A, E, R>(request: Effect.Effect<A, E, R>) =>
+    request.pipe(
+      Effect.as(CompletedAccountAction(done)),
+      Effect.catch((error) => Effect.succeed(FailedAccountAction({ error: apiErrorCode(error) }))),
+    );
+
 export const SetAccountPassword = Command.define("SetAccountPassword", {
   args: { password: Schema.String, currentPassword: Schema.optionalKey(Schema.String) },
   messages: [CompletedAccountAction, FailedAccountAction],
@@ -752,15 +728,10 @@ export const SetAccountPassword = Command.define("SetAccountPassword", {
           payload: currentPassword === undefined ? { password } : { password, currentPassword },
         }),
       ),
-      Effect.as(
-        CompletedAccountAction({
-          title: "Password saved",
-          message: "You can now sign in with your password.",
-        }),
-      ),
-      Effect.catch((error) =>
-        Effect.succeed(FailedAccountAction({ error: accountErrorCode(error) })),
-      ),
+      settledAccountAction({
+        title: "Password saved",
+        message: "You can now sign in with your password.",
+      }),
     ),
 });
 
@@ -770,15 +741,10 @@ export const RemoveAccountPassword = Command.define("RemoveAccountPassword", {
   execute: ({ currentPassword }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.removePassword({ payload: { currentPassword } })),
-      Effect.as(
-        CompletedAccountAction({
-          title: "Password removed",
-          message: "You'll sign in with a code or passkey.",
-        }),
-      ),
-      Effect.catch((error) =>
-        Effect.succeed(FailedAccountAction({ error: accountErrorCode(error) })),
-      ),
+      settledAccountAction({
+        title: "Password removed",
+        message: "You'll sign in with a code or passkey.",
+      }),
     ),
 });
 
@@ -788,10 +754,7 @@ export const RemoveAccountPasskey = Command.define("RemoveAccountPasskey", {
   execute: ({ id }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.auth.removePasskey({ params: { id } })),
-      Effect.as(CompletedAccountAction({ title: "Passkey", message: "That passkey is gone." })),
-      Effect.catch((error) =>
-        Effect.succeed(FailedAccountAction({ error: accountErrorCode(error) })),
-      ),
+      settledAccountAction({ title: "Passkey", message: "That passkey is gone." }),
     ),
 });
 
@@ -801,20 +764,24 @@ export const SignOut = Command.define("SignOut", {
     Effect.tap(() => Effect.sync(forgetSessionUser)),
     Effect.flatMap((client) => client.auth.signout({})),
     Effect.as(SignedOut()),
-    Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+    Effect.catch(() =>
+      Effect.succeed(FailedClientCommand({ message: "Couldn't sign out. Try again." })),
+    ),
   ),
 });
 
 export const RenameGroup = Command.define("RenameGroup", {
   args: { groupRef: Schema.String, title: Schema.String },
-  messages: [CreatedGroup, FailedClientCommand],
+  messages: [RenamedGroup, FailedClientCommand],
   execute: ({ groupRef, title }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) =>
         client.groups.rename({ params: { groupRef }, payload: { title } }),
       ),
-      Effect.map(({ group }) => CreatedGroup({ group })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
+      Effect.map(({ group }) => RenamedGroup({ group })),
+      Effect.catch(() =>
+        Effect.succeed(FailedClientCommand({ message: "Couldn't rename the club." })),
+      ),
     ),
 });
 
@@ -826,17 +793,6 @@ export const JoinGroup = Command.define("JoinGroup", {
       Effect.flatMap((client) => client.groups.join({ params: { groupRef }, payload: { token } })),
       Effect.map(({ group }) => JoinedGroup({ group })),
       Effect.catch(() => Effect.succeed(FailedJoin())),
-    ),
-});
-
-export const DeleteGroup = Command.define("DeleteGroup", {
-  args: { groupRef: Schema.String, groupId: Schema.String },
-  messages: [DeletedGroup, FailedClientCommand],
-  execute: ({ groupRef, groupId }) =>
-    bookclubClient.pipe(
-      Effect.flatMap((client) => client.groups.delete({ params: { groupRef } })),
-      Effect.as(DeletedGroup({ groupId })),
-      Effect.catch((error) => Effect.succeed(FailedClientCommand({ message: String(error) }))),
     ),
 });
 
@@ -859,9 +815,10 @@ export const RegisterPasskey = Command.define("RegisterPasskey", {
   args: { label: Schema.String },
   messages: [CompletedPasskeyRegistration],
   execute: ({ label }) =>
-    Effect.promise(() => registerPasskey(label)).pipe(
-      Effect.map((result) =>
-        CompletedPasskeyRegistration({ error: result.ok ? null : result.error }),
+    registerPasskey(label).pipe(
+      Effect.as(CompletedPasskeyRegistration({ error: null })),
+      Effect.catch((error) =>
+        Effect.succeed(CompletedPasskeyRegistration({ error: apiErrorCode(error) })),
       ),
     ),
 });
@@ -891,7 +848,6 @@ export const init = (): readonly [Model, []] => [
   {
     route: Home(),
     session: LoadingSession(),
-    account: UnavailableAccount(),
     loginStep: "email",
     loginEmail: "",
     loginPassword: "",
@@ -926,7 +882,7 @@ export const init = (): readonly [Model, []] => [
     presence: initialPresenceModel(),
     upload: initialUploadModel(),
     invite: initialInviteModel(),
-    renamingTarget: null,
+    renamingClub: false,
     renameDraft: "",
     splitShare: DESKTOP_READER_SHARE,
     splitDragging: false,
@@ -958,6 +914,31 @@ const blankLogin = {
 
 type Update = readonly [Model, readonly Command.Command<Message, never, NoteAgentService>[]];
 
+/** Answers that name a reader are only believed while that reader is signed in;
+ *  anything else arrived after a sign-out or an account switch. */
+const isCurrentUser = (model: Model, userId: string): boolean =>
+  model.session._tag === "AuthenticatedSession" && model.session.user.id === userId;
+
+/** The account page never shows sign-in methods it has not just read, so every
+ *  change to them, and every visit, reads them again. */
+const reloadAccountSecurity = (model: Model): Update =>
+  model.session._tag === "AuthenticatedSession"
+    ? [
+        { ...model, accountSecurityStatus: "loading" },
+        [LoadAccountSecurity({ userId: model.session.user.id })],
+      ]
+    : [model, []];
+
+/** One account change at a time, and none against sign-in methods that are
+ *  still loading: acting on a stale list could remove the wrong one. */
+const startAccountAction = (
+  model: Model,
+  command: Command.Command<Message, never, NoteAgentService>,
+): Update =>
+  model.accountBusy || model.accountSecurityStatus !== "ready"
+    ? [model, []]
+    : [{ ...model, accountBusy: true }, [command]];
+
 const sameHighlights = (a: readonly { id: string }[], b: readonly { id: string }[]): boolean =>
   a.length === b.length && a.every((left, index) => left.id === b[index]?.id);
 
@@ -983,19 +964,20 @@ const updateNotesSlice = (model: Model, message: NotesMessage): Update => {
   if (withNotes.reader === null) return [withNotes, commands];
   const highlights = notesHighlights(notes, withNotes.reader.sourceId);
   if (sameHighlights(withNotes.reader.highlights, highlights)) return [withNotes, commands];
-  const painted = updateReader(withNotes.reader, ShowedReaderHighlights({ highlights }));
-  return painted === null
-    ? [withNotes, commands]
-    : [{ ...withNotes, reader: painted[0] }, [...commands, ...painted[1]]];
+  const [painted, paintCommands] = updateReader(
+    withNotes.reader,
+    ShowedReaderHighlights({ highlights }),
+  );
+  return [{ ...withNotes, reader: painted }, [...commands, ...paintCommands]];
 };
 
 /**
  * Arriving at a route, however the reader got there: a link click, a redirect
  * after creating a club, or the first paint of a URL typed into the bar.
- * Leaving a club puts its book away, the way React unmounts the workspace when
- * the route changes.
+ * Leaving a club puts its book away. A jump held for a book belongs to the page
+ * it was made on, so no route carries one forward.
  */
-const navigateTo = (model: Model, route: Route): Update => {
+const navigateTo = (model: Model, route: AppRoute): Update => {
   if (route._tag === "Home") {
     return [
       {
@@ -1005,6 +987,7 @@ const navigateTo = (model: Model, route: Route): Update => {
         currentGroup: null,
         pendingInvite: null,
         pendingLinkedBook: null,
+        pendingJump: null,
         clubError: null,
       },
       [],
@@ -1021,6 +1004,7 @@ const navigateTo = (model: Model, route: Route): Update => {
       route,
       pendingInvite: invite ?? null,
       pendingLinkedBook: book ?? null,
+      pendingJump: null,
       clubError: null,
       currentGroup: alreadyShowing ? model.currentGroup : null,
       membership: alreadyShowing ? model.membership : null,
@@ -1050,31 +1034,23 @@ const commitSelection = (
 
 const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
   if (message._tag === "SelectedReaderSource") {
-    const { groupRef } = message;
-    const [nextReader, commands] = updateReader(openReader(message), message) ?? [
-      openReader(message),
-      [],
-    ];
-    // A club *is* its open book; opening one changes what the club page shows
-    // rather than where the reader is.
-    return [{ ...model, route: Club({ groupRef }), reader: nextReader }, commands];
+    const [opened, commands] = updateReader(openReader(message), message);
+    return [{ ...model, reader: opened }, commands];
   }
   if (model.reader === null) return [model, []];
-  const selection = model.reader.selection;
-  const sourceId = model.reader.sourceId;
-  const next = updateReader(model.reader, message);
-  if (next === null) return [model, []];
-  const withReader: Model = { ...model, reader: next[0] };
+  const { selection, sourceId } = model.reader;
+  const [nextReader, readerCommands] = updateReader(model.reader, message);
+  const withReader: Model = { ...model, reader: nextReader };
   // A click on a painted highlight is the reader pointing at a note.
   if (message._tag === "ClickedEpubHighlight") {
     const [focused, focusCommands] = updateNotesSlice(
       withReader,
       FocusedNoteHighlight({ highlightId: message.highlightId }),
     );
-    return [focused, [...next[1], ...focusCommands]];
+    return [focused, [...readerCommands, ...focusCommands]];
   }
   if (message._tag !== "CommittedReaderSelection" || selection === null) {
-    return [withReader, next[1]];
+    return [withReader, readerCommands];
   }
   const [committed, noteCommands] = commitSelection(
     withReader,
@@ -1082,7 +1058,22 @@ const updateReaderSlice = (model: Model, message: ReaderMessage): Update => {
     sourceId,
     message.intent,
   );
-  return [committed, [...next[1], ...noteCommands]];
+  return [committed, [...readerCommands, ...noteCommands]];
+};
+
+/**
+ * Opening a book is the club's to do: it knows each book's kind, and which one
+ * was open is remembered per device. A jump held for some other book is
+ * dropped, or it would fire whenever that book next happened to open.
+ */
+const openBook = (model: Model, group: GroupSummary, sourceId: string): Update => {
+  const meta = group.sourceMeta[sourceId];
+  if (meta === undefined) return [model, []];
+  const [opened, commands] = updateReaderSlice(
+    { ...model, pendingJump: model.pendingJump?.sourceId === sourceId ? model.pendingJump : null },
+    SelectedReaderSource({ groupRef: groupUrlName(group), sourceId, kind: meta.kind }),
+  );
+  return [opened, [...commands, RememberSelectedSource({ groupId: group.groupId, sourceId })]];
 };
 
 /**
@@ -1099,57 +1090,83 @@ const reconcileReaderIdentity = ([model, commands]: Update): Update => {
   if (currentReader.userId === session.user.id && currentReader.groupId === currentGroup.groupId) {
     return [model, commands];
   }
-  const identified = updateReader(
+  const [identified, identifyCommands] = updateReader(
     currentReader,
     IdentifiedReaderSession({
       userId: session.user.id,
       groupId: currentGroup.groupId,
-      positionPolicy: settingsPrefs(model.settings).reader.readingPositionOpenPolicy,
+      positionPolicy: model.settings.prefs.reader.readingPositionOpenPolicy,
     }),
   );
-  return identified === null
-    ? [model, commands]
-    : [{ ...model, reader: identified[0] }, [...commands, ...identified[1]]];
+  return [{ ...model, reader: identified }, [...commands, ...identifyCommands]];
 };
 
 /**
- * Settings publishes what React answered with a toast rather than spawning one
- * itself, so every toast in the application is raised in one place. Reading the
- * notice consumes it.
+ * Page layout and smart arrows are stored preferences, and a book can open
+ * before they load or stay open while they change. Reconciling after every
+ * Message is what keeps the reader showing what the preferences say, however
+ * either side changed.
+ */
+const reconcileReaderPrefs = ([model, commands]: Update): Update => {
+  const currentReader = model.reader;
+  if (currentReader === null) return [model, commands];
+  const { pdfPageLayout, smartArrows } = model.settings.prefs.reader;
+  const [relaid, layoutCommands]: ReaderUpdate =
+    currentReader.layout === pdfPageLayout
+      ? [currentReader, []]
+      : updateReader(currentReader, ChangedReaderLayout({ layout: pdfPageLayout }));
+  const reconciled = relaid.smartArrows === smartArrows ? relaid : { ...relaid, smartArrows };
+  return reconciled === currentReader
+    ? [model, commands]
+    : [{ ...model, reader: reconciled }, [...commands, ...layoutCommands]];
+};
+
+/** The viewer's club name and avatar are saved from settings, but the roster
+ *  the club reads them from is the host's. Patching the viewer's own entry keeps
+ *  both from snapping back until the club is next loaded. */
+const withViewerProfile = (model: Model, message: SettingsMessage): Model => {
+  if (model.session._tag !== "AuthenticatedSession") return model;
+  const viewerId = model.session.user.id;
+  const patch =
+    message._tag === "SavedClubProfile"
+      ? { name: message.profile.displayName }
+      : message._tag === "UploadedAvatar"
+        ? { avatarImageId: message.imageId }
+        : null;
+  return patch === null
+    ? model
+    : {
+        ...model,
+        members: model.members.map((member) =>
+          member.id === viewerId ? { ...member, ...patch } : member,
+        ),
+      };
+};
+
+/**
+ * Settings publishes a notice rather than raising a toast itself, so every toast
+ * in the application is raised in one place. Raising it takes it off.
  */
 const updateSettingsSlice = (model: Model, message: SettingsMessage): Update => {
   const [settings, commands] = updateSettings(model.settings, message);
-  const layout = settingsPrefs(settings).reader.pdfPageLayout;
-  const smartArrows = settingsPrefs(settings).reader.smartArrows;
-  const relaid =
-    model.reader === null || model.reader.layout === layout
-      ? null
-      : updateReader(model.reader, ChangedReaderLayout({ layout }));
-  const appliedLayout =
-    relaid === null ? { ...model, settings } : { ...model, settings, reader: relaid[0] };
-  const withLayout = relaid === null ? commands : [...commands, ...relaid[1]];
-  const applied =
-    appliedLayout.reader === null || appliedLayout.reader.smartArrows === smartArrows
-      ? appliedLayout
-      : { ...appliedLayout, reader: { ...appliedLayout.reader, smartArrows } };
+  const applied = withViewerProfile({ ...model, settings: { ...settings, notice: null } }, message);
   // `updateSettings` only ever replaces `appearance` when it actually changes,
   // so identity is enough to tell — neither renderer's content sits behind
   // the app's `:root` custom properties, so a change has to be told directly
   // to whichever one is open (a PDF re-renders its page; an EPUB restyles its
   // iframe in place).
-  const appearance = settingsPrefs(settings).appearance;
+  const appearance = settings.prefs.appearance;
   const withColors =
     appearance === model.settings.prefs.appearance || applied.reader === null
-      ? withLayout
+      ? commands
       : [
-          ...withLayout,
+          ...commands,
           ApplyReaderColors({ tokens: resolveThemeTokens(appearance), kind: applied.reader.kind }),
         ];
-  const notice = settingsNotice(settings);
+  const notice = settings.notice;
   if (notice === null) return [applied, withColors];
-  const [read] = updateSettings(settings, DismissedSettingsNotice());
   const [toasted, toastCommands] = withToast(
-    { ...applied, settings: read },
+    applied,
     notice.tone === "error"
       ? errorToast(notice.title, notice.body)
       : infoToast(notice.title, notice.body),
@@ -1193,30 +1210,16 @@ const updatePresenceSlice = (model: Model, message: PresenceMessage): Update => 
       if (model.reader === null || message.group.sources.includes(model.reader.sourceId)) {
         return [updated, commands];
       }
-      const sourceId = message.group.sources[0];
-      const source = sourceId === undefined ? undefined : message.group.sourceMeta[sourceId];
-      if (sourceId === undefined || source === undefined) {
-        return [
-          { ...updated, reader: null },
-          [...commands, RememberSelectedSource({ groupId: message.group.groupId, sourceId: null })],
-        ];
-      }
-      const [opened, readerCommands] = updateReaderSlice(
-        updated,
-        SelectedReaderSource({
-          groupRef: groupUrlName(message.group),
-          sourceId,
-          kind: source.kind,
-        }),
-      );
-      return [
-        opened,
-        [
-          ...commands,
-          ...readerCommands,
-          RememberSelectedSource({ groupId: message.group.groupId, sourceId }),
-        ],
-      ];
+      // The open book is gone, so the club falls back to its first remaining one.
+      const next = message.group.sources[0];
+      const [opened, openCommands] =
+        next === undefined || message.group.sourceMeta[next] === undefined
+          ? [
+              { ...updated, reader: null },
+              [RememberSelectedSource({ groupId: message.group.groupId, sourceId: null })],
+            ]
+          : openBook(updated, message.group, next);
+      return [opened, [...commands, ...openCommands]];
     }
     case "SavedBookMetadata":
       return [{ ...withPresence, currentGroup: message.group }, commands];
@@ -1245,7 +1248,7 @@ const updateInviteSlice = (model: Model, message: InviteMessage): Update => {
 };
 
 export const update = (model: Model, message: Message): Update =>
-  reconcilePendingJump(reconcileReaderIdentity(updateSlices(model, message)));
+  reconcilePendingJump(reconcileReaderIdentity(reconcileReaderPrefs(updateSlices(model, message))));
 
 /**
  * Replays a jump that was waiting on its book. A reader still loading cannot
@@ -1258,20 +1261,18 @@ const reconcilePendingJump = ([model, commands]: Update): Update => {
   if (currentReader.sourceId !== pendingJump.sourceId || currentReader.loading) {
     return [model, commands];
   }
-  const jumped = updateReader(currentReader, JumpedToHighlight(pendingJump));
-  return jumped === null
-    ? [{ ...model, pendingJump: null }, commands]
-    : [{ ...model, pendingJump: null, reader: jumped[0] }, [...commands, ...jumped[1]]];
+  const [jumped, jumpCommands] = updateReader(currentReader, JumpedToHighlight(pendingJump));
+  return [{ ...model, pendingJump: null, reader: jumped }, [...commands, ...jumpCommands]];
 };
 
 const updateSlices = (model: Model, message: Message): Update => {
   if (message._tag === "ToggledReaderLayout") {
-    // Page layout is a stored preference in React, not reader-local state, so
-    // the key that flips it writes the preference and the reader follows.
+    // Page layout is a stored preference, not reader-local state, so the key
+    // that flips it writes the preference and the reader follows.
     return updateSettingsSlice(
       model,
       ChosePdfPageLayout({
-        value: settingsPrefs(model.settings).reader.pdfPageLayout === "auto" ? "single" : "auto",
+        value: model.settings.prefs.reader.pdfPageLayout === "auto" ? "single" : "auto",
       }),
     );
   }
@@ -1326,7 +1327,6 @@ const updateSlices = (model: Model, message: Message): Update => {
         {
           ...model,
           session: AuthenticatedSession({ user: message.user }),
-          account: ReadyAccount({ user: message.user }),
           // The clubs this device already knows about paint now rather than
           // when the network answers, and remain the answer if it never does.
           groups:
@@ -1343,9 +1343,11 @@ const updateSlices = (model: Model, message: Message): Update => {
           loginPassword: "",
           loginCode: "",
         },
-        signingIn
-          ? [LoadGroups({ userId: message.user.id }), LoadUserPrefs(), CloseLoginAfterSuccess()]
-          : [LoadGroups({ userId: message.user.id }), LoadUserPrefs()],
+        [
+          LoadGroups({ userId: message.user.id }),
+          LoadUserPrefs({ revision: model.settings.prefsRevision }),
+          ...(signingIn ? [CloseLoginAfterSuccess()] : []),
+        ],
       ];
     }
     case "NoSession":
@@ -1355,7 +1357,6 @@ const updateSlices = (model: Model, message: Message): Update => {
         {
           ...model,
           session: AnonymousSession(),
-          account: UnavailableAccount(),
           groups: [],
           groupsStatus: "idle",
           accountPasskeys: [],
@@ -1364,8 +1365,6 @@ const updateSlices = (model: Model, message: Message): Update => {
         },
         [],
       ];
-    case "SpawnedToast":
-      return withToast(model, message.toast);
     case "DismissedToast":
       return [{ ...model, toasts: model.toasts.filter((toast) => toast.id !== message.id) }, []];
     case "OpenedOverlay": {
@@ -1378,15 +1377,8 @@ const updateSlices = (model: Model, message: Message): Update => {
       switch (message.overlay._tag) {
         case "SettingsOverlay": {
           const [next, commands] = updateSettingsSlice(opened, OpenedSettings());
-          const session = model.session;
-          return [
-            session._tag === "AuthenticatedSession"
-              ? { ...next, accountSecurityStatus: "loading" }
-              : next,
-            session._tag === "AuthenticatedSession"
-              ? [LoadAccountSecurity({ userId: session.user.id }), ...commands]
-              : commands,
-          ];
+          const [reloading, reloadCommands] = reloadAccountSecurity(next);
+          return [reloading, [...reloadCommands, ...commands]];
         }
         case "InviteOverlay":
           return updateInviteSlice(
@@ -1424,17 +1416,17 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "ClosedOverlay":
       return [{ ...model, overlay: NoOverlay() }, []];
     case "StartedRename":
-      return [{ ...model, renamingTarget: message.target, renameDraft: message.value }, []];
+      return [{ ...model, renamingClub: true, renameDraft: message.value }, []];
     case "ChangedRenameDraft":
       return [{ ...model, renameDraft: message.value }, []];
     case "CancelledRename":
-      return [{ ...model, renamingTarget: null, renameDraft: "" }, []];
+      return [{ ...model, renamingClub: false, renameDraft: "" }, []];
     case "CommittedRename": {
       // An empty or unchanged name is not a rename; the field just closes.
       const title = model.renameDraft.trim();
       const unchanged = model.currentGroup === null || title === model.currentGroup.displayName;
       return [
-        { ...model, renamingTarget: null, renameDraft: "" },
+        { ...model, renamingClub: false, renameDraft: "" },
         title === "" || unchanged || model.currentGroup === null
           ? []
           : [RenameGroup({ groupRef: groupUrlName(model.currentGroup), title })],
@@ -1517,17 +1509,11 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "DismissedLogin":
       return [{ ...model, overlay: NoOverlay(), ...blankLogin }, []];
     case "LoadedGroups":
-      return model.session._tag !== "AuthenticatedSession" ||
-        model.session.user.id !== message.userId
-        ? [model, []]
-        : [{ ...model, groups: message.groups, groupsStatus: "ready" }, []];
+      return isCurrentUser(model, message.userId)
+        ? [{ ...model, groups: message.groups, groupsStatus: "ready" }, []]
+        : [model, []];
     case "FailedGroups": {
-      if (
-        model.session._tag !== "AuthenticatedSession" ||
-        model.session.user.id !== message.userId
-      ) {
-        return [model, []];
-      }
+      if (!isCurrentUser(model, message.userId)) return [model, []];
       const failed = { ...model, groupsStatus: "failed" as const };
       // The cached list is already on screen and is the best answer available,
       // so a refusal is only worth saying when there is nothing behind it.
@@ -1572,6 +1558,19 @@ const updateSlices = (model: Model, message: Message): Update => {
         },
         [PushUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })],
       ];
+    case "RenamedGroup":
+      // A rename keeps the reader where they are, under the club's new URL: the
+      // list keeps its order and the back button does not return to the old name.
+      return [
+        {
+          ...model,
+          groups: model.groups.map((group) =>
+            group.groupId === message.group.groupId ? message.group : group,
+          ),
+          currentGroup: message.group,
+        },
+        [ReplaceUrl({ href: hrefFor(Club({ groupRef: groupUrlName(message.group) })) })],
+      ];
     case "JoinedGroup":
       // The token is spent; leaving it in the address bar would let the back
       // button and a copied link try to redeem it again. Dropping it is a URL
@@ -1612,9 +1611,10 @@ const updateSlices = (model: Model, message: Message): Update => {
       };
       const linkedBook = model.pendingLinkedBook;
       if (linkedBook !== null && message.group.sources.includes(linkedBook)) {
-        const [opened, commands] = updateSlices(
+        const [opened, commands] = openBook(
           { ...loaded, pendingLinkedBook: null },
-          SelectedBook({ sourceId: linkedBook }),
+          message.group,
+          linkedBook,
         );
         return [
           opened,
@@ -1636,14 +1636,10 @@ const updateSlices = (model: Model, message: Message): Update => {
         ],
       ];
     }
-    case "MissingGroup":
+    case "FailedGroup":
       return model.route._tag !== "Club" || model.route.groupRef !== message.groupRef
         ? [model, []]
-        : [{ ...model, clubError: "notfound", currentGroup: null, reader: null }, []];
-    case "UnreachableGroup":
-      return model.route._tag !== "Club" || model.route.groupRef !== message.groupRef
-        ? [model, []]
-        : [{ ...model, clubError: "offline", currentGroup: null, reader: null }, []];
+        : [{ ...model, clubError: message.reason, currentGroup: null, reader: null }, []];
     case "RestoredSelectedSource": {
       const group = model.currentGroup;
       if (group === null) return [model, []];
@@ -1651,40 +1647,16 @@ const updateSlices = (model: Model, message: Message): Update => {
         message.sourceId !== null && group.sources.includes(message.sourceId)
           ? message.sourceId
           : (group.sources[0] ?? null);
-      const meta = stored === null ? undefined : group.sourceMeta[stored];
-      return stored === null || meta === undefined || model.reader?.sourceId === stored
+      return stored === null || model.reader?.sourceId === stored
         ? [model, []]
-        : updateReaderSlice(
-            model,
-            SelectedReaderSource({
-              groupRef: groupUrlName(group),
-              sourceId: stored,
-              kind: meta.kind,
-            }),
-          );
+        : openBook(model, group, stored);
     }
     case "RememberedSelectedSource":
       return [model, []];
-    case "SelectedBook": {
-      const group = model.currentGroup;
-      const meta = group?.sourceMeta[message.sourceId];
-      if (group === undefined || group === null || meta === undefined) return [model, []];
-      const [opened, commands] = updateReaderSlice(
-        model,
-        SelectedReaderSource({
-          groupRef: groupUrlName(group),
-          sourceId: message.sourceId,
-          kind: meta.kind,
-        }),
-      );
-      return [
-        opened,
-        [
-          ...commands,
-          RememberSelectedSource({ groupId: group.groupId, sourceId: message.sourceId }),
-        ],
-      ];
-    }
+    case "SelectedBook":
+      return model.currentGroup === null
+        ? [model, []]
+        : openBook(model, model.currentGroup, message.sourceId);
     case "RequestedBookRename": {
       if (model.currentGroup === null) return [model, []];
       const title =
@@ -1697,10 +1669,8 @@ const updateSlices = (model: Model, message: Message): Update => {
         null;
       if (title === "" || title === currentTitle) {
         if (model.reader === null) return [model, []];
-        const cancelled = updateReader(model.reader, CancelledBookRename());
-        return cancelled === null
-          ? [model, []]
-          : [{ ...model, reader: cancelled[0] }, cancelled[1]];
+        const [cancelled, cancelCommands] = updateReader(model.reader, CancelledBookRename());
+        return [{ ...model, reader: cancelled }, cancelCommands];
       }
       return [
         model,
@@ -1715,29 +1685,25 @@ const updateSlices = (model: Model, message: Message): Update => {
     }
     case "RenamedBook": {
       if (model.reader === null) return [{ ...model, currentGroup: message.group }, []];
-      const renamed = updateReader(model.reader, CancelledBookRename());
-      return renamed === null
-        ? [{ ...model, currentGroup: message.group }, []]
-        : [
-            {
-              ...model,
-              currentGroup: message.group,
-              reader: {
-                ...renamed[0],
-                title:
-                  message.group.bookTitles[model.reader.sourceId] ??
-                  message.group.sourceMeta[model.reader.sourceId]?.title ??
-                  model.reader.title,
-              },
-            },
-            renamed[1],
-          ];
+      const [renamed, renameCommands] = updateReader(model.reader, CancelledBookRename());
+      return [
+        {
+          ...model,
+          currentGroup: message.group,
+          reader: {
+            ...renamed,
+            title:
+              message.group.bookTitles[model.reader.sourceId] ??
+              message.group.sourceMeta[model.reader.sourceId]?.title ??
+              model.reader.title,
+          },
+        },
+        renameCommands,
+      ];
     }
     case "LoadedAccountSecurity":
-      return model.session._tag !== "AuthenticatedSession" ||
-        model.session.user.id !== message.userId
-        ? [model, []]
-        : [
+      return isCurrentUser(model, message.userId)
+        ? [
             {
               ...model,
               accountPasskeys: message.passkeys,
@@ -1745,30 +1711,22 @@ const updateSlices = (model: Model, message: Message): Update => {
               accountSecurityStatus: "ready",
             },
             [],
-          ];
+          ]
+        : [model, []];
     case "FailedAccountSecurity":
-      return model.session._tag !== "AuthenticatedSession" ||
-        model.session.user.id !== message.userId
-        ? [model, []]
-        : withToast(
+      return isCurrentUser(model, message.userId)
+        ? withToast(
             { ...model, accountSecurityStatus: "failed" },
             errorToast("Account", "Couldn't load your sign-in methods."),
-          );
+          )
+        : [model, []];
     case "CompletedAccountAction": {
-      const settled = {
-        ...model,
-        accountBusy: false,
-        passkeyLabel: "",
-        currentPassword: "",
-        newPassword: "",
-      };
-      const toasted = withToast(settled, infoToast(message.title, message.message));
-      return model.session._tag === "AuthenticatedSession"
-        ? [
-            { ...toasted[0], accountSecurityStatus: "loading" },
-            [...toasted[1], LoadAccountSecurity({ userId: model.session.user.id })],
-          ]
-        : toasted;
+      const [toasted, toastCommands] = withToast(
+        { ...model, accountBusy: false, passkeyLabel: "", currentPassword: "", newPassword: "" },
+        infoToast(message.title, message.message),
+      );
+      const [reloading, reloadCommands] = reloadAccountSecurity(toasted);
+      return [reloading, [...toastCommands, ...reloadCommands]];
     }
     case "FailedAccountAction":
       return withToast(
@@ -1788,7 +1746,6 @@ const updateSlices = (model: Model, message: Message): Update => {
           // Signing out leaves you on the clubs card as an anonymous reader,
           // not staring at the form you just left.
           session: AnonymousSession(),
-          account: UnavailableAccount(),
           groups: [],
           groupsStatus: "idle",
           accountPasskeys: [],
@@ -1798,33 +1755,14 @@ const updateSlices = (model: Model, message: Message): Update => {
         },
         [PushUrl({ href: hrefFor(Home()) })],
       ];
-    case "DeletedGroup":
-      return [
-        {
-          ...model,
-          groups: model.groups.filter((group) => group.groupId !== message.groupId),
-          currentGroup: null,
-          members: [],
-          membership: null,
-        },
-        [PushUrl({ href: hrefFor(Home()) })],
-      ];
     case "RequestedSignOut":
       return [model, [SignOut()]];
     case "RequestedSetPassword":
-      return model.accountBusy || model.accountSecurityStatus !== "ready"
-        ? [model, []]
-        : [{ ...model, accountBusy: true }, [SetAccountPassword(message)]];
+      return startAccountAction(model, SetAccountPassword(message));
     case "RequestedRemovePassword":
-      return model.accountBusy || model.accountSecurityStatus !== "ready"
-        ? [model, []]
-        : [{ ...model, accountBusy: true }, [RemoveAccountPassword(message)]];
+      return startAccountAction(model, RemoveAccountPassword(message));
     case "RequestedRemovePasskey":
-      return model.accountBusy || model.accountSecurityStatus !== "ready"
-        ? [model, []]
-        : [{ ...model, accountBusy: true }, [RemoveAccountPasskey(message)]];
-    case "RequestedDeleteGroup":
-      return [model, [DeleteGroup(message)]];
+      return startAccountAction(model, RemoveAccountPasskey(message));
     case "RequestedUrl":
       return [model, [PushUrl({ href: message.href })]];
     case "LeftForExternalUrl":
@@ -1842,16 +1780,9 @@ const updateSlices = (model: Model, message: Message): Update => {
           errorToast("Passkey failed", loginErrorMessage(message.error)),
         );
       }
-      return model.session._tag === "AuthenticatedSession"
-        ? [
-            { ...model, accountBusy: false, passkeyLabel: "", accountSecurityStatus: "loading" },
-            [LoadAccountSecurity({ userId: model.session.user.id })],
-          ]
-        : [{ ...model, accountBusy: false }, []];
+      return reloadAccountSecurity({ ...model, accountBusy: false, passkeyLabel: "" });
     case "RequestedPasskeyRegistration":
-      return model.accountBusy || model.accountSecurityStatus !== "ready"
-        ? [model, []]
-        : [{ ...model, accountBusy: true }, [RegisterPasskey({ label: message.label })]];
+      return startAccountAction(model, RegisterPasskey({ label: message.label }));
   }
 };
 
@@ -1872,20 +1803,15 @@ const modelToNoteAgentRequirements = (model: Model): Option.Option<NoteAgentRequ
         sessionMode: currentSessionMode(),
       });
 
-const noteAgentResources = makeNoteAgentResources<Model, Message>({
+const noteAgentResources = makeNoteAgentResources<Model>({
   modelToRequirements: modelToNoteAgentRequirements,
-  toMessage: (message) => message,
 });
 
-const noteAgentSubscriptions = makeNoteAgentSubscriptions<Model, Message>({
-  modelToConnectionKey: (model) => model.notes.connectionKey,
-  toMessage: (message) => message,
-});
+const noteAgentSubscriptions = makeNoteAgentSubscriptions<Model>(
+  (model) => model.notes.connectionKey,
+);
 
-const readerSubscriptions = makeReaderSubscriptions<Model, Message>({
-  modelToReader: (model) => model.reader,
-  toMessage: (message) => message,
-});
+const readerSubscriptions = makeReaderSubscriptions<Model>((model) => model.reader);
 
 /** The workspace layout follows the same breakpoint the React workspace uses;
  *  a media-query listener is the browser fact, the Model holds the answer. */
@@ -2038,7 +1964,7 @@ const workspaceLayoutView = (
   const narrow = model.viewport === "narrow";
   const viewerId = model.session._tag === "AuthenticatedSession" ? model.session.user.id : "";
   const membersById = new Map(model.members.map((member) => [member.id, member]));
-  const prefs = settingsPrefs(model.settings);
+  const prefs = model.settings.prefs;
   const notes = notesView(
     model.notes,
     {
@@ -2315,13 +2241,8 @@ const settingsBook = (model: Model, group: GroupSummary) => {
 
 /** React's `RenamableText`: a double-click turns the text into a field that
  *  saves on blur or Enter and abandons on Escape. */
-const renamableTitle = (
-  model: Model,
-  target: string,
-  value: string,
-  h: HtmlBuilder<Message>,
-): Html =>
-  model.renamingTarget === target
+const renamableTitle = (model: Model, value: string, h: HtmlBuilder<Message>): Html =>
+  model.renamingClub
     ? h.input([
         h.Class("topbar-title-edit"),
         h.Autofocus(true),
@@ -2338,10 +2259,7 @@ const renamableTitle = (
         ),
       ])
     : h.h1(
-        [
-          h.Title("Double-click to rename the club"),
-          h.OnDoubleClick(StartedRename({ target, value })),
-        ],
+        [h.Title("Double-click to rename the club"), h.OnDoubleClick(StartedRename({ value }))],
         [value],
       );
 
@@ -2357,7 +2275,7 @@ export const workspaceHeaderView = (
         [h.Class("topbar-home"), h.Href(hrefFor(Home())), h.AriaLabel("back to your clubs")],
         ["\u2039"],
       ),
-      renamableTitle(model, "club", displayName, h),
+      renamableTitle(model, displayName, h),
       presenceIndicatorView(
         model.notes.peers.length,
         OpenedOverlay({ overlay: PresenceOverlay() }),
@@ -3041,15 +2959,7 @@ const toastViewportView = (model: Model, h: HtmlBuilder<Message>): Html[] =>
                     ),
                   ],
                 ),
-                h.div(
-                  [h.Class("toast-body")],
-                  [
-                    h.p([], [toast.message]),
-                    ...(toast.action === null
-                      ? []
-                      : [h.a([h.Href(toast.action.href)], [toast.action.label])]),
-                  ],
-                ),
+                h.div([h.Class("toast-body")], [h.p([], [toast.message])]),
               ],
             ),
           ),

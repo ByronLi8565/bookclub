@@ -16,7 +16,7 @@ const sourceId = rootNote.sourceId;
 const groupRef = "club-alpha";
 const bookTitles = new Map([[sourceId, "The Book"]]);
 
-const ready: NotesModel = { ...initialNotesModel(), ready: true, status: "online", notes };
+const ready: NotesModel = { ...initialNotesModel(), ready: true, notes };
 const originalTimezone = process.env.TZ;
 
 const foldkitPanel = (model: NotesModel) =>
@@ -47,27 +47,27 @@ describe("note panel parity", () => {
   });
   beforeEach(stubAnimationFrame);
 
-  it("renders the thread React rendered", async () => {
+  it("renders the thread", async () => {
     expectRecordedParity("notes-thread", await foldkitPanel(ready));
   });
 
-  it("marks an unsynced note the way React did", async () => {
+  it("marks an unsynced note", async () => {
     expectRecordedParity(
       "notes-unsynced",
       await foldkitPanel({ ...ready, pendingNoteIds: [notes[0].id], failedNoteIds: [notes[1].id] }),
     );
   });
 
-  it("renders the loading panel React rendered", async () => {
+  it("renders the loading panel", async () => {
     expectRecordedParity(
       "notes-loading",
-      await foldkitPanel({ ...initialNotesModel(), ready: false, status: "offline" }),
+      await foldkitPanel({ ...initialNotesModel(), ready: false }),
     );
   });
 
-  it("opens the composer on a quoted passage the way React did", async () => {
-    // React puts the passage in the body as a blockquote and keeps the highlight
-    // itself out of sight — no chip, and no separate control to attach it with.
+  it("opens the composer on a quoted passage", async () => {
+    // The passage lands in the body as a blockquote and the highlight itself
+    // stays out of sight — no chip, and no separate control to attach it with.
     expectRecordedParity(
       "notes-composing",
       await foldkitPanel({
@@ -79,7 +79,7 @@ describe("note panel parity", () => {
     );
   });
 
-  it("renders the empty panel React rendered", async () => {
+  it("renders the empty panel", async () => {
     expectRecordedParity("notes-empty", await foldkitPanel({ ...ready, notes: [] }));
   });
 });

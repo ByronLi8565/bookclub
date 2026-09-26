@@ -6,9 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupSummary } from "../../shared/types/groups.ts";
 import {
   ChangedOnline,
-  Club,
+  FailedGroup,
   FailedGroups,
-  Home,
   LoadGroup,
   LoadGroups,
   LoadSession,
@@ -17,14 +16,13 @@ import {
   LoadedSession,
   DismissToastLater,
   DismissedToast,
-  MissingGroup,
   Navigated,
   NoSession,
-  UnreachableGroup,
   init,
   initFromUrl,
   update,
 } from "../../client/foldkit/application.ts";
+import { Club, Home } from "../../client/foldkit/routes.ts";
 import { CompletedSettingsAction, LoadUserPrefs } from "../../client/foldkit/settings.ts";
 
 /**
@@ -248,7 +246,7 @@ describe("opening a club without a connection", () => {
   it("admits it is offline for a club it has never read", async () => {
     unreachable();
     expect(await Effect.runPromise(LoadGroup({ groupRef: "club-alpha-public-1" }).effect)).toEqual(
-      UnreachableGroup({ groupRef: "club-alpha-public-1" }),
+      FailedGroup({ groupRef: "club-alpha-public-1", reason: "offline" }),
     );
   });
 
@@ -258,7 +256,7 @@ describe("opening a club without a connection", () => {
     // A deleted club must not keep opening from a stale copy for ever.
     answers(404, { error: "not_found" });
     expect(await Effect.runPromise(LoadGroup({ groupRef: "club-alpha-public-1" }).effect)).toEqual(
-      MissingGroup({ groupRef: "club-alpha-public-1" }),
+      FailedGroup({ groupRef: "club-alpha-public-1", reason: "notfound" }),
     );
   });
 
@@ -269,7 +267,7 @@ describe("opening a club without a connection", () => {
     Story.story(
       update,
       Story.given(onAClub),
-      Story.message(MissingGroup({ groupRef: "club-alpha-public-1" })),
+      Story.message(FailedGroup({ groupRef: "club-alpha-public-1", reason: "notfound" })),
       Story.model((model) => expect(model.clubError).toBe("notfound")),
       // Leaving the club clears the answer, so the next one does not open under
       // the last one's error.
@@ -280,7 +278,7 @@ describe("opening a club without a connection", () => {
     Story.story(
       update,
       Story.given(onAClub),
-      Story.message(UnreachableGroup({ groupRef: "club-alpha-public-1" })),
+      Story.message(FailedGroup({ groupRef: "club-alpha-public-1", reason: "offline" })),
       Story.model((model) => expect(model.clubError).toBe("offline")),
     );
   });
@@ -337,7 +335,10 @@ describe("coming back online", () => {
       Story.message(ChangedOnline({ online: true })),
       Story.Command.expectExact(LoadSession(), LoadGroup({ groupRef: "club-alpha-public-1" })),
       Story.Command.resolve(LoadSession, NoSession()),
-      Story.Command.resolve(LoadGroup, UnreachableGroup({ groupRef: "club-alpha-public-1" })),
+      Story.Command.resolve(
+        LoadGroup,
+        FailedGroup({ groupRef: "club-alpha-public-1", reason: "offline" }),
+      ),
     );
   });
 

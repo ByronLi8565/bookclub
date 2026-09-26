@@ -5,11 +5,11 @@ import type { GroupSummary } from "../../shared/types/groups.ts";
 import {
   AnonymousSession,
   Model,
-  Home,
   init,
   shellView,
   type Message,
 } from "../../client/foldkit/application.ts";
+import { Home } from "../../client/foldkit/routes.ts";
 import { expectRecordedParity, renderFoldkit, stubAnimationFrame } from "./parity.ts";
 
 const user = { id: "reader-1", email: "one@example.com", name: "Reader One" };
@@ -30,8 +30,7 @@ const groups: GroupSummary[] = [
 
 const signedIn = { _tag: "AuthenticatedSession", user } as const;
 
-/** The shell wraps the page in a root of its own, which React had no
- *  counterpart for because its entry rendered straight into `#root`. */
+/** The shell wraps the page in a root of its own; the signature is the page inside it. */
 const page = (root: HTMLElement): Element => {
   const inner = root.querySelector(".foldkit-root");
   if (inner === null) throw new Error("no shell root");
@@ -52,7 +51,7 @@ const foldkitHome = async (overrides: Partial<Model>) => {
 describe("home parity", () => {
   beforeEach(stubAnimationFrame);
 
-  it("renders the signed-out card React rendered", async () => {
+  it("renders the signed-out card", async () => {
     expectRecordedParity("home-signed-out", await foldkitHome({ session: AnonymousSession() }));
   });
 
@@ -72,11 +71,11 @@ describe("home parity", () => {
     expect(cached.querySelector(".home-clubs-status")?.textContent).toBe("refreshing clubs…");
   });
 
-  it("renders the club list React rendered", async () => {
+  it("renders the club list", async () => {
     expectRecordedParity("home-club-list", await foldkitHome({ groups, session: signedIn }));
   });
 
-  it("renders the club-name field React rendered", async () => {
+  it("renders the club-name field", async () => {
     expectRecordedParity(
       "home-naming-a-club",
       await foldkitHome({ groups, session: signedIn, creatingClub: true }),

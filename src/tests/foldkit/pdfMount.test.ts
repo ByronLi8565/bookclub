@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { Effect, Schema } from "effect";
 import { Runtime } from "foldkit";
 import { m } from "foldkit/message";
+import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PdfDocumentLoadFailed,
@@ -186,7 +187,7 @@ describe("PDF Foldkit Mount", () => {
     const { handle, received } = runReader(testEnvironment());
 
     await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(1), {
-      timeout: 20_000,
+      timeout: 5_000,
     });
     const [ready] = messagesOf(received, "PdfDocumentReady");
     const [rendered] = messagesOf(received, "PdfSpreadRendered");
@@ -201,7 +202,7 @@ describe("PDF Foldkit Mount", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(document.querySelector(".pdf-scroller")).toBeNull());
-  }, 30_000);
+  }, 10_000);
 
   it("rerenders the current page when a backgrounded tab becomes visible", async () => {
     const rasterized: number[] = [];
@@ -214,7 +215,7 @@ describe("PDF Foldkit Mount", () => {
       }),
     );
     await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(1), {
-      timeout: 20_000,
+      timeout: 5_000,
     });
 
     document.dispatchEvent(new Event("visibilitychange"));
@@ -222,7 +223,7 @@ describe("PDF Foldkit Mount", () => {
     await vi.waitFor(() => expect(rasterized.filter((page) => page === 1)).toHaveLength(2));
     expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2);
     handle.dispose();
-  }, 30_000);
+  }, 10_000);
 
   it("turns to a prefetched page without rasterizing it again", async () => {
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -242,14 +243,14 @@ describe("PDF Foldkit Mount", () => {
       }),
     );
 
-    await vi.waitFor(() => expect(rasterized).toContain(2), { timeout: 20_000 });
+    await vi.waitFor(() => expect(rasterized).toContain(2), { timeout: 5_000 });
     expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
     await Effect.runPromise(adapter.turnPage("next"));
     await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2));
     expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
 
     handle.dispose();
-  }, 30_000);
+  }, 10_000);
 
   it("adopts an in-flight prefetch when its page is requested", async () => {
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -277,7 +278,7 @@ describe("PDF Foldkit Mount", () => {
       }),
     );
 
-    await vi.waitFor(() => expect(finishPrefetch).toBeDefined(), { timeout: 20_000 });
+    await vi.waitFor(() => expect(finishPrefetch).toBeDefined(), { timeout: 5_000 });
     const turned = Effect.runPromise(adapter.turnPage("next"));
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
@@ -289,7 +290,143 @@ describe("PDF Foldkit Mount", () => {
     expect(rasterized.filter((page) => page === 2)).toHaveLength(1);
 
     handle.dispose();
-  }, 30_000);
+  }, 10_000);
+
+  it("renders a page itself when the prefetch it was waiting on fails", async () => {
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => ({ setTransform: () => {}, drawImage: () => {} }),
+    });
+    let failPrefetch!: (error: Error) => void;
+    const rasterized: number[] = [];
+    const { adapter, handle, received } = runReader(
+      testEnvironment({
+        prefetchAdjacentPages: true,
+        rasterize: ({ page }) => {
+          rasterized.push(page.pageNumber);
+          const prefetch = page.pageNumber === 2 && failPrefetch === undefined;
+          return prefetch
+            ? {
+                promise: new Promise<void>((_resolve, reject) => {
+                  failPrefetch = reject;
+                }),
+                cancel: () => {},
+              }
+            : settledTask();
+        },
+      }),
+    );
+
+    await vi.waitFor(() => expect(failPrefetch).toBeDefined(), { timeout: 5_000 });
+    const turned = Effect.runPromise(adapter.turnPage("next"));
+    // The same handoff the adoption test uses: the turn reaches the pending
+    // prefetch before it fails.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    failPrefetch(new Error("prefetch failed"));
+    await turned;
+
+    await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(2));
+    expect(rasterized.filter((page) => page === 2)).toHaveLength(2);
+    // The reader's colors are themed, so the spread stays hidden until revealed.
+    const canvas = document.querySelector<HTMLCanvasElement>(".pdf-pane canvas");
+    expect(canvas?.style.visibility).toBe("visible");
+
+    handle.dispose();
+  }, 10_000);
+
+  it("keeps a newer text layer when an older one fails to load", async () => {
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [new DOMRect(10, 10, 20, 10)],
+    });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 100, 100),
+    );
+    class FakeTextLayerBuilder {
+      readonly div = document.createElement("div");
+      constructor() {
+        this.div.innerHTML = "<span>whale</span>";
+      }
+      render(): Promise<void> {
+        return Promise.resolve();
+      }
+      cancel(): void {}
+    }
+    const loads: {
+      resolve: (ctor: typeof TextLayerBuilder) => void;
+      reject: (error: Error) => void;
+    }[] = [];
+    const { adapter, handle, received } = runReader(
+      testEnvironment({
+        loadTextLayerBuilder: () =>
+          new Promise((resolve, reject) => {
+            loads.push({ resolve, reject });
+          }),
+      }),
+    );
+
+    await vi.waitFor(() => expect(loads).toHaveLength(1), { timeout: 5_000 });
+    await Effect.runPromise(adapter.turnPage("next"));
+    await vi.waitFor(() => expect(loads).toHaveLength(2));
+    // SAFETY: the Mount constructs the builder and uses only div, render, and cancel.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+    loads[1]?.resolve(FakeTextLayerBuilder as unknown as typeof TextLayerBuilder);
+    await vi.waitFor(() => expect(document.querySelector(".pdf-pane-inner span")).not.toBeNull());
+    loads[0]?.reject(new Error("text layer chunk failed"));
+    // A macrotask boundary: every microtask the rejection schedules has run.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    const word = document.querySelector(".pdf-pane-inner span")?.firstChild;
+    if (!word) throw new Error("no text layer word");
+    const range = document.createRange();
+    range.setStart(word, 0);
+    range.setEnd(word, 5);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+    document.dispatchEvent(new Event("selectionchange"));
+
+    await vi.waitFor(() =>
+      expect(
+        messagesOf(received, "PdfSelectionChanged").some(
+          (message) => message._tag === "PdfSelectionChanged" && message.anchor !== null,
+        ),
+      ).toBe(true),
+    );
+    // SAFETY: removing the test's own shim restores jsdom's Range prototype.
+    delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
+    handle.dispose();
+  }, 10_000);
+
+  it("absorbs a failed render in the reader's Commands", async () => {
+    let broken = false;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { adapter, handle, received } = runReader(
+      testEnvironment({
+        loadDocument: async (bytes) => {
+          const doc = await loadRealDocument(bytes);
+          const getPage = doc.getPage.bind(doc);
+          doc.getPage = (page) =>
+            broken ? Promise.reject(new Error("pdf.js worker is gone")) : getPage(page);
+          return doc;
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(1), {
+      timeout: 5_000,
+    });
+
+    broken = true;
+    await expect(Effect.runPromise(adapter.fitToText)).resolves.toBeNull();
+    await expect(Effect.runPromise(adapter.setZoom(150))).resolves.toBeUndefined();
+    expect(errors).toHaveBeenCalledWith("PDF reader command failed", expect.any(Error));
+
+    broken = false;
+    handle.dispose();
+  }, 10_000);
 
   it("cancels an in-flight page render task when the element is released", async () => {
     const tasks: PendingTask[] = [];
@@ -303,7 +440,7 @@ describe("PDF Foldkit Mount", () => {
       }),
     );
 
-    await vi.waitFor(() => expect(tasks).toHaveLength(1), { timeout: 20_000 });
+    await vi.waitFor(() => expect(tasks).toHaveLength(1), { timeout: 5_000 });
     expect(tasks[0]?.cancelled).toBe(0);
     expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(0);
 
@@ -312,7 +449,7 @@ describe("PDF Foldkit Mount", () => {
     expect(document.querySelector(".pdf-scroller")).toBeNull();
     // A cancelled rasterization never claims to have rendered a spread.
     expect(messagesOf(received, "PdfSpreadRendered")).toHaveLength(0);
-  }, 30_000);
+  }, 10_000);
 
   it("releases the prior document and render task when the source switches", async () => {
     const tasks: PendingTask[] = [];
@@ -337,10 +474,10 @@ describe("PDF Foldkit Mount", () => {
       }),
     );
 
-    await vi.waitFor(() => expect(tasks).toHaveLength(1), { timeout: 20_000 });
+    await vi.waitFor(() => expect(tasks).toHaveLength(1), { timeout: 5_000 });
     switchSource();
 
-    await vi.waitFor(() => expect(opened).toEqual(["source-a", "source-b"]), { timeout: 20_000 });
+    await vi.waitFor(() => expect(opened).toEqual(["source-a", "source-b"]), { timeout: 5_000 });
     expect(tasks[0]?.cancelled).toBe(1);
     await vi.waitFor(() => expect(documents[0]?.loadingTask.destroyed).toBe(true));
     await vi.waitFor(() => expect(messagesOf(received, "PdfDocumentReady")).toHaveLength(2));
@@ -349,7 +486,7 @@ describe("PDF Foldkit Mount", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(documents[1]?.loadingTask.destroyed).toBe(true));
-  }, 40_000);
+  }, 10_000);
 
   it("publishes a load failure and still releases the element's resources", async () => {
     const { handle, received } = runReader(
@@ -360,7 +497,7 @@ describe("PDF Foldkit Mount", () => {
     );
 
     await vi.waitFor(() => expect(messagesOf(received, "PdfDocumentLoadFailed")).toHaveLength(1), {
-      timeout: 20_000,
+      timeout: 5_000,
     });
     const [failure] = messagesOf(received, "PdfDocumentLoadFailed");
     expect(Schema.is(PdfDocumentLoadFailed)(failure) && failure.sourceId).toBe("source-a");
@@ -369,7 +506,7 @@ describe("PDF Foldkit Mount", () => {
 
     handle.dispose();
     await vi.waitFor(() => expect(document.querySelector(".pdf-scroller")).toBeNull());
-  }, 30_000);
+  }, 10_000);
 
   it("destroys a document that finishes loading after the element was released", async () => {
     const late = await loadRealDocument(await mobyDickBytes());
@@ -383,13 +520,13 @@ describe("PDF Foldkit Mount", () => {
       }),
     );
 
-    await vi.waitFor(() => expect(deliver).toBeDefined(), { timeout: 20_000 });
+    await vi.waitFor(() => expect(deliver).toBeDefined(), { timeout: 5_000 });
     handle.dispose();
     // Effect interruption cannot cancel the underlying pdf.js promise, so the
     // handle only becomes reachable after release and must still be destroyed.
     deliver(late);
     await vi.waitFor(() => expect(late.loadingTask.destroyed).toBe(true));
-  }, 30_000);
+  }, 10_000);
 
   it("reopens an immutable source without reading or parsing its bytes again", async () => {
     let sourceLoads = 0;
@@ -417,7 +554,7 @@ describe("PDF Foldkit Mount", () => {
     expect(sourceLoads).toBe(1);
     expect(documentLoads).toBe(1);
     second.handle.dispose();
-  }, 30_000);
+  }, 10_000);
 
   it("keeps PDF search as text offsets until the rendered range can supply geometry", async () => {
     const doc = await loadRealDocument(await mobyDickBytes());
@@ -433,7 +570,7 @@ describe("PDF Foldkit Mount", () => {
     });
     expect(pdfSearchMatches(geometry, "zzzunlikelyquery")).toEqual([]);
     await doc.loadingTask.destroy();
-  }, 30_000);
+  }, 10_000);
 
   it("resolves search offsets through the same DOM Range used by PDF selections", () => {
     const layer = document.createElement("div");

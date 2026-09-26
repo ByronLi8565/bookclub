@@ -29,7 +29,7 @@ export async function setSessionToken(token: string | null): Promise<void> {
   else await Preferences.remove({ key: TOKEN_KEY });
 }
 
-export function apiUrl(path: string): string {
+function apiUrl(path: string): string {
   return isNative ? `${apiOrigin}${path}` : path;
 }
 

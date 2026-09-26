@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { foldkit } from "@foldkit/vite-plugin";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { VitePWA } from "vite-plugin-pwa";
-import { fixtureServer } from "./src/tests/harness/testServer.ts";
 
 const PDFJS_WASM_PATH = "/pdfjs-wasm/";
 const PDFJS_WASM_FILES = [
@@ -109,7 +108,6 @@ export default defineConfig(({ command }) => ({
       },
       devOptions: { enabled: false },
     }),
-    fixtureServer(new URL("./assets", import.meta.url).pathname),
   ],
   resolve: {
     alias: {

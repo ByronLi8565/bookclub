@@ -56,6 +56,7 @@ import {
 } from "../../../shared/notes/tags.ts";
 import { createReferenceTransformer } from "../../logic/notes/referenceTransformer.ts";
 import { ReferenceNode } from "../../logic/notes/ReferenceNode.ts";
+import { failureMessage, makeLiveSlot } from "../../logic/mountSupport.ts";
 
 export const ChangedNoteDraft = m("ChangedNoteDraft", {
   groupRef: Schema.String,
@@ -597,9 +598,6 @@ const createNoteEditorHandle = (
   };
 };
 
-const failureMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
-
 /**
  * Owns one Lexical editor for the lifetime of its element. Editor state stays inside the editor;
  * the Message loop only ever sees the note draft, its images, its tags, and selection formatting.
@@ -623,12 +621,12 @@ const NoteDraftEditorMount = Mount.defineStream(
  * an upload reach it here rather than by rebuilding the composer and losing the
  * reader's undo history and cursor.
  */
-export const makeNoteEditorAdapter = () => {
-  let live: NoteEditorHandle | null = null;
+const makeNoteEditorAdapter = () => {
+  const live = makeLiveSlot<NoteEditorHandle>();
 
   const onLiveEditor = (use: (handle: NoteEditorHandle) => void) =>
     Effect.sync(() => {
-      const handle = live;
+      const handle = live.get();
       if (handle !== null) use(handle);
     });
 
@@ -650,19 +648,9 @@ export const makeNoteEditorAdapter = () => {
           const publish: Publish = (message) => {
             Queue.offerUnsafe(queue, message);
           };
-          const handle = yield* Effect.acquireRelease(
-            Effect.sync(() => {
-              const created = createNoteEditorHandle(args, element, publish);
-              live = created;
-              return created;
-            }),
-            (acquired) =>
-              Effect.sync(() => {
-                // A previous scope can release after the next one acquires, so
-                // only the editor that is still current clears the handle.
-                if (live === acquired) live = null;
-                acquired.dispose();
-              }),
+          const handle = yield* live.acquire(
+            Effect.sync(() => createNoteEditorHandle(args, element, publish)),
+            (acquired) => acquired.dispose(),
           );
           yield* Effect.try({ try: () => handle.start(), catch: failureMessage }).pipe(
             Effect.catch((message: string) =>
@@ -713,12 +701,6 @@ export const makeNoteEditorAdapter = () => {
   };
 };
 
-export type NoteEditorAdapter = ReturnType<typeof makeNoteEditorAdapter>;
-
 export const noteEditor = makeNoteEditorAdapter();
 
-/**
- * Owns one Lexical editor for the lifetime of its element. Editor state stays inside the editor;
- * the Message loop only ever sees the note draft, its images, its tags, and selection formatting.
- */
 export const NoteDraftEditor = noteEditor.Mount;

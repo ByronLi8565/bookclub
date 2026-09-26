@@ -8,20 +8,18 @@
     "deploy:no-backup": "vite build && wrangler deploy",
     "destroy": "wrangler delete",
     "secrets:sync": "fnox exec -- bash scripts/sync-secrets.sh",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:foldkit": "vitest run src/tests/foldkit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
+    "test": "bun run scripts/test-all.ts",
+    "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:smoke": "playwright test e2e/browser/commonPaths.pw.ts --project=\"Desktop Safari\" --workers=1",
-    "perf:reader": "PLAYWRIGHT_BASE_URL=http://127.0.0.1:5199 READER_PERF=1 playwright test src/tests/playwright/foldkitReader.perf.pw.ts --project=\"Desktop Safari\" --workers=1",
-    "e2e": "vitest run --config e2e/vitest.config.ts",
-    "e2e:watch": "vitest --config e2e/vitest.config.ts",
+    "test:api": "vitest run --config e2e/vitest.config.ts",
+    "test:browser": "playwright test",
+    "test:perf": "READER_PERF=1 playwright test --project=Performance --workers=1",
     "info:template": "node scripts/new-info-card.mjs",
     "cap:sync": "vite build && cap sync",
     "cap:ios": "vite build && cap sync ios && cap open ios",
     "cap:android": "vite build && cap sync android && cap open android",
-    "check": "oxfmt --check && oxlint && tsc --noEmit"
+    "check": "oxfmt --check && oxlint && bun run typecheck"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
@@ -44,7 +42,6 @@
     "ulidx": "^2.4.1"
   },
   "devDependencies": {
-    "@antithesishq/bombadil": "^0.5.0",
     "@capacitor/cli": "^8.4.1",
     "@cloudflare/vite-plugin": "^1.45.1",
     "@cloudflare/workers-types": "^5.20260719.1",
@@ -52,6 +49,7 @@
     "@oxlint/plugins": "1.78.0",
     "@playwright/test": "^1.61.1",
     "@types/jsdom": "^28.0.3",
+    "@types/ws": "^8.18.1",
     "jsdom": "^29.1.1",
     "oxfmt": "^0.54.0",
     "oxlint": "1.78.0",
@@ -60,7 +58,8 @@
     "vite": "^8.1.2",
     "vite-plugin-pwa": "^1.3.0",
     "vitest": "^4.1.10",
-    "wrangler": "^4.112.0"
+    "wrangler": "^4.112.0",
+    "ws": "^8.22.0"
   },
   "trustedDependencies": [
     "core-js",

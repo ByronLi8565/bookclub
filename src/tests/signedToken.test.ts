@@ -15,8 +15,7 @@ const BAD_SESSION =
 const BAD_CHALLENGE =
   "eyJlbWFpbCI6MSwiY2hhbGxlbmdlIjoiY2hhbC0xMjMiLCJleHAiOjE3MDAwMDAzMDAwMDB9.Alf5G091-sPpgtXDBmU2nJgqJCEqGAslyCoC33vRIcc";
 
-const requestWith = (token: string) =>
-  new Request("https://bookclub.example/x", { headers: { Cookie: `bc_pk_challenge=${token}` } });
+const requestWith = (token: string) => `bc_pk_challenge=${token}`;
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -38,6 +37,7 @@ describe("signed token compatibility", () => {
     expect(await readChallenge(requestWith(CHALLENGE), SECRET)).toEqual({
       email: "a@b.com",
       challenge: "chal-123",
+      exp: NOW + 300_000,
     });
     vi.mocked(Date.now).mockReturnValue(NOW + 300_001);
     expect(await readChallenge(requestWith(CHALLENGE), SECRET)).toBeNull();

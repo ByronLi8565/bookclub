@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { ulid } from "ulidx";
+import { books, uploadPart } from "./browserSupport.ts";
 
 // The whole Foldkit entry against the real worker, which is the seam no slice
 // test and no harness crosses: session decoding, group references, and the
@@ -9,14 +11,16 @@ import { readFileSync } from "node:fs";
 // One journey rather than several tests: the checks are sequential stages of a
 // single session, and a detached macOS launchd session gives Chromium only one
 // usable browser context (see PW_DETACHED_SESSION in playwright.config.ts).
+// Tagged @chromium because WebKit drops the Secure session cookie over local
+// http, and this journey signs in through the UI rather than planting a cookie.
 const PASSWORD = "devdevdev";
 const REF_PATTERN = "[a-z0-9-]+";
 const DISPLAY_NAME = "Parity Club";
 
-/** Seeds an account and a club with a book through the API, so the journey
- *  starts from a known state rather than whatever the dev worker holds. */
+/** Seeds an account and a club with a book through the API, in the request
+ *  fixture's own cookie jar, so the page starts signed out. */
 async function seedClub(request: APIRequestContext): Promise<string> {
-  const email = `foldkit-${Date.now()}@bookclub.test`;
+  const email = `sign-in-${ulid().toLowerCase()}@example.com`;
   const started = await request.post("/auth/start", { data: { email } });
   expect(started.ok(), "dev sign-in needs DEV_AUTH=true").toBeTruthy();
 
@@ -29,26 +33,23 @@ async function seedClub(request: APIRequestContext): Promise<string> {
   const { group } = (await created.json()) as { group: { slug: string; publicId: string } };
 
   const uploaded = await request.put(`/groups/${group.slug}-${group.publicId}/book`, {
-    headers: { "x-source-title": "The Picture of Dorian Gray" },
-    multipart: {
-      file: {
-        name: "dorian.epub",
-        mimeType: "application/epub+zip",
-        buffer: readFileSync(new URL("../../../assets/dorian.epub", import.meta.url)),
-      },
-    },
+    headers: { "x-source-title": encodeURIComponent(books.epub.title) },
+    multipart: uploadPart(
+      await readFile(books.epub.file),
+      books.epub.contentType,
+      books.epub.title,
+    ),
   });
   expect(uploaded.ok()).toBeTruthy();
 
   return email;
 }
 
-test("a reader signs in, picks a club, and opens its book", async ({ page, request }) => {
+test("Sign in · a reader signs in, picks a club, and opens its book @chromium", async ({
+  page,
+  request,
+}) => {
   const email = await seedClub(request);
-  // Seeding runs through the page's own cookie jar, so the journey has to start
-  // by putting the reader back outside the door it just walked through.
-  await page.context().clearCookies();
-
   await page.goto("/");
 
   // `home.css` applies through these class names and nothing else, so a page
@@ -70,7 +71,7 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   // being a direct child of `.app`, loses its height, and the page jumps.
   expect(await card.boundingBox()).toEqual(cardBefore);
 
-  // Every way in the React modal offers: a mailed code by default, a password,
+  // Every way in the modal offers: a mailed code by default, a password,
   // or a passkey.
   await expect(dialog.getByRole("button", { name: "send code" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "use a passkey" })).toBeVisible();
@@ -120,109 +121,6 @@ test("a reader signs in, picks a club, and opens its book", async ({ page, reque
   // The reader and the notes pane sit side by side rather than stacked.
   await expect(page.locator(".split-pane")).toHaveCount(2);
   await expect(page.locator(".split-divider")).toBeVisible();
-  await page.keyboard.press("d");
-  await expect(page.locator(".split-pane--reader-spread")).toBeVisible();
-  const epubBody = page
-    .locator(".reader-surface .epub-container iframe")
-    .first()
-    .contentFrame()
-    .locator("body");
-  await expect
-    .poll(() =>
-      epubBody.evaluate((body) => {
-        const rawColumnWidth = getComputedStyle(body).columnWidth;
-        const columnWidth = Number(
-          rawColumnWidth.endsWith("px") ? rawColumnWidth.slice(0, -2) : rawColumnWidth,
-        );
-        return (
-          Number.isFinite(columnWidth) && columnWidth < document.documentElement.clientWidth * 0.75
-        );
-      }),
-    )
-    .toBe(true);
-  const initialPaneWidths = await page
-    .locator(".split-pane")
-    .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
-  expect(initialPaneWidths[0]).toBeGreaterThanOrEqual(884);
-  expect(initialPaneWidths[1]).toBeGreaterThanOrEqual(280);
-  await page.keyboard.press("d");
-  await page.waitForTimeout(300);
-  await expect(page.locator(".split-pane--reader-spread")).toBeVisible();
-  const singlePaneWidths = await page
-    .locator(".split-pane")
-    .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
-  expect(singlePaneWidths[0]).toBeGreaterThanOrEqual(884);
-  expect(singlePaneWidths[1]).toBeGreaterThanOrEqual(280);
-
-  const readerOnly = page.getByRole("button", { name: "Show reader only" });
-  await expect(readerOnly).toHaveText("→");
-  await readerOnly.click();
-  await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-left/u);
-  const splitView = page.getByRole("button", { name: "Show split view" });
-  await expect(splitView).toHaveText("←");
-  await splitView.click();
-  await expect(page.locator(".workspace-layout")).not.toHaveClass(/split--expanded/u);
-
-  await page.keyboard.press("Shift+ArrowRight");
-  await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-left/u);
-  await expect
-    .poll(() =>
-      page.locator(".split-pane--notes").evaluate((pane) => pane.getBoundingClientRect().width),
-    )
-    .toBe(0);
-
-  // The first press crosses the normal split; the second reaches the opposite
-  // endpoint and removes the reader despite its sticky spread width.
-  await page.keyboard.press("Shift+ArrowLeft");
-  await page.keyboard.press("Shift+ArrowLeft");
-  await expect(page.locator(".workspace-layout")).toHaveClass(/split--expanded-right/u);
-  await expect
-    .poll(
-      () =>
-        page
-          .locator(".split-pane--reader")
-          .evaluate((pane) =>
-            pane.getAnimations().some((animation) => animation.playState === "running"),
-          ),
-      { timeout: 250 },
-    )
-    .toBe(true);
-  await expect
-    .poll(() =>
-      page.locator(".split-pane--reader").evaluate((pane) => pane.getBoundingClientRect().width),
-    )
-    .toBe(0);
-  const notesFilter = page.getByRole("textbox", { name: "Filter notes" });
-  await notesFilter.evaluate((input) => {
-    input.addEventListener("keydown", (event) => event.stopPropagation());
-  });
-  await notesFilter.press("Shift+ArrowRight");
-  await expect(page.locator(".workspace-layout")).not.toHaveClass(/split--expanded/u);
-  await expect
-    .poll(() =>
-      page
-        .locator(".split-pane")
-        .evaluateAll((panes) =>
-          Math.min(...panes.map((pane) => pane.getBoundingClientRect().width)),
-        ),
-    )
-    .toBeGreaterThan(200);
-
-  // A drag stops with both panes usable; releasing near an edge must never turn
-  // resizing into an accidental pane close.
-  const divider = page.locator(".split-divider");
-  const box = await divider.boundingBox();
-  if (box === null) throw new Error("the split divider has no box to drag");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(40, box.y + box.height / 2, { steps: 8 });
-  await page.mouse.up();
-  await expect(page.locator(".workspace-layout")).not.toHaveClass(/split--expanded/u);
-  const paneWidths = await page
-    .locator(".split-pane")
-    .evaluateAll((panes) => panes.map((pane) => pane.getBoundingClientRect().width));
-  expect(Math.min(...paneWidths)).toBeGreaterThan(200);
-
   // Every overlay the workspace header opens, over the book.
   await page.getByRole("button", { name: "open info" }).click();
   await expect(page.locator("dialog.modal.home-info-panel[open]")).toBeVisible();

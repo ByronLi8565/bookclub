@@ -1,4 +1,5 @@
-import { Agent } from "agents";
+import { getAgentByName } from "agents";
+import { ServerOwnedAgent } from "./serverOwnedAgent.ts";
 import { monotonicFactory } from "ulidx";
 import { constantTimeEqual, sha256Hex } from "../../shared/crypto.ts";
 import type { StoredReadingPosition } from "../../shared/types/readingPositions.ts";
@@ -9,6 +10,7 @@ import type { Env } from "../env.ts";
 import { hashPassword, verifyPassword, type PasswordHash } from "../auth/password.ts";
 import type { StoredCredential } from "../auth/webauthn.ts";
 import { sendLoginCode } from "../services/email.ts";
+import { avatarScope, deleteImages } from "../services/images.ts";
 
 const ulid = monotonicFactory();
 const encoder = new TextEncoder();
@@ -58,6 +60,10 @@ export interface AuthState {
   credentials?: StoredCredential[];
   regChallenge?: RegChallenge | null;
   pwRate?: RateWindow | null;
+  /** Replaced avatar ids and when they were replaced, kept until the grace period ends. */
+  retiredAvatars?: Record<string, number>;
+  /** Passkey login challenges already accepted, until each one's signed expiry. */
+  usedLoginChallenges?: Record<string, number>;
 }
 
 export const AuthFailureReason = {
@@ -95,7 +101,11 @@ export type PasswordLoginResult =
 
 export type SetPasswordResult =
   | { ok: true }
-  | AuthFailure<typeof AuthFailureReason.NoUser | typeof AuthFailureReason.BadCurrent>;
+  | AuthFailure<
+      | typeof AuthFailureReason.NoUser
+      | typeof AuthFailureReason.BadCurrent
+      | typeof AuthFailureReason.RateLimited
+    >;
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
@@ -103,6 +113,8 @@ const RATE_WINDOW_MS = 15 * 60 * 1000;
 const MAX_SENDS_PER_WINDOW = 5;
 const MAX_PW_ATTEMPTS_PER_WINDOW = 10;
 const REG_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+// Groups may still show a replaced avatar until their projection converges.
+const AVATAR_GRACE_SECONDS = 7 * 24 * 60 * 60;
 
 function hashCode(email: string, code: string): Promise<string> {
   return sha256Hex(encoder.encode(`${email}:${code}`).buffer);
@@ -113,7 +125,7 @@ function generateCode(): string {
   return n.toString().padStart(6, "0");
 }
 
-export class AuthAgent extends Agent<Env, AuthState> {
+export class AuthAgent extends ServerOwnedAgent<Env, AuthState> {
   initialState: AuthState = {
     user: null,
     pending: null,
@@ -176,11 +188,44 @@ export class AuthAgent extends Agent<Env, AuthState> {
     return this.state.user;
   }
 
-  setAvatarImageId(imageId: string): User | null {
-    if (!this.state.user) return null;
-    const user = { ...this.state.user, avatarImageId: imageId };
-    this.setState({ ...this.state, user });
+  /** Commits the new avatar, then projects it into every Group. The replaced
+   *  file outlives the swap by a grace period so stale projections still resolve. */
+  async setAvatarImageId(imageId: string): Promise<User | null> {
+    const current = this.state.user;
+    if (!current) return null;
+    const user = { ...current, avatarImageId: imageId };
+    const retiring = current.avatarImageId === imageId ? undefined : current.avatarImageId;
+    if (retiring) {
+      this.setState({
+        ...this.state,
+        user,
+        retiredAvatars: { ...this.state.retiredAvatars, [retiring]: Date.now() },
+      });
+      await this.schedule(AVATAR_GRACE_SECONDS, "purgeRetiredAvatars");
+    } else {
+      this.setState({ ...this.state, user });
+    }
+    await this.projectProfile(user.groupIds);
     return user;
+  }
+
+  async purgeRetiredAvatars(): Promise<void> {
+    const user = this.state.user;
+    const cutoff = Date.now() - AVATAR_GRACE_SECONDS * 1000;
+    const due = Object.entries(this.state.retiredAvatars ?? {}).flatMap(([id, retiredAt]) =>
+      retiredAt <= cutoff ? [id] : [],
+    );
+    if (!user || due.length === 0) return;
+    await this.reconcile("purgeRetiredAvatars", undefined, async () => {
+      await deleteImages(this.env, avatarScope(user.id), due);
+      const purged = new Set(due);
+      this.setState({
+        ...this.state,
+        retiredAvatars: Object.fromEntries(
+          Object.entries(this.state.retiredAvatars ?? {}).filter(([id]) => !purged.has(id)),
+        ),
+      });
+    });
   }
 
   getClubProfile(groupId: string): { displayName: string; avatarImageId?: string } | null {
@@ -192,7 +237,7 @@ export class AuthAgent extends Agent<Env, AuthState> {
       : { displayName };
   }
 
-  setClubDisplayName(groupId: string, displayName: string): User | null {
+  async setClubDisplayName(groupId: string, displayName: string): Promise<User | null> {
     const user = this.state.user;
     if (!user) return null;
     const next = {
@@ -200,54 +245,82 @@ export class AuthAgent extends Agent<Env, AuthState> {
       clubDisplayNames: { ...user.clubDisplayNames, [groupId]: displayName },
     };
     this.setState({ ...this.state, user: next });
+    await this.projectProfile([groupId]);
     return next;
+  }
+
+  /** Carries this account's current per-Group name and avatar into each Group's roster. */
+  async projectProfile(groupIds: string[]): Promise<void> {
+    await this.reconcile("projectProfile", groupIds, async () => {
+      await Promise.all(
+        groupIds.map(async (groupId) => {
+          const profile = this.getClubProfile(groupId);
+          const userId = this.state.user?.id;
+          if (!profile || !userId) return;
+          const group = await getAgentByName(this.env.GroupAgent, groupId);
+          await group.setMemberProfile(userId, profile.displayName, profile.avatarImageId);
+        }),
+      );
+    });
   }
 
   hasPassword(): boolean {
     return Boolean(this.state.password);
   }
 
-  async loginWithPassword(email: string, password: string): Promise<PasswordLoginResult> {
-    const stored = this.state.password;
-    if (!stored) return { ok: false, reason: AuthFailureReason.NoPassword };
-
+  // Every password guess, at sign-in or when changing it, draws on one window,
+  // so a stolen session cannot brute-force the current password either.
+  private async checkPassword(
+    candidate: string,
+    stored: PasswordHash,
+  ): Promise<"ok" | typeof AuthFailureReason.RateLimited | "wrong"> {
     const now = Date.now();
     const rate =
       this.state.pwRate && now - this.state.pwRate.windowStart < RATE_WINDOW_MS
         ? this.state.pwRate
         : { windowStart: now, sends: 0 };
-    if (rate.sends >= MAX_PW_ATTEMPTS_PER_WINDOW)
-      return { ok: false, reason: AuthFailureReason.RateLimited };
+    if (rate.sends >= MAX_PW_ATTEMPTS_PER_WINDOW) return AuthFailureReason.RateLimited;
     this.setState({
       ...this.state,
       pwRate: { windowStart: rate.windowStart, sends: rate.sends + 1 },
     });
+    if (!(await verifyPassword(candidate, stored))) return "wrong";
+    this.setState({ ...this.state, pwRate: null });
+    return "ok";
+  }
 
-    if (!(await verifyPassword(password, stored)))
-      return { ok: false, reason: AuthFailureReason.BadPassword };
-
+  async loginWithPassword(email: string, password: string): Promise<PasswordLoginResult> {
+    const stored = this.state.password;
+    if (!stored) return { ok: false, reason: AuthFailureReason.NoPassword };
+    const checked = await this.checkPassword(password, stored);
+    if (checked === AuthFailureReason.RateLimited) return { ok: false, reason: checked };
+    if (checked === "wrong") return { ok: false, reason: AuthFailureReason.BadPassword };
     const user = this.upsertUser(email);
-    this.setState({ ...this.state, user, pwRate: null });
+    this.setState({ ...this.state, user });
     return { ok: true, user };
   }
 
-  async setPassword(next: string, current?: string): Promise<SetPasswordResult> {
+  // An account without a password needs no current one to set the first.
+  private async checkCurrentPassword(current: string | undefined): Promise<SetPasswordResult> {
     if (!this.state.user) return { ok: false, reason: AuthFailureReason.NoUser };
-    if (
-      this.state.password &&
-      (!current || !(await verifyPassword(current, this.state.password)))
-    ) {
-      return { ok: false, reason: AuthFailureReason.BadCurrent };
-    }
+    const stored = this.state.password;
+    if (!stored) return { ok: true };
+    if (!current) return { ok: false, reason: AuthFailureReason.BadCurrent };
+    const checked = await this.checkPassword(current, stored);
+    if (checked === AuthFailureReason.RateLimited) return { ok: false, reason: checked };
+    return checked === "ok" ? { ok: true } : { ok: false, reason: AuthFailureReason.BadCurrent };
+  }
+
+  async setPassword(next: string, current?: string): Promise<SetPasswordResult> {
+    const checked = await this.checkCurrentPassword(current);
+    if (!checked.ok) return checked;
     this.setState({ ...this.state, password: await hashPassword(next), pwRate: null });
     return { ok: true };
   }
 
   async removePassword(current: string): Promise<SetPasswordResult> {
-    if (!this.state.user) return { ok: false, reason: AuthFailureReason.NoUser };
-    if (this.state.password && !(await verifyPassword(current, this.state.password))) {
-      return { ok: false, reason: AuthFailureReason.BadCurrent };
-    }
+    const checked = await this.checkCurrentPassword(current);
+    if (!checked.ok) return checked;
     this.setState({ ...this.state, password: null });
     return { ok: true };
   }
@@ -280,6 +353,17 @@ export class AuthAgent extends Agent<Env, AuthState> {
     this.setState({ ...this.state, regChallenge: null });
     if (!pending || Date.now() > pending.expiresAt) return null;
     return pending.challenge;
+  }
+
+  /** Accepts a signed login challenge once; a replay before its expiry is refused. */
+  consumeLoginChallenge(challenge: string, expiresAt: number): boolean {
+    const now = Date.now();
+    const live = Object.fromEntries(
+      Object.entries(this.state.usedLoginChallenges ?? {}).filter(([, exp]) => exp >= now),
+    );
+    if (Object.hasOwn(live, challenge)) return false;
+    this.setState({ ...this.state, usedLoginChallenges: { ...live, [challenge]: expiresAt } });
+    return true;
   }
 
   addCredential(credential: StoredCredential): void {

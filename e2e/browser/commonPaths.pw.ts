@@ -4,6 +4,7 @@ import {
   authenticateContext,
   books,
   currentPage,
+  selectEpubText,
   selectPdfText,
   watchForUnexpectedBrowserFailures,
   type GroupSummary,
@@ -28,23 +29,6 @@ async function uploadThroughUi(
   await dialog.getByTitle("Upload book").click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator(books[kind].ready).first()).toBeVisible({ timeout: 30_000 });
-}
-
-async function selectEpubText(page: Page): Promise<void> {
-  const frame = page.frameLocator(".epub-container iframe").first();
-  await frame.locator("body").evaluate((body) => {
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    let node = walker.nextNode();
-    while (node && (node.textContent?.trim().length ?? 0) < 8) node = walker.nextNode();
-    if (!node?.textContent) throw new Error("No selectable EPUB text");
-    const start = node.textContent.search(/\S/u);
-    const range = document.createRange();
-    range.setStart(node, start);
-    range.setEnd(node, Math.min(node.textContent.length, start + 80));
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  });
 }
 
 test("Smoke · common PDF and EPUB reading paths stay free of unexpected errors", async ({

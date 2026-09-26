@@ -11,13 +11,15 @@ Bookclub: a collaborative book-reading app. One Cloudflare Worker + a Foldkit SP
 - Routes are URLs. `src/client/foldkit/routes.ts` owns the table, and every route change — clicked or
   programmatic — goes out as a URL and comes back through `onUrlChange`, so the address bar and the
   Model cannot disagree.
-- `src/tests/parity/` holds the React client's rendered markup, recorded on the day it was deleted.
-  A change to a file in `signatures/` is a change to the user interface: review it as one.
+- `src/tests/parity/` pins the client's rendered markup. A change to a file in `signatures/` is a
+  change to the user interface: review it as one.
 
-- Package manager is **bun**; run scripts as `bun run <script>`. Never `bun test`
-  (not our runner) — use `bun run test` (Vitest).
-- Full check gate: `bun run check` (oxfmt + oxlint + tsc). Other suites:
-  `bun run e2e` (live worker), `bun run test:e2e` (Playwright).
+- Package manager is **bun**; run scripts as `bun run <script>`. Never `bun test` (not our runner).
+- `bun run test` is the whole gate: check, unit tests, the worker scenarios, and the browser
+  journeys, against one fresh worker. It must stay green. For a faster loop, run one part:
+  `bun run check` (oxfmt + oxlint + tsc), `bun run test:unit` (Vitest), `bun run test:api`
+  (worker scenarios), `bun run test:browser` (Playwright journeys). Testing philosophy lives in
+  `e2e/AGENTS.md`: prefer a real-user journey over a test that pins implementation.
 - Version control is **Jujutsu (jj)**, colocated with git: use `jj`, not `git`.
 - Match the surrounding comment style: say _why_, not _what_.
 - The server HTTP architecture is Effect v4 HttpApi as specified in

@@ -2,7 +2,7 @@ import { expect } from "vitest";
 import { scenario } from "../src/scenario.ts";
 import { UPLOAD_FILE_FIELD } from "../../src/shared/http/uploads.ts";
 
-const upload = (bytes: Uint8Array, type: string, name: string): FormData => {
+const upload = (bytes: Uint8Array<ArrayBuffer>, type: string, name: string): FormData => {
   const form = new FormData();
   form.append(UPLOAD_FILE_FIELD, new Blob([bytes], { type }), name);
   return form;

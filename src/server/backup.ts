@@ -41,7 +41,7 @@ function groupIdsFrom(registry: RegistryState): string[] {
   return [...ids];
 }
 
-export async function collectSnapshot(env: Env): Promise<BackupSnapshot> {
+async function collectSnapshot(env: Env): Promise<BackupSnapshot> {
   const registry = await (await getAgentByName(env.GroupRegistry, REGISTRY_ID)).exportState();
 
   const groups: Record<string, GroupState> = {};
@@ -158,9 +158,10 @@ export interface RestoreResult {
 
 // Writes a snapshot back into the Durable Objects. This overwrites current
 // state for every key present in the snapshot, so callers must gate it.
-export async function restoreFrom(env: Env, key: string): Promise<RestoreResult> {
+// Resolves `null` when no snapshot has that key.
+export async function restoreFrom(env: Env, key: string): Promise<RestoreResult | null> {
   const object = await env.BACKUPS.get(key);
-  if (!object) throw new Error(`backup not found: ${key}`);
+  if (!object) return null;
   // SAFETY: this R2 object is written only by createBackup using the BackupSnapshot schema.
   const snapshot = (await object.json()) as BackupSnapshot;
 

@@ -27,6 +27,8 @@ import {
 import { addNoteOp, addReplyOp, editNoteOp, removeNoteOp } from "../logic/notes/noteOps.ts";
 import { canDeleteNote, canEditNote, type NoteViewer } from "../logic/notes/permissions.ts";
 import { editIconView } from "./icons.ts";
+import { loadingView } from "./loading.ts";
+import { tagGuard } from "./messageGuard.ts";
 import { noteBodyView } from "./noteBody.ts";
 import {
   NoteFilterMode,
@@ -64,16 +66,8 @@ import {
 
 const OnlinePeer = ChangedNoteAgentPresence.fields.peers;
 
-const DraftFormat = Schema.Struct({
-  collapsed: Schema.Boolean,
-  bold: Schema.Boolean,
-  italic: Schema.Boolean,
-  highlight: Schema.Boolean,
-});
-
 export const NotesModel = Schema.Struct({
   ready: Schema.Boolean,
-  status: Schema.Literals(["syncing", "online", "offline"]),
   /**
    * The group whose socket is actually acquired, null until `ConnectedNoteAgent`
    * arrives and again once it is released. The event Subscription gates on this
@@ -84,7 +78,6 @@ export const NotesModel = Schema.Struct({
   notes: Schema.Array(Note),
   pendingNoteIds: Schema.Array(Schema.String),
   failedNoteIds: Schema.Array(Schema.String),
-  pendingCount: Schema.Number,
   peers: OnlinePeer,
   draft: Schema.String,
   draftTags: Schema.Array(Schema.String),
@@ -96,8 +89,9 @@ export const NotesModel = Schema.Struct({
   /** The club whose draft the editor is holding, learned from the editor
    *  itself, so an abandoned upload can be cleaned up without the view. */
   groupRef: Schema.NullOr(Schema.String),
-  draftFormat: DraftFormat,
-  uploadingImage: Schema.Boolean,
+  /** Uploads still in flight, by the token that ties each back to its image.
+   *  Several pasted images upload at once, so one flag would clear on the first. */
+  uploadingImageTokens: Schema.Array(Schema.String),
   /**
    * Bumped whenever the composer must be re-seeded from the Model rather than
    * from what the reader has typed. The editor element is keyed on it, so the
@@ -117,18 +111,11 @@ export const NotesModel = Schema.Struct({
   filterTerms: Schema.Array(NoteFilterTerm),
   filterMode: NoteFilterMode,
   filterInput: Schema.String,
-  error: Schema.NullOr(Schema.String),
 });
 export type NotesModel = typeof NotesModel.Type;
 
-export const StartedNote = m("StartedNote");
 export const StartedNoteEdit = m("StartedNoteEdit", {
   noteId: Schema.String,
-  body: Schema.String,
-  tags: Schema.Array(Schema.String),
-  highlights: Schema.Array(Highlight),
-});
-export const ChangedNoteComposer = m("ChangedNoteComposer", {
   body: Schema.String,
   tags: Schema.Array(Schema.String),
   highlights: Schema.Array(Highlight),
@@ -140,18 +127,11 @@ export const FocusedNoteHighlight = m("FocusedNoteHighlight", {
   highlightId: Schema.NullOr(Schema.String),
 });
 export const SubmittedNoteOperation = m("SubmittedNoteOperation", { op: NoteOp });
-export const SelectedNoteImage = m("SelectedNoteImage", {
-  groupRef: Schema.String,
-  file: FoldkitFile.File,
-});
 export const UploadedNoteImage = m("UploadedNoteImage", {
   token: Schema.String,
   imageId: Schema.String,
 });
-export const FailedNoteImageUpload = m("FailedNoteImageUpload", {
-  token: Schema.String,
-  message: Schema.String,
-});
+export const FailedNoteImageUpload = m("FailedNoteImageUpload", { token: Schema.String });
 export const CompletedImageAction = m("CompletedImageAction");
 export const StartedNoteReply = m("StartedNoteReply", { noteId: Schema.String });
 export const RemovedNoteDraftTag = m("RemovedNoteDraftTag", { tag: Schema.String });
@@ -169,14 +149,11 @@ export const ToggledNoteFilterMode = m("ToggledNoteFilterMode");
 export const ClearedNoteFilters = m("ClearedNoteFilters");
 
 export const NotesMessage = Schema.Union([
-  StartedNote,
   StartedNoteEdit,
-  ChangedNoteComposer,
   CancelledNoteComposer,
   AttachedNoteHighlight,
   FocusedNoteHighlight,
   SubmittedNoteOperation,
-  SelectedNoteImage,
   UploadedNoteImage,
   FailedNoteImageUpload,
   CompletedImageAction,
@@ -214,7 +191,7 @@ export const NotesMessage = Schema.Union([
 ]);
 export type NotesMessage = typeof NotesMessage.Type;
 
-export const isNotesMessage = Schema.is(NotesMessage);
+export const isNotesMessage = tagGuard(NotesMessage);
 
 export const EnqueueNoteOperation = Command.define("EnqueueNoteOperation", {
   args: { op: NoteOp },
@@ -236,9 +213,7 @@ export const UploadNoteImage = Command.define("UploadNoteImage", {
     return bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.uploadImage({ params: { groupRef }, payload })),
       Effect.map(({ id }) => UploadedNoteImage({ token, imageId: id })),
-      Effect.catch((error) =>
-        Effect.succeed(FailedNoteImageUpload({ token, message: String(error) })),
-      ),
+      Effect.catch(() => Effect.succeed(FailedNoteImageUpload({ token }))),
     );
   },
 });
@@ -270,7 +245,7 @@ export const MarkNoteImageFailed = Command.define("MarkNoteImageFailed", {
  *  note that never arrives. */
 export const DiscardNoteImage = Command.define("DiscardNoteImage", {
   args: { groupRef: Schema.String, imageId: Schema.String },
-  messages: [CompletedImageAction, FailedNoteImageUpload],
+  messages: [CompletedImageAction],
   execute: ({ groupRef, imageId }) =>
     bookclubClient.pipe(
       Effect.flatMap((client) => client.groups.deleteImage({ params: { groupRef, imageId } })),
@@ -281,12 +256,10 @@ export const DiscardNoteImage = Command.define("DiscardNoteImage", {
 
 export const initialNotesModel = (): NotesModel => ({
   ready: false,
-  status: "syncing",
   connectionKey: null,
   notes: [],
   pendingNoteIds: [],
   failedNoteIds: [],
-  pendingCount: 0,
   peers: [],
   draft: "",
   draftTags: [],
@@ -295,8 +268,7 @@ export const initialNotesModel = (): NotesModel => ({
   draftImageIds: [],
   unresolvedImages: 0,
   groupRef: null,
-  draftFormat: { collapsed: true, bold: false, italic: false, highlight: false },
-  uploadingImage: false,
+  uploadingImageTokens: [],
   composerGeneration: 0,
   editingNoteId: null,
   composing: false,
@@ -306,8 +278,10 @@ export const initialNotesModel = (): NotesModel => ({
   filterTerms: [],
   filterMode: "all",
   filterInput: "",
-  error: null,
 });
+
+const withoutUpload = (model: NotesModel, token: string): readonly string[] =>
+  model.uploadingImageTokens.filter((pending) => pending !== token);
 
 const opBody = (op: NoteOp): string => ("body" in op && typeof op.body === "string" ? op.body : "");
 
@@ -374,10 +348,8 @@ export const updateNotes = (
   message: NotesMessage,
 ): readonly [NotesModel, readonly NotesCommand[]] => {
   switch (message._tag) {
-    case "StartedNote":
-      // Uploads the abandoned draft was holding have no note to belong to.
-      return [{ ...clearComposer(model), composing: true }, discardDraftImages(model, [])];
     case "CancelledNoteComposer":
+      // Uploads the abandoned draft was holding have no note to belong to.
       return [clearComposer(model), discardDraftImages(model, [])];
     case "StartedNoteReply":
       return [
@@ -471,28 +443,12 @@ export const updateNotes = (
       ];
     case "ExtractedNoteDraftTags":
       return [{ ...model, draftTags: withTags(model.draftTags, message.tags) }, []];
-    case "ChangedNoteDraftSelection":
-      return [
-        {
-          ...model,
-          draftFormat: {
-            collapsed: message.collapsed,
-            bold: message.bold,
-            italic: message.italic,
-            highlight: message.highlight,
-          },
-        },
-        [],
-      ];
-    case "FailedNoteEditor":
-      return [{ ...model, error: message.message }, []];
-    case "SelectedNoteImage":
     case "PastedNoteImage": {
       // The image is part of the document from the moment it is chosen; the
       // token is what ties the upload's outcome back to it.
       const token = crypto.randomUUID();
       return [
-        { ...model, uploadingImage: true, error: null },
+        { ...model, uploadingImageTokens: [...model.uploadingImageTokens, token] },
         [
           ShowPendingNoteImage({ token, file: message.file }),
           UploadNoteImage({ groupRef: message.groupRef, token, file: message.file }),
@@ -501,7 +457,7 @@ export const updateNotes = (
     }
     case "RetriedNoteImage":
       return [
-        { ...model, uploadingImage: true, error: null },
+        { ...model, uploadingImageTokens: [...withoutUpload(model, message.token), message.token] },
         [UploadNoteImage({ groupRef: message.groupRef, token: message.token, file: message.file })],
       ];
     case "UploadedNoteImage":
@@ -510,14 +466,14 @@ export const updateNotes = (
       return [
         {
           ...model,
-          uploadingImage: false,
+          uploadingImageTokens: withoutUpload(model, message.token),
           draftImageIds: [...model.draftImageIds, message.imageId],
         },
         [ResolveNoteImage({ token: message.token, imageId: message.imageId })],
       ];
     case "FailedNoteImageUpload":
       return [
-        { ...model, uploadingImage: false, error: message.message },
+        { ...model, uploadingImageTokens: withoutUpload(model, message.token) },
         [MarkNoteImageFailed({ token: message.token })],
       ];
     case "RemovedNoteImage":
@@ -525,7 +481,7 @@ export const updateNotes = (
         {
           ...model,
           draftImageIds: model.draftImageIds.filter((id) => id !== message.imageId),
-          uploadingImage: false,
+          uploadingImageTokens: withoutUpload(model, message.token),
         },
         message.imageId === ""
           ? []
@@ -562,16 +518,6 @@ export const updateNotes = (
             )?.id ?? null);
       return [{ ...model, focusedNoteId: focused }, []];
     }
-    case "ChangedNoteComposer":
-      return [
-        {
-          ...model,
-          draft: message.body,
-          draftTags: message.tags,
-          draftHighlights: message.highlights,
-        },
-        [],
-      ];
     case "SubmittedNoteOperation":
       return [
         clearComposer(model),
@@ -581,8 +527,6 @@ export const updateNotes = (
           ...discardDraftImages(model, [...noteImageIds(opBody(message.op))]),
         ],
       ];
-    case "ChangedNoteAgentStatus":
-      return [{ ...model, status: message.status }, []];
     case "ChangedNoteAgentPresence":
       return [{ ...model, peers: message.peers }, []];
     case "ChangedNotes":
@@ -593,21 +537,23 @@ export const updateNotes = (
           notes: message.notes,
           pendingNoteIds: message.pendingNoteIds,
           failedNoteIds: message.failedNoteIds,
-          pendingCount: message.pendingCount,
         },
         [],
       ];
     case "FailedNoteAgentConnection":
-      return [{ ...model, status: "offline", connectionKey: null, error: message.reason }, []];
-    case "FailedNoteFlush":
-    case "DroppedNoteOperation":
-      return [{ ...model, status: "offline", error: message.reason }, []];
-    case "RejectedNoteOperations":
-      return [{ ...model, error: `${message.count} note operation rejected` }, []];
+      return [{ ...model, connectionKey: null }, []];
     case "ReleasedNoteAgent":
-      return [{ ...model, status: "offline", connectionKey: null, peers: [] }, []];
+      return [{ ...model, connectionKey: null, peers: [] }, []];
     case "ConnectedNoteAgent":
       return [{ ...model, connectionKey: message.groupId }, []];
+    // The panel shows each note's own sync state, and the host raises a toast
+    // for a rejection; nothing here keeps a connection-wide status line.
+    case "ChangedNoteAgentStatus":
+    case "FailedNoteFlush":
+    case "DroppedNoteOperation":
+    case "RejectedNoteOperations":
+    case "ChangedNoteDraftSelection":
+    case "FailedNoteEditor":
     case "QueuedNoteOperation":
     case "StampedNoteAgentIdentity":
       return [model, []];
@@ -794,7 +740,7 @@ export const notesView = <Message>(
         h.div(
           [h.Class("note-editor-actions")],
           [
-            ...(model.uploadingImage
+            ...(model.uploadingImageTokens.length > 0
               ? [h.span([h.Class("note-editor-hint"), h.Role("status")], ["Uploading image"])]
               : []),
             h.button(
@@ -1263,23 +1209,6 @@ export const notesView = <Message>(
       ],
     );
 
-  const loadingView = (): Html =>
-    h.output(
-      [h.Class("loading loading--note-panel"), h.AriaLive("polite"), h.AriaLabel("Loading")],
-      [
-        h.span(
-          [h.Class("loading-text")],
-          [
-            "LOADING",
-            h.span(
-              [h.Class("loading-dots"), h.AriaHidden(true)],
-              [h.span([], ["."]), h.span([], ["."]), h.span([], ["."])],
-            ),
-          ],
-        ),
-      ],
-    );
-
   const roots = conversation.roots;
   return h.aside(
     [h.Class("note-panel")],
@@ -1288,7 +1217,7 @@ export const notesView = <Message>(
         [h.Class("note-panel-toolbar")],
         [h.h2([h.Class("label")], ["Notes"]), filterBarView()],
       ),
-      ...(loading && !composing ? [loadingView()] : []),
+      ...(loading && !composing ? [loadingView(h, "loading--note-panel")] : []),
       ...(!loading && roots.length === 0 && !composing
         ? [
             h.p(

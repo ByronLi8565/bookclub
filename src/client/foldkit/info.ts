@@ -3,6 +3,7 @@ import type { Command } from "foldkit";
 import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { infoCards, type InfoCard } from "../logic/info/infoCards.ts";
+import { tagGuard } from "./messageGuard.ts";
 import { modalTabsView, modalView, type ModalTab } from "./modal.ts";
 import { noteBodyView } from "./noteBody.ts";
 
@@ -35,10 +36,7 @@ export const SelectedInfoPage = m("SelectedInfoPage", { page: InfoPage });
 export const InfoMessage = Schema.Union([SelectedInfoPage]);
 export type InfoMessage = typeof InfoMessage.Type;
 
-const matchesInfoMessage = Schema.is(InfoMessage);
-
-export const isInfoMessage = (message: { _tag: string }): message is InfoMessage =>
-  matchesInfoMessage(message);
+export const isInfoMessage = tagGuard(InfoMessage);
 
 export const updateInfo = (
   model: InfoModel,

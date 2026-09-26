@@ -1,9 +1,8 @@
 import { monotonicFactory } from "ulidx";
+import { MAX_IMAGE_UPLOAD_BYTES } from "../../shared/http/uploads.ts";
 import type { Env } from "../env.ts";
 
-const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-const IMAGE_ID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
 
 const ulid = monotonicFactory();
 
@@ -29,8 +28,9 @@ export function imageKey(groupId: string, imageId: string): string {
   return `${groupId}/${imageId}`;
 }
 
-export function validImageId(imageId: string): boolean {
-  return IMAGE_ID_PATTERN.test(imageId);
+/** Avatars share the images bucket under a per-account scope instead of a Group's. */
+export function avatarScope(userId: string): string {
+  return `avatars/${userId}`;
 }
 
 export async function storeImage(
@@ -41,7 +41,7 @@ export async function storeImage(
   uploadedBy?: string,
 ): Promise<StoreImageResult> {
   if (bytes.byteLength === 0) return { ok: false, reason: "empty" };
-  if (bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, reason: "too_large" };
+  if (bytes.byteLength > MAX_IMAGE_UPLOAD_BYTES) return { ok: false, reason: "too_large" };
   const type = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
   if (!IMAGE_TYPES.has(type)) return { ok: false, reason: "unsupported_type" };
 
@@ -83,16 +83,18 @@ export async function listImages(env: Env, groupId: string): Promise<GroupImageO
   const images: GroupImageObject[] = [];
   let cursor: string | undefined;
   do {
-    const page = await env.IMAGES.list({ prefix, cursor });
-    const metadata = await Promise.all(page.objects.map((object) => env.IMAGES.head(object.key)));
-    for (const [index, object] of page.objects.entries()) {
-      const detail = metadata[index];
+    const page = await env.IMAGES.list({
+      prefix,
+      cursor,
+      include: ["httpMetadata", "customMetadata"],
+    });
+    for (const object of page.objects) {
       images.push({
         id: object.key.slice(prefix.length),
         size: object.size,
-        contentType: detail?.httpMetadata?.contentType ?? "application/octet-stream",
+        contentType: object.httpMetadata?.contentType ?? "application/octet-stream",
         uploadedAt: object.uploaded.toISOString(),
-        uploadedBy: detail?.customMetadata?.uploadedBy ?? null,
+        uploadedBy: object.customMetadata?.uploadedBy ?? null,
       });
     }
     cursor = page.truncated ? page.cursor : undefined;

@@ -484,6 +484,12 @@
   }
 }
 
+/* The widget hides a read-only image's controls with `hidden`, which a control's
+   own `display` would otherwise outrank. */
+.note-editor-image [hidden] {
+  display: none;
+}
+
 .note-editor-image-remove {
   position: absolute;
   z-index: 1;

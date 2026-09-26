@@ -7,17 +7,15 @@ function tokenFrom(setCookie: string): string {
   return setCookie.split(";")[0].split("=").slice(1).join("=");
 }
 
-function requestWith(token: string): Request {
-  return new Request("https://bookclub.example/x", {
-    headers: { Cookie: `bc_pk_challenge=${token}` },
-  });
+function requestWith(token: string): string {
+  return `other=1; bc_pk_challenge=${token}`;
 }
 
 describe("passkey challenge cookie", () => {
   it("round-trips email and challenge", async () => {
     const cookie = await challengeCookie("a@b.com", "chal-123", SECRET);
     const result = await readChallenge(requestWith(tokenFrom(cookie)), SECRET);
-    expect(result).toEqual({ email: "a@b.com", challenge: "chal-123" });
+    expect(result).toMatchObject({ email: "a@b.com", challenge: "chal-123" });
   });
 
   it("rejects a token signed with a different secret", async () => {
@@ -34,7 +32,7 @@ describe("passkey challenge cookie", () => {
   });
 
   it("returns null when the cookie is absent", async () => {
-    const request = new Request("https://bookclub.example/x");
-    expect(await readChallenge(request, SECRET)).toBeNull();
+    expect(await readChallenge(undefined, SECRET)).toBeNull();
+    expect(await readChallenge("bc_session=abc", SECRET)).toBeNull();
   });
 });

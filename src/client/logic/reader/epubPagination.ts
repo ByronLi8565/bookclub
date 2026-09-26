@@ -11,7 +11,7 @@ export interface EpubPagination {
 
 /** Where the reader sits in the renderer's own terms, before it becomes a
  *  press count. */
-export interface EpubPlacement {
+interface EpubPlacement {
   spineIndex: number;
   page: number;
 }

@@ -4,6 +4,8 @@ import type { Html, HtmlBuilder } from "foldkit/html";
 import { m } from "foldkit/message";
 import { groupUrlName, type GroupUrlParts } from "../../shared/groupUrls.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
+import { loadingView } from "./loading.ts";
+import { tagGuard } from "./messageGuard.ts";
 import { modalView } from "./modal.ts";
 
 const COPIED_LABEL_MILLIS = 1500;
@@ -62,22 +64,11 @@ export const InviteMessage = Schema.Union([
 ]);
 export type InviteMessage = typeof InviteMessage.Type;
 
-const inviteMessageTags: ReadonlySet<string> = new Set([
-  "OpenedInvite",
-  "LoadedInviteLink",
-  "ChangedInviteEmail",
-  "SubmittedInvite",
-  "SentInvite",
-  "FailedInvite",
-  "CopiedInviteLink",
-  "MarkedInviteLinkCopied",
-  "ClearedInviteLinkCopied",
-  "RotatedInviteLink",
-  "FailedInviteLinkRotation",
-]);
+export const isInviteMessage = tagGuard(InviteMessage);
 
-export const isInviteMessage = (message: { _tag: string }): message is InviteMessage =>
-  inviteMessageTags.has(message._tag);
+/** An invite needs an address, and a second one while the first is in flight
+ *  would send it twice. */
+export const canSendInvite = (model: InviteModel): boolean => !model.busy && model.email !== "";
 
 /**
  * The link endpoint mints one on first ask and replaces it when rotating, which
@@ -213,24 +204,6 @@ export const updateInvite = (
   }
 };
 
-/** React's `Loading`, which `shared.css` styles by class name and nothing else. */
-const loadingView = <Message>(className: string, h: HtmlBuilder<Message>): Html =>
-  h.output(
-    [h.Class(`loading ${className}`), h.AriaLive("polite"), h.AriaLabel("Loading")],
-    [
-      h.span(
-        [h.Class("loading-text")],
-        [
-          "LOADING",
-          h.span(
-            [h.Class("loading-dots"), h.AriaHidden(true)],
-            [h.span([], ["."]), h.span([], ["."]), h.span([], ["."])],
-          ),
-        ],
-      ),
-    ],
-  );
-
 const ICON_ATTRIBUTES = <Message>(h: HtmlBuilder<Message>) => [
   h.Width("16"),
   h.Height("16"),
@@ -292,7 +265,7 @@ export const inviteControlsView = <Message>(
           [
             h.Type("submit"),
             h.Class("primary"),
-            h.Disabled(model.busy || model.email === ""),
+            h.Disabled(!canSendInvite(model)),
             h.Title("Send invite"),
           ],
           ["send invite"],
@@ -305,7 +278,7 @@ export const inviteControlsView = <Message>(
       [
         h.p([h.Class("modal-note")], ["Invite with link:"]),
         model.linkLoading
-          ? loadingView("loading--invite-link", h)
+          ? loadingView(h, "loading--invite-link")
           : h.div(
               [h.Class("invite-link")],
               [

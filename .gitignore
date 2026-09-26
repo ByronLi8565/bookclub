@@ -12,9 +12,6 @@ dist
 # agents dump
 docs
 
-# bombadil
-.bombadil
-
 # playwright
 test-results
 playwright-report

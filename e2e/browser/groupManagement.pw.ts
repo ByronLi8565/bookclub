@@ -2,7 +2,6 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { strToU8, zipSync } from "fflate";
 import {
-  BASE_URL,
   authenticateContext,
   books,
   joinGroup,
@@ -76,10 +75,7 @@ test("Group roles · an owner demotes a member and the live roster reflects it",
   page,
 }) => {
   const { ref } = await seedWorkspace(page.context());
-  const memberContext = await browser.newContext({
-    baseURL: BASE_URL,
-    viewport: { width: 1280, height: 900 },
-  });
+  const memberContext = await browser.newContext();
   try {
     const member = await authenticateContext(memberContext, "member");
     await joinGroup(page.context(), memberContext, ref);

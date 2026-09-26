@@ -30,7 +30,7 @@ describe("settings modal parity", () => {
     localStorage.clear();
   });
 
-  it("renders the reader page React rendered", async () => {
+  it("renders the reader page", async () => {
     const foldkit = await renderFoldkit<SettingsModel, typeof Close | SettingsMessage>({
       Model: SettingsModel,
       model: initialSettingsModel(),
@@ -39,7 +39,7 @@ describe("settings modal parity", () => {
     expectRecordedParity("settings-reader", foldkit);
   });
 
-  it("renders the account page React rendered", async () => {
+  it("renders the account page", async () => {
     // The account page is the shell's to pass in rather than the settings
     // module's to own, so this is the host's composition under test.
     const [initial] = appInit();

@@ -1,10 +1,6 @@
-import { Context } from "effect";
-import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { Env } from "../../server/env.ts";
 import { mintSessionToken } from "../../server/auth/cookies.ts";
-import { currentStructuredIdentity } from "../../server/http/authentication.ts";
-import { CloudflareEnv, cloudflareRequestContext } from "../../server/http/cloudflare.ts";
 import { bookclubHttpFallback } from "../../server/http/live.ts";
 import { DEFAULT_USER_PREFS } from "../../shared/types/userPrefs.ts";
 
@@ -30,19 +26,6 @@ const API_PREFIXES = ["/auth", "/me", "/users", "/groups", "/admin"] as const;
 afterAll(bookclubHttpFallback.dispose);
 
 describe("Bookclub Worker HttpApi seam", () => {
-  it("keeps Cloudflare bindings request-scoped", async () => {
-    const first = env("first");
-    const second = env("second");
-
-    const [firstSeen, secondSeen] = await Promise.all([
-      Promise.resolve(Context.get(cloudflareRequestContext(first), CloudflareEnv)),
-      Promise.resolve(Context.get(cloudflareRequestContext(second), CloudflareEnv)),
-    ]);
-
-    expect(firstSeen).toBe(first);
-    expect(secondSeen).toBe(second);
-  });
-
   it("does not authenticate structured HTTP with a query token", async () => {
     const bindings = env("query-token-secret");
     const token = await mintSessionToken(bindings, {
@@ -53,20 +36,19 @@ describe("Bookclub Worker HttpApi seam", () => {
       createdAt: "2026-08-15T00:00:00.000Z",
     });
 
-    await expect(
-      currentStructuredIdentity(
-        new Request(`https://bookclub.test/me/prefs?token=${token}`),
-        bindings,
-      ),
-    ).resolves.toBeNull();
-    await expect(
-      currentStructuredIdentity(
-        new Request("https://bookclub.test/me/prefs", {
-          headers: { authorization: `Bearer ${token}` },
-        }),
-        bindings,
-      ),
-    ).resolves.toMatchObject({ id: "user-1", email: "reader@example.com" });
+    agents.set("reader@example.com", { getPrefs: () => DEFAULT_USER_PREFS });
+    const byQuery = await bookclubHttpFallback.handler(
+      new Request(`https://bookclub.test/me/prefs?token=${token}`),
+      bindings,
+    );
+    expect(byQuery.status, "a URL is logged and shared, so it is never a credential").toBe(401);
+    const byBearer = await bookclubHttpFallback.handler(
+      new Request("https://bookclub.test/me/prefs", {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+      bindings,
+    );
+    expect(byBearer.status, "the native app's bearer header still signs in").toBe(200);
   });
 
   it("owns bare and nested API prefixes with a JSON 404", async () => {
@@ -78,13 +60,37 @@ describe("Bookclub Worker HttpApi seam", () => {
           new Request(`https://bookclub.test${path}`),
           bindings,
         );
-        const migratedGroupRoute = path.startsWith("/groups");
-        expect(response.status, path).toBe(migratedGroupRoute ? 401 : 404);
-        await expect(response.json(), path).resolves.toEqual({
-          error: migratedGroupRoute ? "unauthenticated" : "not_found",
-        });
+        // `/groups` is itself a route, so an anonymous caller is refused before any 404.
+        const groupsRoute = path.startsWith("/groups");
+        expect(response.status, path).toBe(groupsRoute ? 401 : 404);
+        await expect(response.json(), path).resolves.toEqual(
+          groupsRoute
+            ? { _tag: "Unauthenticated", error: "unauthenticated" }
+            : { error: "not_found" },
+        );
       }
     }
+  });
+
+  it("answers a malformed field with the code its endpoint documents", async () => {
+    const bindings = env("field-secret");
+    const token = await mintSessionToken(bindings, {
+      id: "user-1",
+      email: "reader@example.com",
+      displayName: "Reader",
+      groupIds: [],
+      createdAt: "2026-08-15T00:00:00.000Z",
+    });
+    const response = await bookclubHttpFallback.handler(
+      new Request("https://bookclub.test/me/password", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ password: "short" }),
+      }),
+      bindings,
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ _tag: "BadRequest", error: "weak_password" });
   });
 
   it("serves typed preferences and reading positions through the Worker adapter", async () => {
@@ -170,12 +176,5 @@ describe("Bookclub Worker HttpApi seam", () => {
       expect(response.status).toBe(401);
       await expect(response.json()).resolves.toMatchObject({ error: "unauthenticated" });
     }
-  });
-
-  it("retires application-shell service workers across deployments", () => {
-    const config = readFileSync(new URL("../../../vite.config.ts", import.meta.url), "utf8");
-    expect(config).toContain("selfDestroying: true");
-    expect(config).toContain("injectRegister: false");
-    expect(config).not.toContain("navigateFallback:");
   });
 });

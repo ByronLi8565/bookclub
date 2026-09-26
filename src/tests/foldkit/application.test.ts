@@ -1,19 +1,26 @@
 // @vitest-environment jsdom
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { Story } from "foldkit";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DismissedToast,
   DismissToastLater,
   errorToast,
+  FailedClientCommand,
+  FailedGroup,
   FailedGroups,
   FOLDKIT_RUNTIME_ID,
   ChangedLoginEmail,
   LeftTheApp,
   LoadGroup,
-  MissingGroup,
+  LoadedGroup,
+  PasskeyLogin,
   PushUrl,
+  RenameGroup,
+  RenamedGroup,
+  ReplaceUrl,
+  SelectedBook,
   ChangedNewGroupName,
   CreateGroup,
   CreatedGroup,
@@ -21,17 +28,14 @@ import {
   StartedCreatingClub,
   SubmittedNewGroup,
   ChangedLoginPassword,
-  DeleteGroup,
-  DeletedGroup,
-  Club,
-  Home,
+  ChangedRenameDraft,
+  CommittedRename,
   LoadGroups,
   LoadedSession,
   LoadedGroups,
   Model,
   Navigated,
   PasswordLogin,
-  RequestedDeleteGroup,
   RequestedSignOut,
   SignOut,
   SignedOut,
@@ -53,11 +57,61 @@ import {
   RequestedSetPassword,
   SetAccountPassword,
   SettingsOverlay,
+  StartedRename,
   init,
   makeBookclubApplication,
   update,
+  type Model as AppModel,
 } from "../../client/foldkit/application.ts";
-import { CompletedSettingsAction, LoadUserPrefs } from "../../client/foldkit/settings.ts";
+import { Club, Home } from "../../client/foldkit/routes.ts";
+import { ToggledReaderLayout } from "../../client/foldkit/reader.ts";
+import {
+  CompletedSettingsAction,
+  LoadUserPrefs,
+  SaveClubProfile,
+  SavedClubProfile,
+  SubmittedDisplayName,
+  UploadedAvatar,
+} from "../../client/foldkit/settings.ts";
+import type { GroupSummary } from "../../shared/types/groups.ts";
+
+/** The generated client resolves `fetch` once and holds it, so one stub that
+ *  delegates to a swappable answer is what lets each test choose one. */
+let respond: () => Promise<Response> = () => Promise.reject(new TypeError("Failed to fetch"));
+vi.stubGlobal("fetch", () => respond());
+
+const reader = { id: "reader-1", email: "reader@example.com", name: "Reader" };
+
+const club: GroupSummary = {
+  groupId: "group-1",
+  slug: "club",
+  publicId: "alpha",
+  displayName: "Club",
+  ownerId: reader.id,
+  sources: ["source-1", "source-2"],
+  bookTitles: {},
+  sourceMeta: {
+    "source-1": { kind: "pdf", contentType: "application/pdf", size: 1, addedBy: reader.id },
+    "source-2": { kind: "pdf", contentType: "application/pdf", size: 1, addedBy: reader.id },
+  },
+  memberCount: 1,
+};
+
+/** A signed-in member standing in a loaded club with no book open yet. */
+const inClub = (): AppModel => {
+  const [initial] = init();
+  const [signedIn] = update(initial, LoadedSession({ user: reader }));
+  const [routed] = update(signedIn, Navigated({ route: Club({ groupRef: "club-alpha" }) }));
+  return update(
+    routed,
+    LoadedGroup({
+      groupRef: "club-alpha",
+      group: club,
+      membership: { isMember: true, role: "owner" },
+      members: [{ id: reader.id, name: "Reader", email: reader.email, role: "owner" }],
+    }),
+  )[0];
+};
 
 describe("Foldkit Bookclub boundary", () => {
   it("opens public settings without requesting private account security", () => {
@@ -142,7 +196,6 @@ describe("Foldkit Bookclub boundary", () => {
       Story.Command.resolve(LoadUserPrefs, CompletedSettingsAction()),
       Story.model((model) => {
         expect(model.session._tag).toBe("AuthenticatedSession");
-        expect(model.account._tag).toBe("ReadyAccount");
         expect(Schema.decodeUnknownSync(Model)(JSON.parse(JSON.stringify(model)))).toEqual(model);
       }),
       // A club list that cannot be refreshed with nothing behind it is the one
@@ -163,24 +216,17 @@ describe("Foldkit Bookclub boundary", () => {
     expect(makeBookclubApplication(container).runtimeId).toBe(FOLDKIT_RUNTIME_ID);
   });
 
-  it("drives deletion and signout as explicit control-plane Commands", () => {
+  it("signs out through a Command and lands on the clubs card by URL", () => {
     const [initial] = init();
 
-    const groupId = "group-1";
     Story.story(
       update,
       Story.given({ ...initial, route: Club({ groupRef: "club-ref" }) }),
-      Story.message(RequestedDeleteGroup({ groupRef: "club-ref", groupId })),
-      Story.Command.resolve(DeleteGroup, DeletedGroup({ groupId })),
-      // Deleting a club navigates by URL rather than by assignment, so the
-      // address bar can never disagree with the Model about where the reader is.
-      Story.Command.expectExact(PushUrl({ href: "/" })),
-      Story.Command.resolve(PushUrl, LeftTheApp()),
-      // The runtime turns that push back into a route change.
-      Story.message(Navigated({ route: Home() })),
-      Story.model((model) => expect(model.route._tag).toBe("Home")),
       Story.message(RequestedSignOut()),
       Story.Command.resolve(SignOut, SignedOut()),
+      // Signing out navigates by URL rather than by assignment, so the address
+      // bar can never disagree with the Model about where the reader is.
+      Story.Command.expectExact(PushUrl({ href: "/" })),
       Story.Command.resolve(PushUrl, LeftTheApp()),
       Story.model((model) => expect(model.session._tag).toBe("AnonymousSession")),
     );
@@ -297,7 +343,10 @@ describe("Foldkit Bookclub boundary", () => {
       Story.message(Navigated({ route: Club({ groupRef: "new-club-public-1" }) })),
       // Loading the club itself is another story's subject; this one ends at
       // the route the push produced.
-      Story.Command.resolve(LoadGroup, MissingGroup({ groupRef: "new-club-public-1" })),
+      Story.Command.resolve(
+        LoadGroup,
+        FailedGroup({ groupRef: "new-club-public-1", reason: "notfound" }),
+      ),
       Story.model((model) => {
         expect(model.creatingClub).toBe(false);
         expect(model.newGroupName).toBe("");
@@ -334,6 +383,136 @@ describe("Foldkit Bookclub boundary", () => {
       Story.given({ ...initial, toasts: [toast] }),
       Story.message(DismissedToast({ id: toast.id })),
       Story.model((model) => expect(model.toasts).toEqual([])),
+    );
+  });
+});
+
+describe("the reader follows the reader's preferences", () => {
+  it("opens a book in the page layout and arrow keys that were chosen", () => {
+    const model = inClub();
+    const [opened] = update(
+      {
+        ...model,
+        settings: {
+          ...model.settings,
+          prefs: {
+            ...model.settings.prefs,
+            reader: { ...model.settings.prefs.reader, pdfPageLayout: "auto", smartArrows: "off" },
+          },
+        },
+      },
+      SelectedBook({ sourceId: "source-1" }),
+    );
+
+    expect(opened.reader?.layout).toBe("auto");
+    expect(opened.reader?.smartArrows).toBe("off");
+  });
+
+  it("flips the layout that is showing, and the stored preference with it", () => {
+    const [opened] = update(inClub(), SelectedBook({ sourceId: "source-1" }));
+    const shown = opened.reader?.layout;
+    const [toggled] = update(opened, ToggledReaderLayout());
+
+    expect(toggled.reader?.layout).not.toBe(shown);
+    expect(toggled.settings.prefs.reader.pdfPageLayout).toBe(toggled.reader?.layout);
+    const [back] = update(toggled, ToggledReaderLayout());
+    expect(back.reader?.layout).toBe(shown);
+  });
+});
+
+describe("the viewer's own club profile", () => {
+  it("keeps a saved nickname and photo on the viewer's roster entry", () => {
+    Story.story(
+      update,
+      Story.given(inClub()),
+      Story.message(SubmittedDisplayName({ groupId: club.groupId, displayName: "Ishmael" })),
+      Story.Command.resolve(
+        SaveClubProfile,
+        SavedClubProfile({ profile: { id: reader.id, displayName: "Ishmael" } }),
+      ),
+      Story.Command.resolve(DismissToastLater, DismissedToast({ id: "not-this-one" })),
+      Story.message(UploadedAvatar({ imageId: "image-1" })),
+      Story.Command.resolve(DismissToastLater, DismissedToast({ id: "not-this-one" })),
+      Story.model((model) => {
+        // The settings page reads the viewer's name back from the roster; a
+        // roster left alone snaps the field back to the old name.
+        expect(model.members.find((member) => member.id === reader.id)).toMatchObject({
+          name: "Ishmael",
+          avatarImageId: "image-1",
+        });
+      }),
+    );
+  });
+});
+
+describe("a jump held for a book", () => {
+  const anchor = { kind: "pdf-text" as const, page: 3, rects: [] };
+
+  it("is dropped when the reader opens a different book instead", () => {
+    const model = { ...inClub(), pendingJump: { sourceId: "source-2", anchor } };
+    const [opened] = update(model, SelectedBook({ sourceId: "source-1" }));
+
+    expect(opened.pendingJump).toBeNull();
+  });
+
+  it("is dropped when the reader leaves the club", () => {
+    const model = { ...inClub(), pendingJump: { sourceId: "source-2", anchor } };
+    const [left] = update(model, Navigated({ route: Home() }));
+
+    expect(left.pendingJump).toBeNull();
+  });
+});
+
+describe("renaming a club", () => {
+  it("keeps the club where it was in the list and replaces the URL", () => {
+    const other = { ...club, groupId: "group-2", slug: "other", publicId: "beta" };
+    const renamed = { ...club, slug: "the-whale", displayName: "The Whale" };
+
+    Story.story(
+      update,
+      Story.given({ ...inClub(), groups: [club, other] }),
+      Story.message(StartedRename({ value: club.displayName })),
+      Story.message(ChangedRenameDraft({ value: "The Whale" })),
+      Story.message(CommittedRename()),
+      Story.Command.expectExact(RenameGroup({ groupRef: "club-alpha", title: "The Whale" })),
+      Story.Command.resolve(RenameGroup, RenamedGroup({ group: renamed })),
+      // A rename is not somewhere new to go back from.
+      Story.Command.expectExact(ReplaceUrl({ href: "/clubs/the-whale-alpha" })),
+      Story.Command.resolve(ReplaceUrl, LeftTheApp()),
+      Story.model((model) => {
+        expect(model.groups.map((group) => group.displayName)).toEqual(["The Whale", "Club"]);
+        expect(model.currentGroup?.displayName).toBe("The Whale");
+        expect(model.renamingClub).toBe(false);
+      }),
+    );
+  });
+});
+
+describe("requests that never reach the server", () => {
+  it("turns a passkey sign-in with no connection into a sign-in error", async () => {
+    respond = () => Promise.reject(new TypeError("Failed to fetch"));
+    const failed = await Effect.runPromise(PasskeyLogin({ email: reader.email }).effect);
+
+    expect(failed._tag).toBe("FailedLogin");
+  });
+
+  it("names a refused passkey sign-in by the server's code", async () => {
+    respond = () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ _tag: "NotFound", error: "no_passkeys" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    expect(await Effect.runPromise(PasskeyLogin({ email: reader.email }).effect)).toEqual(
+      FailedLogin({ error: "no_passkeys" }),
+    );
+  });
+
+  it("says in words that a sign-out did not go through", async () => {
+    respond = () => Promise.reject(new TypeError("Failed to fetch"));
+    expect(await Effect.runPromise(SignOut().effect)).toEqual(
+      FailedClientCommand({ message: "Couldn't sign out. Try again." }),
     );
   });
 });

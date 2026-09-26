@@ -23,25 +23,25 @@ describe("login modal parity", () => {
     vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {});
   });
 
-  it("renders the email step React rendered", async () => {
+  it("renders the email step", async () => {
     expectRecordedParity("login-email-step", await foldkitLogin({}));
   });
 
-  it("renders a typed email and password the way React did", async () => {
+  it("renders a typed email and password", async () => {
     expectRecordedParity(
       "login-typed",
       await foldkitLogin({ loginEmail: EMAIL, loginPassword: "hunter2" }),
     );
   });
 
-  it("renders the code step React rendered", async () => {
+  it("renders the code step", async () => {
     expectRecordedParity(
       "login-code-step",
       await foldkitLogin({ loginEmail: EMAIL, loginStep: "code" }),
     );
   });
 
-  it("renders the wrong-password error React rendered", async () => {
+  it("renders the wrong-password error", async () => {
     expectRecordedParity(
       "login-wrong-password",
       await foldkitLogin({

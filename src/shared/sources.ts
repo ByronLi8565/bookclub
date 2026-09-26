@@ -1,5 +1,5 @@
 import type { GroupSummary } from "./types/groups.ts";
-import { EPUB_CONTENT_TYPE, type SourceRef, type SourceSummary } from "./types/sources.ts";
+import { EPUB_CONTENT_TYPE, type SourceSummary } from "./types/sources.ts";
 
 function summaryFor(group: GroupSummary, id: string): SourceSummary {
   const meta = group.sourceMeta[id];
@@ -18,11 +18,6 @@ export function books(group: GroupSummary): SourceSummary[] {
 
 export function sourceById(group: GroupSummary, id: string): SourceSummary | null {
   return group.sources.includes(id) ? summaryFor(group, id) : null;
-}
-
-export function sourceRefById(group: GroupSummary, id: string): SourceRef | null {
-  const source = sourceById(group, id);
-  return source ? { id: source.id, kind: source.kind, contentType: source.contentType } : null;
 }
 
 export function currentSourceId(group: GroupSummary): string | null {

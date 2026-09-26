@@ -3,8 +3,8 @@
 A scenario is ONE user-meaningful product journey, written once against the
 `Target` interface and run on every deployment that supports its capabilities.
 Tests are **black-box**: drive the product only through public surfaces (the
-HTTP API, the NoteAgent websocket). Never import app internals, never poke the
-Durable Object storage, never modify product code — if the product blocks you,
+HTTP API, the NoteAgent websocket, the browser UI). Never import app internals,
+never poke the Durable Object storage, never modify product code — if the product blocks you,
 STOP and report the blocker instead of working around it.
 
 **The test source is the review artifact.** A reviewer judges correctness by
@@ -70,9 +70,8 @@ scenario(
 One target today: **`wrangler`** — the built worker under `wrangler dev` on the
 e2e-only `wrangler.e2e.jsonc` (which declares the SQLite exports the agents SDK
 needs locally; it is NEVER deployed). Each run starts from a fresh throwaway
-persist dir. Adding a target = a factory in `src/targets/registry.ts`
-
-- a `setup/<name>.globalsetup.ts` + a project in `vitest.config.ts`.
+persist dir. Adding a target = a factory in `src/targets/registry.ts`, a
+`setup/<name>.globalsetup.ts`, and a project in `vitest.config.ts`.
 
 > There is intentionally no `vite`/`dev` target yet. Vite local development
 > inherits the SQLite exports, but this harness still uses a fresh isolated
@@ -81,27 +80,54 @@ persist dir. Adding a target = a factory in `src/targets/registry.ts`
 ## Running
 
 ```sh
-bun run e2e            # boots wrangler dev on a derived port, runs all scenarios
-bun run e2e:watch      # watch mode
+bun run test           # the whole gate: check, unit, scenarios, and journeys on one worker
+bun run test:api       # just the scenarios; boots wrangler dev on a derived port
 
 # Fast iteration against an already-running instance:
-bunx wrangler dev --config wrangler.e2e.jsonc --port 8842 --persist-to /tmp/bc-e2e
-E2E_WRANGLER_URL=http://127.0.0.1:8842 bun run e2e
+bunx wrangler dev --config wrangler.e2e.jsonc --port 8842 --persist-to "$(mktemp -d)"
+E2E_WRANGLER_URL=http://localhost:8842 bun run test:api
 ```
 
 Ports are derived from the checkout path (`src/ports.ts`), so two worktrees
 don't collide; `E2E_WRANGLER_PORT` pins one explicitly. Each run writes
 `runs/<target>/<slug>/result.json` (or `skipped.json`); wrangler's own output
-is captured to `runs/.wrangler/dev.log`.
+is captured to `runs/.wrangler/<target>.log`.
+
+## Browser journeys
+
+`browser/*.pw.ts` are Playwright journeys: a real reader in a real browser,
+against the production client bundle. Global setup (`setup/browser.globalsetup.ts`
+→ `src/worker.ts`) runs `vite build` and boots a fresh `wrangler dev` on its own
+derived port, so there is no dev server to start first. Each journey seeds its
+own identities and club through the public API (`browser/browserSupport.ts`),
+so journeys run fully parallel. The same rules apply as above: product-guarantee
+names, user-visible assertions, condition waits (`expect`, `expect.poll`), never
+`waitForTimeout`.
+
+Projects are chosen by a tag in the test name:
+
+| Tag         | Project        | Use for                                                              |
+| ----------- | -------------- | -------------------------------------------------------------------- |
+| (none)      | Desktop Safari | the default                                                          |
+| `@mobile`   | Mobile Safari  | phone layout and touch gestures                                      |
+| `@chromium` | Desktop Chrome | signing in through the UI (WebKit drops the Secure cookie over http) |
+| `@perf`     | Performance    | timing loops; only exists with `READER_PERF=1` (`bun run test:perf`) |
+
+```sh
+bun run test:browser                      # every journey
+bunx playwright test e2e/browser/reader.pw.ts --project="Desktop Safari"
+E2E_BROWSER_URL=http://localhost:8842 bun run test:browser   # reuse a running worker (serves dist/client)
+```
 
 ## Discovering payload shapes
 
-The public surface is the worker's routes. To see what an endpoint accepts and
-returns, read the route + workflow definitions — READ ONLY, for shapes, not for
+The public surface is the worker's HTTP API. To see what an endpoint accepts and
+returns, read the contract and its handlers — READ ONLY, for shapes, not for
 importing:
 
-- HTTP routes: `src/server/{worker,routes/groupRoutes,routes/userRoutes}.ts`
-- their result shapes: `src/server/workflows/*.ts`
+- the HttpApi contract (paths, payloads, success and error schemas):
+  `src/shared/http/*.ts`
+- its handlers: `src/server/http/*Handlers.ts`
 - websocket RPC methods (the `@callable`s): `src/server/state/NoteAgent.ts`
 - wire types shared with the client: `src/shared/types/*.ts`
 

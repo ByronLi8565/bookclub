@@ -1,6 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-
-// Mobile Safari emulation per https://playwright.dev/docs/emulation
+import { targetBaseUrl } from "./e2e/src/ports.ts";
 
 // A launchd session that is not attached to the user's GUI session refuses the
 // mach service registration Chromium's multi-process startup does, and the
@@ -9,54 +8,44 @@ import { defineConfig, devices } from "@playwright/test";
 // in a normal terminal, where multi-process is faster and closer to production.
 const detachedSession = !!process.env.PW_DETACHED_SESSION;
 const chromiumLaunch = detachedSession ? { args: ["--single-process", "--no-zygote"] } : {};
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
-const testServer = new URL(baseURL);
+const desktop = { width: 1280, height: 900 };
 
+// Journeys run against the built client on a fresh e2e worker
+// (e2e/setup/browser.globalsetup.ts), never a developer's dev server, and every
+// journey mints its own identities, so they are safe to run in parallel.
 export default defineConfig({
-  testDir: ".",
-  testMatch: ["src/tests/playwright/**/*.pw.ts", "e2e/browser/**/*.pw.ts"],
+  testDir: "e2e/browser",
+  testMatch: "**/*.pw.ts",
+  globalSetup: "./e2e/setup/browser.globalsetup.ts",
   fullyParallel: true,
-  forbidOnly: !!process.env.CI,
+  forbidOnly: true,
   retries: 0,
-  workers: 1,
+  workers: process.env.CI ? 2 : "50%",
   reporter: [["list"]],
-  use: { baseURL, trace: "on-first-retry" },
+  use: { baseURL: targetBaseUrl("browser"), trace: "retain-on-failure" },
   projects: [
     {
-      name: "Mobile Safari",
-      testMatch: ["**/foldkitReaderGestures.pw.ts"],
-      use: { ...devices["iPhone 14"] },
-    },
-    {
       name: "Desktop Safari",
-      testMatch: [
-        "**/foldkitReader.pw.ts",
-        "**/foldkitReader.perf.pw.ts",
-        "**/foldkitComposer.pw.ts",
-        "e2e/browser/**/*.pw.ts",
-      ],
-      // Performance measurement is a separate gate, not a skipped functional
-      // test. `bun run perf:reader` opts it back into this project explicitly.
-      testIgnore: process.env.READER_PERF === "1" ? [] : ["**/foldkitReader.perf.pw.ts"],
-      use: { browserName: "webkit", viewport: { width: 1280, height: 900 } },
+      grepInvert: /@mobile|@chromium|@perf/u,
+      use: { browserName: "webkit", viewport: desktop },
     },
+    { name: "Mobile Safari", grep: /@mobile/u, use: { ...devices["iPhone 14"] } },
     {
-      // The whole-application checks are about the client and the worker
-      // agreeing, not about a rendering engine's quirks, so they run on Chromium
-      // — which is also the engine that still starts in a detached session.
+      // WebKit drops the Secure session cookie over local http, so journeys that
+      // sign in through the UI itself run on Chromium, which treats loopback as secure.
       name: "Desktop Chrome",
-      testMatch: ["**/foldkitApp.pw.ts", "**/deployment.pw.ts"],
-      use: {
-        browserName: "chromium",
-        viewport: { width: 1280, height: 900 },
-        launchOptions: chromiumLaunch,
-      },
+      grep: /@chromium/u,
+      use: { browserName: "chromium", viewport: desktop, launchOptions: chromiumLaunch },
     },
+    // Performance measurement is a separate gate that `bun run test:perf` opts into.
+    ...(process.env.READER_PERF === "1"
+      ? [
+          {
+            name: "Performance",
+            grep: /@perf/u,
+            use: { browserName: "webkit" as const, viewport: desktop },
+          },
+        ]
+      : []),
   ],
-  webServer: {
-    command: `vite --host ${testServer.hostname} --port ${testServer.port} --strictPort`,
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
 });

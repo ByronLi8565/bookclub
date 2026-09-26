@@ -49,6 +49,7 @@ interface FakeEngine {
 
 interface FakeSession extends EpubSession {
   moved: () => void;
+  relaidOut: (place: EpubPlace) => void;
   select: (selection: EpubSelectionReading | null) => void;
 }
 
@@ -64,6 +65,7 @@ function makeFakeEngine({ load }: FakeEngineOptions = {}): FakeEngine {
     const id = `source-${sessions.length + 1}`;
     lifecycle.push(`created:${spread}`);
     let listener: (() => void) | null = null;
+    let relayoutListener: ((place: EpubPlace) => void) | null = null;
     let selection: EpubSelectionReading | null = null;
     const marker = element.ownerDocument.createElement("span");
     element.appendChild(marker);
@@ -92,8 +94,9 @@ function makeFakeEngine({ load }: FakeEngineOptions = {}): FakeEngine {
         lifecycle.push(`goTo:${cfi}`);
         return Promise.resolve();
       },
-      setFontSize: (percent) => {
-        lifecycle.push(`fontSize:${percent}`);
+      setFontSize: (points) => {
+        lifecycle.push(`fontSize:${points}`);
+        return Promise.resolve();
       },
       setColors: (colors) => {
         lifecycle.push(`colors:${colors.background}`);
@@ -111,15 +114,18 @@ function makeFakeEngine({ load }: FakeEngineOptions = {}): FakeEngine {
         lifecycle.push(`spread:${nextSpread}`);
         return Promise.resolve();
       },
-      measurePagination: (isCancelled) => {
-        lifecycle.push("measured");
-        return Promise.resolve(!isCancelled());
+      onRelaidOut(handler) {
+        relayoutListener = handler;
+        return () => {
+          relayoutListener = null;
+        };
       },
       destroy() {
         lifecycle.push("destroyed");
         marker.remove();
       },
       moved: () => listener?.(),
+      relaidOut: (place) => relayoutListener?.(place),
       select: (next) => {
         selection = next;
       },
@@ -155,6 +161,8 @@ function describeMessage(message: EpubMountMessage): string {
       return `OpenedEpub:${message.sourceId}:${message.title ?? "untitled"}:${message.place?.cfi ?? "nowhere"}`;
     case "MovedEpub":
       return `MovedEpub:${message.sourceId}:${message.place.cfi ?? "nowhere"}`;
+    case "RelaidOutEpub":
+      return `RelaidOutEpub:${message.sourceId}:${message.place.count.total}`;
     case "SelectedEpubText":
       return `SelectedEpubText:${message.sourceId}:${message.quote.exact}`;
     case "ClearedEpubSelection":
@@ -298,7 +306,7 @@ describe("EPUB Foldkit Mount", () => {
     handle.dispose();
   });
 
-  it("serializes spread changes and applies the latest requested layout", async () => {
+  it("reports the pages counted after a relayout without claiming the reader moved", async () => {
     const fake = makeFakeEngine();
     const adapter = makeEpubMount({
       loadSource: () => Promise.resolve(dorianBytes()),
@@ -307,27 +315,12 @@ describe("EPUB Foldkit Mount", () => {
     const handle = startReader(adapter, "a");
     await vi.waitFor(() => expect(log()).toContain("OpenedEpub:a"));
 
-    const calls: string[] = [];
-    let finishFirst = (): void => {
-      throw new Error("first spread change has not started");
-    };
-    fake.latest().setSpread = async (spread) => {
-      calls.push(spread);
-      if (calls.length === 1) {
-        await new Promise<void>((resolve) => {
-          finishFirst = resolve;
-        });
-      }
-    };
+    await Effect.runPromise(adapter.setFontSize(18));
+    expect(fake.lifecycle, "the zoom reaches the open book").toContain("fontSize:18");
+    fake.latest().relaidOut({ ...A_PLACE, count: { ...A_PLACE.count, total: 412 } });
 
-    const first = Effect.runPromise(adapter.setSpread("none"));
-    await vi.waitFor(() => expect(calls).toEqual(["none"]));
-    const second = Effect.runPromise(adapter.setSpread("auto"));
-    expect(calls).toEqual(["none"]);
-
-    finishFirst();
-    await Promise.all([first, second]);
-    expect(calls).toEqual(["none", "auto"]);
+    await vi.waitFor(() => expect(log()).toContain("RelaidOutEpub:a:412"));
+    expect(log(), "the reader's place did not change").not.toContain("MovedEpub");
 
     handle.dispose();
   });
@@ -390,6 +383,9 @@ describe("EPUB Foldkit Mount", () => {
   });
 
   it("removes listeners and destroys the session when the element unmounts", async () => {
+    // Fake timers that still follow the wall clock, so the selection poll can
+    // be driven past its interval on demand below.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const fake = makeFakeEngine();
     const adapter = makeEpubMount({
       loadSource: () => Promise.resolve(dorianBytes()),
@@ -417,10 +413,9 @@ describe("EPUB Foldkit Mount", () => {
       quote: { type: "TextQuoteSelector", exact: "late", prefix: "", suffix: "" },
       point: { x: 0, y: 0 },
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 400);
-    });
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(log()).toBe(before);
+    vi.useRealTimers();
 
     // Commands taken after release must not reach a destroyed session.
     await Effect.runPromise(adapter.turnPage("next"));
@@ -464,6 +459,55 @@ describe("EPUB Foldkit Mount", () => {
     await vi.waitFor(() => expect(fake.lifecycle).toContain("destroyed"));
   });
 
+  it("publishes a failure when the renderer itself cannot be loaded", async () => {
+    // The browser engine imports epub.js on demand; offline, or after a deploy
+    // replaced the chunk, that import rejects before any session exists.
+    const adapter = makeEpubMount({
+      loadSource: () => Promise.resolve(dorianBytes()),
+      engine: () => Promise.reject(new TypeError("Failed to fetch dynamically imported module")),
+    });
+    const handle = startReader(adapter, "a");
+
+    await vi.waitFor(() =>
+      expect(log()).toContain("FailedEpubLoad:a:Failed to fetch dynamically imported module"),
+    );
+    expect(log()).not.toContain("OpenedEpub");
+    await expect(Effect.runPromise(adapter.turnPage("next"))).resolves.toBeUndefined();
+
+    handle.dispose();
+  });
+
+  it("rejects only the caller when a real session fails to open", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown): void => void rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+
+    const element = document.createElement("div");
+    document.body.appendChild(element);
+    const session = await epubJsEngine({
+      sourceId: "broken-test",
+      element,
+      spread: "auto",
+      fontSizePoints: 16,
+      colors: { background: "#fff", text: "#000", link: "#00f" },
+      onHighlightClick: () => {},
+    });
+
+    const failure = await session.load(new TextEncoder().encode("not an epub").buffer, null).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    process.off("unhandledRejection", onRejection);
+
+    expect(failure).not.toBeNull();
+    expect(rejections).not.toContain(failure);
+    session.destroy();
+    element.remove();
+  });
+
   it("opens the real dorian.epub bytes and exposes a reader over the live book", async () => {
     const parseOnlyEngine: EpubEngine = () => {
       const book = ePub();
@@ -483,8 +527,8 @@ describe("EPUB Foldkit Mount", () => {
         syncHighlights: () => {},
         setSearchHighlight: () => {},
         setSpread: () => Promise.resolve(),
-        measurePagination: () => Promise.resolve(false),
-        setFontSize: () => {},
+        onRelaidOut: () => () => {},
+        setFontSize: () => Promise.resolve(),
         setColors: () => {},
         clearSelection: () => {},
         destroy: () => book.destroy(),
@@ -497,7 +541,7 @@ describe("EPUB Foldkit Mount", () => {
     const handle = startReader(adapter, "a");
 
     await vi.waitFor(() => expect(log()).toMatch(/OpenedEpub:a:.*Dorian Gray/u), {
-      timeout: 20000,
+      timeout: 5_000,
     });
     expect(await Effect.runPromise(adapter.reader.search("forehead"))).toHaveLength(12);
 
@@ -507,7 +551,7 @@ describe("EPUB Foldkit Mount", () => {
     await vi.waitFor(async () =>
       expect(await Effect.runPromise(adapter.reader.search("forehead"))).toEqual([]),
     );
-  }, 30000);
+  }, 10_000);
 
   it("tears a real session down mid-open without throwing inside epub.js", async () => {
     // `renderTo` queues `start` behind `book.opened`. Destroying the rendition
@@ -534,12 +578,12 @@ describe("EPUB Foldkit Mount", () => {
     void session.load(dorianBytes(), null).catch(() => {});
     session.destroy();
 
-    await vi.waitFor(() => expect(document.querySelector(".epub-container")).toBeNull(), {
-      timeout: 20000,
-    });
-    // Give any queued task the destroy stranded a chance to surface.
+    expect(document.querySelector(".epub-container")).toBeNull();
+    // The epub.js teardown waits for the open to settle; once the book is
+    // destroyed, a macrotask boundary lets any stranded rejection surface.
+    await vi.waitFor(() => expect(session.book.spine).toBeUndefined(), { timeout: 5_000 });
     await new Promise((resolve) => {
-      setTimeout(resolve, 250);
+      setImmediate(resolve);
     });
     process.off("unhandledRejection", onRejection);
 
@@ -552,7 +596,7 @@ describe("EPUB Foldkit Mount", () => {
       .filter((reason) => /reading '(package|navigation|spine|opened|packaging)'/u.test(reason));
     expect(strandedReads).toEqual([]);
     element.remove();
-  }, 30000);
+  }, 10_000);
 
   it("ignores a page turn before epub.js has installed its manager", async () => {
     const element = document.createElement("div");
@@ -582,11 +626,11 @@ describe("EPUB Foldkit Mount", () => {
     // Whether jsdom finishes `display()` depends on its layout shims; either
     // way releasing the Mount must tear down the rendition deterministically.
     await vi.waitFor(() => expect(document.querySelector(".epub-container")).not.toBeNull(), {
-      timeout: 20000,
+      timeout: 5_000,
     });
     clickButton("none");
     await vi.waitFor(() => expect(document.querySelector(".epub-container")).toBeNull());
 
     handle.dispose();
-  }, 30000);
+  }, 10_000);
 });

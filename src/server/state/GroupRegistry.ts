@@ -1,9 +1,11 @@
-import { Agent } from "agents";
+import { ServerOwnedAgent } from "./serverOwnedAgent.ts";
 import type { Env } from "../env.ts";
 
 export { REGISTRY_ID } from "./registryId.ts";
 
 export interface RegistryState {
+  /** Slug claims from before public ids. Never written now, but still read so
+   *  backups and deletions reach Groups registered under the old scheme. */
   names?: Record<string, string>;
   publicIds?: Record<string, string>;
 }
@@ -14,8 +16,8 @@ export type RegistryFailureReason =
 
 export type ReservePublicIdResult = { ok: true } | { ok: false; reason: RegistryFailureReason };
 
-export class GroupRegistry extends Agent<Env, RegistryState> {
-  initialState: RegistryState = { names: {}, publicIds: {} };
+export class GroupRegistry extends ServerOwnedAgent<Env, RegistryState> {
+  initialState: RegistryState = { publicIds: {} };
 
   reservePublicId(publicId: string, groupId: string): ReservePublicIdResult {
     const publicIds = this.state.publicIds ?? {};

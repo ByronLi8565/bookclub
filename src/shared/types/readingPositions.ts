@@ -31,11 +31,18 @@ export const StoredReadingPosition = Schema.Union([
   Schema.Struct({ ...StoredPositionMeta, ...PdfReadingPosition.fields }),
 ]).pipe(Schema.toTaggedUnion("kind"));
 
+// The envelope repeats the position's own key, so the two must name one book.
 export const SetReadingPositionRequest = Schema.Struct({
   groupId: Schema.String,
   sourceId: Schema.String,
   position: StoredReadingPosition,
-});
+}).check(
+  Schema.makeFilter(
+    ({ groupId, sourceId, position }) =>
+      position.groupId === groupId && position.sourceId === sourceId,
+    { message: "the position belongs to the requested book" },
+  ),
+);
 
 export const ReadingPositionResponse = Schema.Struct({
   position: Schema.NullOr(StoredReadingPosition),

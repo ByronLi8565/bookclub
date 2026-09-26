@@ -27,7 +27,7 @@ export async function sessionCredentials(
   return { cookie: sessionCookie(token), token };
 }
 
-export function sessionCookie(token: string): string {
+function sessionCookie(token: string): string {
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
 }
@@ -36,32 +36,50 @@ export function clearedCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-function readSessionCookie(request: Request): string | null {
-  const header = request.headers.get("Cookie");
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const [name, ...rest] = part.trim().split("=");
-    if (name === SESSION_COOKIE) return rest.join("=");
+/** One cookie's value out of a `Cookie` header. */
+export function cookieValue(header: string | null | undefined, name: string): string | null {
+  for (const part of header?.split(";") ?? []) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
   }
   return null;
 }
 
-// Native uses bearer auth for HTTP and `?token=` for WebSocket upgrades.
-function readSessionToken(request: Request): string | null {
-  const cookie = readSessionCookie(request);
-  if (cookie) return cookie;
-
-  const auth = request.headers.get("Authorization");
-  if (auth?.startsWith("Bearer ")) return auth.slice("Bearer ".length).trim() || null;
-
-  const queryToken = new URL(request.url).searchParams.get("token");
-  return queryToken?.trim() || null;
+interface CredentialHeaders {
+  readonly cookie?: string | null | undefined;
+  readonly authorization?: string | null | undefined;
 }
 
-export async function currentIdentity(request: Request, env: Env): Promise<Identity | null> {
-  const tokenValue = readSessionToken(request);
-  if (!tokenValue) return null;
-  const claims = await verifySession(tokenValue, env.SESSION_HMAC_SECRET);
-  if (!claims) return null;
-  return { id: claims.userId, name: claims.name, email: claims.email };
+// The web app carries a session cookie; the native app sends the same token as a bearer.
+function sessionToken({ cookie, authorization }: CredentialHeaders): string | null {
+  const fromCookie = cookieValue(cookie, SESSION_COOKIE);
+  if (fromCookie) return fromCookie;
+  if (authorization?.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length).trim() || null;
+  }
+  return null;
 }
+
+async function identityFor(token: string | null, env: Env): Promise<Identity | null> {
+  if (!token) return null;
+  const claims = await verifySession(token, env.SESSION_HMAC_SECRET);
+  return claims ? { id: claims.userId, name: claims.name, email: claims.email } : null;
+}
+
+/** The caller of a structured HTTP route. A `?token=` query is never a credential
+ *  here: a URL is logged and shared far more readily than a header. */
+export const currentIdentity = (headers: CredentialHeaders, env: Env): Promise<Identity | null> =>
+  identityFor(sessionToken(headers), env);
+
+/** The caller opening a NoteAgent socket. A native WebSocket cannot set headers,
+ *  so only this upgrade also accepts the session as a `?token=` query. */
+export const socketIdentity = (request: Request, env: Env): Promise<Identity | null> =>
+  identityFor(
+    sessionToken({
+      cookie: request.headers.get("cookie"),
+      authorization: request.headers.get("authorization"),
+    }) ||
+      new URL(request.url).searchParams.get("token")?.trim() ||
+      null,
+    env,
+  );

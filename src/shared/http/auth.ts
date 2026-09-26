@@ -4,7 +4,9 @@ import { PasskeyInfo } from "../types/passkeys.ts";
 import { JsonObject, PublicUser, Session } from "./compatibility.ts";
 import { AuthenticationResponse, RegistrationResponse } from "./webauthn.ts";
 import { Authentication } from "./middleware.ts";
+import { Email, LoginCode, NewPassword, Required, emailField } from "./fields.ts";
 import {
+  BadRequest,
   BadRequestError,
   ForbiddenError,
   InternalErrorSchema,
@@ -12,6 +14,9 @@ import {
   RateLimitedError,
   UnauthenticatedError,
 } from "./errors.ts";
+
+// Sign-in forms have always answered a malformed email with the generic code.
+const LoginEmail = emailField(new BadRequest({ error: "invalid_request" }));
 
 const DevSession = Schema.Struct({
   devSignedIn: Schema.Literal(true),
@@ -27,14 +32,14 @@ const SignedOut = HttpApiSchema.WithHeaders(HttpApiSchema.NoContent, CookieHeade
 
 export const AuthHttp = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("start", "/auth/start", {
-    payload: Schema.Struct({ email: Schema.String }),
+    payload: Schema.Struct({ email: Email }),
     success: [DevSessionWithCookie, HttpApiSchema.NoContent],
     error: [BadRequestError, RateLimitedError, InternalErrorSchema],
   }),
   HttpApiEndpoint.post("verify", "/auth/verify", {
     payload: Schema.Struct({
-      email: Schema.String,
-      code: Schema.String,
+      email: LoginEmail,
+      code: LoginCode,
       displayName: Schema.optionalKey(Schema.String),
     }),
     success: SessionWithCookie,
@@ -46,20 +51,20 @@ export const AuthHttp = HttpApiGroup.make("auth").add(
     error: UnauthenticatedError,
   }).middleware(Authentication),
   HttpApiEndpoint.post("passwordLogin", "/auth/password", {
-    payload: Schema.Struct({ email: Schema.String, password: Schema.String }),
+    payload: Schema.Struct({ email: LoginEmail, password: Required }),
     success: SessionWithCookie,
     error: [BadRequestError, RateLimitedError, InternalErrorSchema],
   }),
   HttpApiEndpoint.put("setPassword", "/me/password", {
     payload: Schema.Struct({
-      password: Schema.String,
+      password: NewPassword,
       currentPassword: Schema.optionalKey(Schema.String),
     }),
-    error: [BadRequestError, UnauthenticatedError, ForbiddenError],
+    error: [BadRequestError, UnauthenticatedError, ForbiddenError, RateLimitedError],
   }).middleware(Authentication),
   HttpApiEndpoint.delete("removePassword", "/me/password", {
     payload: Schema.Struct({ currentPassword: Schema.String }),
-    error: [BadRequestError, UnauthenticatedError, ForbiddenError],
+    error: [BadRequestError, UnauthenticatedError, ForbiddenError, RateLimitedError],
   }).middleware(Authentication),
   HttpApiEndpoint.post("passkeyRegistrationOptions", "/auth/passkey/register/options", {
     success: JsonObject,
@@ -74,7 +79,7 @@ export const AuthHttp = HttpApiGroup.make("auth").add(
     error: [BadRequestError, UnauthenticatedError],
   }).middleware(Authentication),
   HttpApiEndpoint.post("passkeyLoginOptions", "/auth/passkey/login/options", {
-    payload: Schema.Struct({ email: Schema.String }),
+    payload: Schema.Struct({ email: Email }),
     success: JsonObject,
     error: [BadRequestError, NotFoundError, InternalErrorSchema],
   }),
