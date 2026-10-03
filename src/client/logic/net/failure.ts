@@ -1,3 +1,5 @@
+import { FAILURE_STATUS } from "../../../shared/http/errors.ts";
+
 /**
  * Why a request did not answer.
  *
@@ -39,9 +41,11 @@ const statusOf = (error: unknown): number | null => {
  * has a single place to break.
  */
 export const apiFailure = (error: unknown): ApiFailure => {
-  switch (tagOf(error)) {
-    case "NotFound":
-      return "notfound";
+  const tag = tagOf(error);
+  if (tag !== null && tag in FAILURE_STATUS) {
+    return tag === "NotFound" ? "notfound" : "refused";
+  }
+  switch (tag) {
     case "RequestError":
       return "unreachable";
     default:

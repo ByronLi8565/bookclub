@@ -19,7 +19,7 @@ import { Url } from "foldkit";
 import { AppRoute, Club, Home, hrefFor, routeOf } from "./routes.ts";
 import { clubNameErrorMessage } from "../logic/groups/groupMessages.ts";
 import { effectiveHighlight } from "../logic/notes/conversation.ts";
-import { setSessionToken } from "../logic/net/api.ts";
+import { SESSION_EXPIRED_EVENT, setSessionToken } from "../logic/net/api.ts";
 import { apiFailure } from "../logic/net/failure.ts";
 import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import {
@@ -221,6 +221,7 @@ export const Model = Schema.Struct({
   loginCode: Schema.String,
   loginError: Schema.NullOr(Schema.String),
   loginBusy: Schema.Boolean,
+  resumeUploadAfterLogin: Schema.Boolean,
   passkeysAvailable: Schema.Boolean,
   groups: Schema.Array(GroupSummary),
   groupsStatus: Schema.Literals(["idle", "loading", "ready", "failed"]),
@@ -273,6 +274,7 @@ export const LoadedSession = m("LoadedSession", { user: SessionUser });
 /** The sign-in check finished and nobody is signed in. Silent on purpose: an
  *  anonymous visitor is an ordinary state, not a failure to report. */
 export const NoSession = m("NoSession");
+export const SessionExpired = m("SessionExpired");
 export const OpenedOverlay = m("OpenedOverlay", { overlay: Overlay });
 export const ClosedOverlay = m("ClosedOverlay");
 export const StartedRename = m("StartedRename", { value: Schema.String });
@@ -377,6 +379,7 @@ export const RequestedPasskeyRegistration = m("RequestedPasskeyRegistration", {
 export type Message =
   | typeof LoadedSession.Type
   | typeof NoSession.Type
+  | typeof SessionExpired.Type
   | typeof OpenedOverlay.Type
   | typeof ClosedOverlay.Type
   | InfoMessage
@@ -443,6 +446,14 @@ export type Message =
   | typeof CompletedPasskeyRegistration.Type
   | ReaderMessage
   | NotesMessage;
+
+export const ForgetSession = Command.define("ForgetSession", {
+  messages: [LeftTheApp],
+  execute: Effect.sync(forgetSessionUser).pipe(
+    Effect.flatMap(() => Effect.promise(() => setSessionToken(null))),
+    Effect.as(LeftTheApp()),
+  ),
+});
 
 /**
  * Who is signed in, according to the server. Nothing else in the app asks, so
@@ -848,6 +859,7 @@ export const init = (): readonly [Model, []] => [
   {
     route: Home(),
     session: LoadingSession(),
+    resumeUploadAfterLogin: false,
     loginStep: "email",
     loginEmail: "",
     loginPassword: "",
@@ -904,6 +916,7 @@ const withToast = (model: Model, toast: Toast): Update => [
 
 /** Every way into or out of the sign-in modal leaves the form as it was found. */
 const blankLogin = {
+  resumeUploadAfterLogin: false,
   loginStep: "email",
   loginEmail: "",
   loginPassword: "",
@@ -1180,10 +1193,7 @@ const updateUploadSlice = (model: Model, message: UploadMessage): Update => {
   const [upload, commands] = updateUpload(model.upload, message);
   const withUpload = { ...model, upload };
   if (message._tag === "FailedBookUpload") {
-    return withToast(
-      withUpload,
-      errorToast("Upload failed", "Couldn't store that file. Try again."),
-    );
+    return withToast(withUpload, errorToast("Upload failed", message.message));
   }
   if (message._tag !== "UploadedBook") return [withUpload, commands];
   const group = model.currentGroup;
@@ -1350,6 +1360,20 @@ const updateSlices = (model: Model, message: Message): Update => {
         ],
       ];
     }
+    case "SessionExpired": {
+      if (model.session._tag !== "AuthenticatedSession") return [model, []];
+      const [anonymous] = update(model, NoSession());
+      const [prompted, commands] = withToast(
+        {
+          ...anonymous,
+          overlay: LoginOverlay(),
+          ...blankLogin,
+          resumeUploadAfterLogin: model.overlay._tag === "UploadOverlay",
+        },
+        errorToast("Session expired", "Please sign in again. Your session is no longer valid."),
+      );
+      return [prompted, [ForgetSession(), ...commands]];
+    }
     case "NoSession":
       // Nobody is signed in, so nobody's clubs belong on screen — a session
       // that expired must not leave the last reader's list behind.
@@ -1507,7 +1531,17 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "FailedLogin":
       return [{ ...model, loginBusy: false, loginError: loginErrorMessage(message.error) }, []];
     case "DismissedLogin":
-      return [{ ...model, overlay: NoOverlay(), ...blankLogin }, []];
+      return [
+        {
+          ...model,
+          overlay:
+            model.loginStep === "done" && model.resumeUploadAfterLogin
+              ? UploadOverlay()
+              : NoOverlay(),
+          ...blankLogin,
+        },
+        [],
+      ];
     case "LoadedGroups":
       return isCurrentUser(model, message.userId)
         ? [{ ...model, groups: message.groups, groupsStatus: "ready" }, []]
@@ -1939,10 +1973,26 @@ const splitSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }));
 
+const sessionSubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  sessionExpiry: entry(
+    {},
+    {
+      modelToDependencies: () => ({}),
+      dependenciesToStream: () =>
+        Subscription.fromEvent<Event, Message>({
+          target: globalThis.window,
+          type: SESSION_EXPIRED_EVENT,
+          toMessage: () => SessionExpired(),
+        }),
+    },
+  ),
+}));
+
 // Keep this merge local instead of calling Foldkit's aggregate helper: the PWA
 // still supports iOS Safari versions without Object.hasOwn, which that helper
 // uses while the application module is being evaluated.
 const subscriptions = {
+  ...sessionSubscriptions,
   ...noteAgentSubscriptions,
   ...readerSubscriptions,
   ...viewportSubscriptions,

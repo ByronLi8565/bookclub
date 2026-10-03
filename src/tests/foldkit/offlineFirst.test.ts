@@ -107,7 +107,7 @@ describe("asking who is signed in", () => {
 
   it("believes a server that says nobody, and forgets what it knew", async () => {
     localStorage.setItem("bookclub.session.user", JSON.stringify(user));
-    answers(401, { error: "unauthenticated" });
+    answers(401, { _tag: "Unauthenticated", error: "unauthenticated" });
     expect(await Effect.runPromise(LoadSession().effect)).toEqual(NoSession());
     // A server that answered is authoritative; keeping the cached reader here
     // would show a signed-in app to someone whose session has expired.

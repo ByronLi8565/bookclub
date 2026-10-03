@@ -225,7 +225,21 @@ export const UploadBook = Command.define("UploadBook", {
           return UploadedBook({ sourceId: hash });
         }),
       ),
-      Effect.catch((error) => Effect.succeed(FailedBookUpload({ message: String(error) }))),
+      Effect.catchTag("Unauthenticated", () =>
+        Effect.succeed(
+          FailedBookUpload({ message: "Your session expired. Sign in again to upload this book." }),
+        ),
+      ),
+      Effect.catchTag("Forbidden", () =>
+        Effect.succeed(
+          FailedBookUpload({
+            message: "You no longer have permission to upload books to this club.",
+          }),
+        ),
+      ),
+      Effect.catch(() =>
+        Effect.succeed(FailedBookUpload({ message: "Couldn't upload that file. Try again." })),
+      ),
     );
   },
 });
@@ -339,7 +353,7 @@ export const updateUpload = (
       // side, so what is left here is a modal ready to take the next book.
       return [initialUploadModel(), []];
     case "FailedBookUpload":
-      return [{ ...model, status: "ready" }, []];
+      return [{ ...model, status: "ready", error: message.message }, []];
   }
 };
 

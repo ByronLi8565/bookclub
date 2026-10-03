@@ -288,3 +288,38 @@ test("Naming · club and book renames survive a reload", async ({ page }) => {
     "the book rename is stored on the server",
   ).toBeVisible();
 });
+
+test("Library · an expired session prompts sign-in and preserves the chosen upload @chromium", async ({
+  page,
+}) => {
+  const { ref, owner } = await seedWorkspace(page.context());
+  await openWorkspace(page, ref);
+  await page.getByTitle("switch book").click();
+  await page.getByTitle("Add a book").click();
+  const uploadDialog = page.getByRole("dialog", { name: "add a book" });
+  await uploadDialog.locator('input[type="file"]').setInputFiles(fileURLToPath(books.epub.file));
+  await expect(uploadDialog.getByRole("heading", { name: "upload info" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.context().clearCookies();
+  await uploadDialog.getByTitle("Upload book").click();
+  const login = page.getByRole("dialog", { name: "sign in" });
+  await expect(
+    login,
+    "a rejected session cannot leave the app pretending to be signed in",
+  ).toBeVisible();
+  await expect(
+    page.getByText("Please sign in again. Your session is no longer valid."),
+  ).toBeVisible();
+  await login.getByLabel("Email address").fill(owner.email);
+  await login.getByRole("button", { name: "send code" }).click();
+  await expect(uploadDialog, "signing in returns to the already inspected file").toBeVisible();
+  await expect(uploadDialog.getByText("dorian.epub", { exact: true })).toBeVisible();
+  await uploadDialog.getByTitle("Upload book").click();
+  await expect(uploadDialog).toHaveCount(0);
+  await expect(page.locator(books.epub.ready)).toBeVisible({ timeout: 30_000 });
+  const response = await page.context().request.get(`/groups/${ref}`);
+  expect(response.ok()).toBe(true);
+  const body = await response.json();
+  expect(body.group.sources, "the upload succeeds after session recovery").toHaveLength(2);
+});
