@@ -64,7 +64,7 @@ import {
   type Model as AppModel,
 } from "../../client/foldkit/application.ts";
 import { Club, Home } from "../../client/foldkit/routes.ts";
-import { ToggledReaderLayout } from "../../client/foldkit/reader.ts";
+import { InvokedUserCommand } from "../../client/foldkit/userCommands.ts";
 import {
   CompletedSettingsAction,
   LoadUserPrefs,
@@ -411,11 +411,11 @@ describe("the reader follows the reader's preferences", () => {
   it("flips the layout that is showing, and the stored preference with it", () => {
     const [opened] = update(inClub(), SelectedBook({ sourceId: "source-1" }));
     const shown = opened.reader?.layout;
-    const [toggled] = update(opened, ToggledReaderLayout());
+    const [toggled] = update(opened, InvokedUserCommand({ id: "reader.layout" }));
 
     expect(toggled.reader?.layout).not.toBe(shown);
     expect(toggled.settings.prefs.reader.pdfPageLayout).toBe(toggled.reader?.layout);
-    const [back] = update(toggled, ToggledReaderLayout());
+    const [back] = update(toggled, InvokedUserCommand({ id: "reader.layout" }));
     expect(back.reader?.layout).toBe(shown);
   });
 });

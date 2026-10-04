@@ -29,6 +29,7 @@ import { canDeleteNote, canEditNote, type NoteViewer } from "../logic/notes/perm
 import { editIconView } from "./icons.ts";
 import { loadingView } from "./loading.ts";
 import { tagGuard } from "./messageGuard.ts";
+import type { UserCommand } from "./userCommands.ts";
 import { noteBodyView } from "./noteBody.ts";
 import {
   NoteFilterMode,
@@ -190,6 +191,44 @@ export const NotesMessage = Schema.Union([
   PastedNoteImage,
 ]);
 export type NotesMessage = typeof NotesMessage.Type;
+
+export const notesUserCommands = (model: NotesModel): readonly UserCommand<NotesMessage>[] => [
+  {
+    id: "notes.scope",
+    title:
+      model.scope === "current-book" ? "Show notes from all books" : "Show notes from this book",
+    category: "Notes",
+    message: ChangedNotesScope({
+      scope: model.scope === "current-book" ? "all-books" : "current-book",
+    }),
+  },
+  ...(model.filterTerms.length === 0
+    ? []
+    : [
+        {
+          id: "notes.clear-filters",
+          title: "Clear note filters",
+          category: "Notes",
+          message: ClearedNoteFilters(),
+        },
+        {
+          id: "notes.filter-mode",
+          title: model.filterMode === "all" ? "Match any note filter" : "Match all note filters",
+          category: "Notes",
+          message: ToggledNoteFilterMode(),
+        },
+      ]),
+  ...(model.composing || model.editingNoteId !== null || model.replyingToNoteId !== null
+    ? [
+        {
+          id: "notes.cancel",
+          title: "Cancel note editing",
+          category: "Notes",
+          message: CancelledNoteComposer(),
+        },
+      ]
+    : []),
+];
 
 export const isNotesMessage = tagGuard(NotesMessage);
 

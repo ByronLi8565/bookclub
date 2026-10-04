@@ -48,9 +48,11 @@ import {
 } from "./info.ts";
 import {
   SettingsModel,
+  SettingsCategory,
   initialSettingsModel,
   isSettingsMessage,
   ChosePdfPageLayout,
+  ChoseSettingsCategory,
   LoadUserPrefs,
   OpenedSettings,
   settingsView,
@@ -97,6 +99,7 @@ import {
   isNotesMessage,
   notesHighlights,
   notesView,
+  notesUserCommands,
   selectionHighlight,
   updateNotes,
   type NotesMessage,
@@ -117,13 +120,32 @@ import {
   makeReaderSubscriptions,
   openReader,
   SelectedReaderSource,
+  readerUserCommands,
   PendingJump,
   type ReaderUpdate,
   type ReaderMessage,
   type ReaderSelection,
 } from "./reader.ts";
 import { ThemeTokens, resolveThemeTokens } from "../../shared/types/theme.ts";
+import { makeCommandShortcutSubscriptions } from "./commandShortcuts.ts";
 import { SourceKind } from "../../shared/types/sources.ts";
+import {
+  commandRegistry,
+  InvokedUserCommand,
+  rankCommands,
+  rememberCommand,
+  type UserCommand,
+} from "./userCommands.ts";
+import {
+  PaletteModel,
+  initialPaletteModel,
+  PersistCommandHistory,
+  ScrollCommandSelection,
+  makePaletteSubscriptions,
+  paletteView,
+  type PaletteMessage,
+} from "./commandPalette.ts";
+import { settingsUserCommands } from "./settings.ts";
 
 // One slice per application: the Mounts inside it own the live book handles.
 const reader = makeReaderSlice(browserReaderEnvironment);
@@ -153,6 +175,7 @@ export const InfoOverlay = ts("InfoOverlay");
 export const SettingsOverlay = ts("SettingsOverlay");
 export const PresenceOverlay = ts("PresenceOverlay");
 export const UploadOverlay = ts("UploadOverlay");
+export const CommandPaletteOverlay = ts("CommandPaletteOverlay");
 export const InviteOverlay = ts("InviteOverlay", {
   groupRef: Schema.String,
   displayName: Schema.String,
@@ -165,6 +188,7 @@ export const Overlay = Schema.Union([
   SettingsOverlay,
   PresenceOverlay,
   UploadOverlay,
+  CommandPaletteOverlay,
   InviteOverlay,
 ]);
 export type Overlay = typeof Overlay.Type;
@@ -253,6 +277,8 @@ export const Model = Schema.Struct({
   pendingJump: Schema.NullOr(PendingJump),
   reader: Schema.NullOr(ReaderWorkspace),
   overlay: Overlay,
+  palette: PaletteModel,
+  palettePreviousOverlay: Overlay,
   info: InfoModel,
   settings: SettingsModel,
   presence: PresenceModel,
@@ -284,6 +310,10 @@ export const CancelledRename = m("CancelledRename");
 export const SteppedExpandedPane = m("SteppedExpandedPane", {
   direction: Schema.Literals(["left", "right"]),
 });
+export const ChoseExpandedPane = m("ChoseExpandedPane", {
+  pane: Schema.NullOr(Schema.Literals(["left", "right"])),
+});
+export const OpenedSettingsCategory = m("OpenedSettingsCategory", { category: SettingsCategory });
 export const StartedSplitDrag = m("StartedSplitDrag");
 export const MovedSplitDivider = m("MovedSplitDivider", { share: Schema.Number });
 export const EndedSplitDrag = m("EndedSplitDrag");
@@ -377,6 +407,9 @@ export const RequestedPasskeyRegistration = m("RequestedPasskeyRegistration", {
   label: Schema.String,
 });
 export type Message =
+  | PaletteMessage
+  | typeof ChoseExpandedPane.Type
+  | typeof OpenedSettingsCategory.Type
   | typeof LoadedSession.Type
   | typeof NoSession.Type
   | typeof SessionExpired.Type
@@ -844,6 +877,221 @@ const DESKTOP_READER_SHARE = 62;
 const MIN_SPLIT_SHARE = 25;
 const MAX_SPLIT_SHARE = 75;
 
+const applicationUserCommands = (model: Model): readonly UserCommand<Message>[] => {
+  const signedIn = model.session._tag === "AuthenticatedSession";
+  const commands: UserCommand<Message>[] = [
+    {
+      id: "app.settings",
+      title: "Settings",
+      category: "Application",
+      keywords: ["preferences"],
+      message: OpenedOverlay({ overlay: SettingsOverlay() }),
+    },
+    {
+      id: "app.info",
+      title: "About & release log",
+      category: "Application",
+      message: OpenedOverlay({ overlay: InfoOverlay() }),
+    },
+    {
+      id: "app.home",
+      title: "Go to home",
+      category: "Navigation",
+      keywords: ["home", "your clubs"],
+      message: RequestedUrl({ href: hrefFor(Home()) }),
+    },
+    signedIn
+      ? { id: "app.sign-out", title: "Sign out", category: "Account", message: RequestedSignOut() }
+      : {
+          id: "app.sign-in",
+          title: "Sign in",
+          category: "Account",
+          message: OpenedOverlay({ overlay: LoginOverlay() }),
+        },
+  ];
+  if (signedIn)
+    commands.push(
+      {
+        id: "app.create-club",
+        title: "Create a club",
+        category: "Clubs",
+        keywords: ["new group"],
+        message: StartedCreatingClub(),
+      },
+      ...model.groups.map((group) => ({
+        id: `club.${group.groupId}`,
+        title: `Switch to club: ${group.displayName}`,
+        category: "Clubs",
+        keywords: ["group", group.displayName],
+        message: RequestedUrl({ href: hrefFor(Club({ groupRef: groupUrlName(group) })) }),
+      })),
+    );
+  const group = model.currentGroup;
+  if (group === null || model.membership?.isMember !== true) return commands;
+  const role = model.membership?.role ?? "visitor";
+  const groupRef = groupUrlName(group);
+  commands.push(
+    {
+      id: "club.settings",
+      title: "Group settings",
+      category: "Club",
+      keywords: ["club settings", "general preferences"],
+      message: OpenedSettingsCategory({ category: "general" }),
+    },
+    {
+      id: "club.profile",
+      title: "Your club profile",
+      category: "Club",
+      keywords: ["display name", "avatar", "user settings"],
+      message: OpenedSettingsCategory({ category: "user" }),
+    },
+    {
+      id: "club.people",
+      title: "People & books",
+      category: "Club",
+      keywords: ["members", "manage books", "roster"],
+      message: OpenedOverlay({ overlay: PresenceOverlay() }),
+    },
+    ...books(group).map((book) => ({
+      id: `book.${group.groupId}.${book.id}`,
+      title: `Switch to book: ${book.title ?? "Untitled book"}`,
+      category: "Books",
+      keywords: [book.title ?? "", book.kind],
+      message: SelectedBook({ sourceId: book.id }),
+    })),
+  );
+  if (signedIn && permits(role, GroupAction.UploadBook))
+    commands.push({
+      id: "club.upload",
+      title: "Upload book",
+      category: "Club",
+      keywords: ["add book", "pdf", "epub"],
+      message: OpenedOverlay({ overlay: UploadOverlay() }),
+    });
+  if (signedIn && permits(role, GroupAction.InviteMember))
+    commands.push({
+      id: "club.invite",
+      title: "Invite people",
+      category: "Club",
+      keywords: ["invite link", "share"],
+      message: OpenedOverlay({
+        overlay: InviteOverlay(
+          model.reader === null
+            ? { groupRef, displayName: group.displayName }
+            : { groupRef, displayName: group.displayName, sourceId: model.reader.sourceId },
+        ),
+      }),
+    });
+  if (permits(role, GroupAction.RenameClub))
+    commands.push({
+      id: "club.rename",
+      title: "Rename club",
+      category: "Club",
+      message: StartedRename({ value: group.displayName }),
+    });
+  if (model.reader !== null) {
+    commands.push(
+      {
+        id: "reader.settings",
+        title: "Reader settings",
+        category: "Reader",
+        message: OpenedSettingsCategory({ category: "reader" }),
+      },
+      {
+        id: "reader.layout",
+        title:
+          model.settings.prefs.reader.pdfPageLayout === "single"
+            ? "Double page layout"
+            : "Single page layout",
+        category: "Reader",
+        keywords: ["double page", "single page", "spread", "two pages", "layout"],
+        binding: { key: "d", modifier: "none" },
+        message: ChosePdfPageLayout({
+          value: model.settings.prefs.reader.pdfPageLayout === "single" ? "auto" : "single",
+        }),
+      },
+    );
+    if (model.viewport === "wide")
+      commands.push(
+        {
+          id: "workspace.step-left",
+          title: "Expand notes pane",
+          category: "Workspace",
+          binding: { key: "ArrowLeft", modifier: "shift", whileTyping: true },
+          message: SteppedExpandedPane({ direction: "left" }),
+        },
+        {
+          id: "workspace.step-right",
+          title: "Expand reader pane",
+          category: "Workspace",
+          binding: { key: "ArrowRight", modifier: "shift", whileTyping: true },
+          message: SteppedExpandedPane({ direction: "right" }),
+        },
+        {
+          id: "workspace.notes",
+          title: model.expandedPane === "left" ? "Show notes" : "Hide notes",
+          category: "Workspace",
+          keywords: ["reader only"],
+          message: ChoseExpandedPane({ pane: model.expandedPane === "left" ? null : "left" }),
+        },
+        {
+          id: "workspace.reader",
+          title: model.expandedPane === "right" ? "Show reader" : "Hide reader",
+          category: "Workspace",
+          keywords: ["notes only"],
+          message: ChoseExpandedPane({ pane: model.expandedPane === "right" ? null : "right" }),
+        },
+        ...(model.expandedPane === null
+          ? []
+          : [
+              {
+                id: "workspace.split",
+                title: "Show split view",
+                category: "Workspace",
+                message: ChoseExpandedPane({ pane: null }),
+              },
+            ]),
+      );
+    else
+      commands.push(
+        {
+          id: "workspace.notes",
+          title: "Show notes",
+          category: "Workspace",
+          keywords: ["hide reader"],
+          message: SwitchedReaderPane({ pane: "notes" }),
+        },
+        {
+          id: "workspace.reader",
+          title: "Show reader",
+          category: "Workspace",
+          keywords: ["hide notes"],
+          message: SwitchedReaderPane({ pane: "reader" }),
+        },
+      );
+  }
+  return commands;
+};
+
+export const discoverUserCommands = commandRegistry<Model, Message>(
+  applicationUserCommands,
+  (model) =>
+    model.reader === null
+      ? []
+      : readerUserCommands(
+          model.reader,
+          permits(model.membership?.role ?? "visitor", GroupAction.CreateNote),
+        ),
+  (model) => settingsUserCommands(model.settings),
+  (model) =>
+    model.reader === null || model.membership?.isMember !== true
+      ? []
+      : notesUserCommands(model.notes),
+);
+
+const paletteCommands = (model: Model): readonly UserCommand<Message>[] =>
+  rankCommands(discoverUserCommands(model), model.palette.query, model.palette.history);
+
 /**
  * The first paint of whatever URL the browser opened on. Asking who is signed
  * in is part of starting up: the session cookie is only worth anything if
@@ -889,6 +1137,8 @@ export const init = (): readonly [Model, []] => [
     pendingJump: null,
     reader: null,
     overlay: NoOverlay(),
+    palette: initialPaletteModel(),
+    palettePreviousOverlay: NoOverlay(),
     info: initialInfoModel(),
     settings: initialSettingsModel(),
     presence: initialPresenceModel(),
@@ -1276,15 +1526,79 @@ const reconcilePendingJump = ([model, commands]: Update): Update => {
 };
 
 const updateSlices = (model: Model, message: Message): Update => {
-  if (message._tag === "ToggledReaderLayout") {
-    // Page layout is a stored preference, not reader-local state, so the key
-    // that flips it writes the preference and the reader follows.
-    return updateSettingsSlice(
-      model,
-      ChosePdfPageLayout({
-        value: model.settings.prefs.reader.pdfPageLayout === "auto" ? "single" : "auto",
-      }),
-    );
+  switch (message._tag) {
+    case "ToggledCommandPalette":
+      return model.overlay._tag === "CommandPaletteOverlay"
+        ? [
+            {
+              ...model,
+              overlay: model.palettePreviousOverlay,
+              palettePreviousOverlay: NoOverlay(),
+            },
+            [],
+          ]
+        : [
+            {
+              ...model,
+              overlay: CommandPaletteOverlay(),
+              palettePreviousOverlay: model.overlay,
+              palette: { ...model.palette, query: "", selected: 0 },
+            },
+            [],
+          ];
+    case "ChangedCommandQuery":
+      return [
+        { ...model, palette: { ...model.palette, query: message.query, selected: 0 } },
+        [ScrollCommandSelection()],
+      ];
+    case "MovedCommandSelection": {
+      const count = paletteCommands(model).length;
+      const current = Math.min(model.palette.selected, Math.max(0, count - 1));
+      return [
+        {
+          ...model,
+          palette: {
+            ...model.palette,
+            selected: count === 0 ? 0 : (current + message.delta + count) % count,
+          },
+        },
+        [ScrollCommandSelection()],
+      ];
+    }
+    case "SelectedPaletteCommand": {
+      const commands = paletteCommands(model);
+      const selected = commands[Math.min(model.palette.selected, commands.length - 1)];
+      return selected === undefined
+        ? [model, []]
+        : updateSlices(model, InvokedUserCommand({ id: selected.id }));
+    }
+    case "InvokedUserCommand": {
+      const command = discoverUserCommands(model).find(({ id }) => id === message.id);
+      if (command === undefined) return [model, []];
+      const history = rememberCommand(model.palette.history, command.id);
+      const [next, effects] = updateSlices(
+        {
+          ...model,
+          overlay: model.overlay._tag === "CommandPaletteOverlay" ? NoOverlay() : model.overlay,
+          palettePreviousOverlay: NoOverlay(),
+          palette: { ...model.palette, history },
+        },
+        command.message,
+      );
+      return [next, [...effects, PersistCommandHistory({ history })]];
+    }
+    case "CompletedPaletteAction":
+      return [model, []];
+    case "ChoseExpandedPane":
+      return [{ ...model, expandedPane: message.pane }, []];
+    case "OpenedSettingsCategory": {
+      const [opened, effects] = updateSlices(model, OpenedOverlay({ overlay: SettingsOverlay() }));
+      const [next, categoryEffects] = updateSettingsSlice(
+        opened,
+        ChoseSettingsCategory({ category: message.category }),
+      );
+      return [next, [...effects, ...categoryEffects]];
+    }
   }
   if (
     message._tag === "JumpedToHighlight" &&
@@ -1438,7 +1752,17 @@ const updateSlices = (model: Model, message: Message): Update => {
       }
     }
     case "ClosedOverlay":
-      return [{ ...model, overlay: NoOverlay() }, []];
+      return [
+        {
+          ...model,
+          overlay:
+            model.overlay._tag === "CommandPaletteOverlay"
+              ? model.palettePreviousOverlay
+              : NoOverlay(),
+          palettePreviousOverlay: NoOverlay(),
+        },
+        [],
+      ];
     case "StartedRename":
       return [{ ...model, renamingClub: true, renameDraft: message.value }, []];
     case "ChangedRenameDraft":
@@ -1561,7 +1885,10 @@ const updateSlices = (model: Model, message: Message): Update => {
     case "ChangedNewGroupName":
       return [{ ...model, newGroupName: message.name }, []];
     case "StartedCreatingClub":
-      return [{ ...model, creatingClub: true, newGroupError: null }, []];
+      return [
+        { ...model, creatingClub: true, newGroupError: null },
+        model.route._tag === "Home" ? [] : [PushUrl({ href: hrefFor(Home()) })],
+      ];
     case "CancelledCreatingClub":
       return [{ ...model, creatingClub: false, newGroupName: "", newGroupError: null }, []];
     case "SubmittedNewGroup":
@@ -1845,7 +2172,17 @@ const noteAgentSubscriptions = makeNoteAgentSubscriptions<Model>(
   (model) => model.notes.connectionKey,
 );
 
-const readerSubscriptions = makeReaderSubscriptions<Model>((model) => model.reader);
+const readerSubscriptions = makeReaderSubscriptions<Model>(
+  (model) => model.reader,
+  (model) => model.overlay._tag === "NoOverlay",
+);
+const commandShortcutSubscriptions = makeCommandShortcutSubscriptions(
+  discoverUserCommands,
+  (model: Model) => model.overlay._tag === "NoOverlay",
+);
+const paletteSubscriptions = makePaletteSubscriptions<Model>(
+  (model) => model.overlay._tag === "CommandPaletteOverlay",
+);
 
 /** The workspace layout follows the same breakpoint the React workspace uses;
  *  a media-query listener is the browser fact, the Model holds the answer. */
@@ -1860,40 +2197,6 @@ const viewportSubscriptions = Subscription.make<Model, Message>()((entry) => ({
           type: "change",
           toMessage: (event) => ResizedViewport({ viewport: event.matches ? "narrow" : "wide" }),
         }),
-    },
-  ),
-}));
-
-const paneKeySubscriptions = Subscription.make<Model, Message>()((entry) => ({
-  expandedPaneKeys: entry(
-    { active: Schema.Boolean },
-    {
-      modelToDependencies: (model) => ({
-        active:
-          model.reader !== null && model.viewport === "wide" && model.overlay._tag === "NoOverlay",
-      }),
-      dependenciesToStream: ({ active }) =>
-        Stream.when(
-          Subscription.fromEventFilterMap<KeyboardEvent, Message>({
-            target: globalThis.document,
-            type: "keydown",
-            // Notes editors may consume Shift+Arrow for text selection before
-            // a bubbling document listener sees it. Pane navigation is a
-            // workspace command, so claim it on the way down instead.
-            options: { capture: true },
-            toMessage: (event) => {
-              if (!event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
-                return Option.none();
-              }
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return Option.none();
-              event.preventDefault();
-              return Option.some(
-                SteppedExpandedPane({ direction: event.key === "ArrowLeft" ? "left" : "right" }),
-              );
-            },
-          }),
-          Effect.sync(() => active),
-        ),
     },
   ),
 }));
@@ -1993,13 +2296,14 @@ const sessionSubscriptions = Subscription.make<Model, Message>()((entry) => ({
 // uses while the application module is being evaluated.
 const subscriptions = {
   ...sessionSubscriptions,
+  ...paletteSubscriptions,
   ...noteAgentSubscriptions,
   ...readerSubscriptions,
+  ...commandShortcutSubscriptions,
   ...viewportSubscriptions,
   ...connectivitySubscriptions,
   ...overlaySubscriptions,
   ...splitSubscriptions,
-  ...paneKeySubscriptions,
 };
 
 const paneClass = (base: string, hidden: boolean): string =>
@@ -2087,19 +2391,21 @@ const workspaceLayoutView = (
             {
               books: model.currentGroup === null ? [] : books(model.currentGroup),
               title: model.currentGroup?.bookTitles[activeReader.sourceId] ?? null,
-              onSelectBook: (sourceId) => SelectedBook({ sourceId }),
+              onSelectBook: (sourceId) =>
+                InvokedUserCommand({ id: `book.${model.currentGroup?.groupId}.${sourceId}` }),
+              onCommand: (id) => InvokedUserCommand({ id }),
               // Renaming a book is a permission, not a decoration.
               onRenameBook: permits(model.membership?.role ?? "visitor", GroupAction.RenameBook)
                 ? (sourceId, title) => RequestedBookRename({ sourceId, title })
                 : null,
-              onAddBook: OpenedOverlay({ overlay: UploadOverlay() }),
+              onAddBook: permits(model.membership?.role ?? "visitor", GroupAction.UploadBook)
+                ? InvokedUserCommand({ id: "club.upload" })
+                : null,
               readerOnlyControl: narrow
                 ? null
                 : {
                     expanded: model.expandedPane === "left",
-                    onToggle: SteppedExpandedPane({
-                      direction: model.expandedPane === "left" ? "left" : "right",
-                    }),
+                    onToggle: InvokedUserCommand({ id: "workspace.notes" }),
                   },
               colors: resolveThemeTokens(model.settings.prefs.appearance),
             },
@@ -2201,6 +2507,8 @@ const workspaceLayoutView = (
  *  own markup; the host owns only which one is on screen. */
 export const overlayView = (model: Model, h: HtmlBuilder<Message>): Html[] => {
   switch (model.overlay._tag) {
+    case "CommandPaletteOverlay":
+      return [paletteView(model.palette, paletteCommands(model), ClosedOverlay(), h)];
     case "LoginOverlay":
       return [loginModalView(model, h)];
     case "InfoOverlay":
@@ -2326,18 +2634,14 @@ export const workspaceHeaderView = (
         ["\u2039"],
       ),
       renamableTitle(model, displayName, h),
-      presenceIndicatorView(
-        model.notes.peers.length,
-        OpenedOverlay({ overlay: PresenceOverlay() }),
-        h,
-      ),
+      presenceIndicatorView(model.notes.peers.length, InvokedUserCommand({ id: "club.people" }), h),
       h.button(
         [
           h.Type("button"),
           h.Class("settings-button icon-button"),
           h.AriaLabel("settings"),
           h.Title("Settings"),
-          h.OnClick(OpenedOverlay({ overlay: SettingsOverlay() })),
+          h.OnClick(InvokedUserCommand({ id: "app.settings" })),
         ],
         [settingsIconView(h)],
       ),
@@ -2347,7 +2651,7 @@ export const workspaceHeaderView = (
           h.Class("workspace-info-button"),
           h.AriaLabel("open info"),
           h.Title("About & release log"),
-          h.OnClick(OpenedOverlay({ overlay: InfoOverlay() })),
+          h.OnClick(InvokedUserCommand({ id: "app.info" })),
         ],
         ["i"],
       ),
@@ -2367,14 +2671,13 @@ const workspaceView = (
     [
       workspaceHeaderView(model, model.currentGroup?.displayName ?? "Bookclub", h),
       workspaceLayoutView(model, activeReader, groupRef, h),
-      ...overlayView(model, h),
     ],
   );
 
 /** The card the whole signed-out and club-picking experience sits on. React's
  *  `home.css` draws its stacked border, its centre rule, and its bookmark. */
-const homeCard = (h: HtmlBuilder<Message>, children: Html[], overlay: Html[] = []): Html =>
-  h.div([h.Class("home")], [h.div([h.Class("home-card")], children), ...overlay]);
+const homeCard = (h: HtmlBuilder<Message>, children: Html[]): Html =>
+  h.div([h.Class("home")], [h.div([h.Class("home-card")], children)]);
 
 /** The card's top-left corner: the way into settings and into the info screen. */
 const homeTopButtons = (model: Model, h: HtmlBuilder<Message>): Html =>
@@ -2389,7 +2692,7 @@ const homeTopButtons = (model: Model, h: HtmlBuilder<Message>): Html =>
                 h.Class("home-settings-button icon-button"),
                 h.AriaLabel("settings"),
                 h.Title("Settings"),
-                h.OnClick(OpenedOverlay({ overlay: SettingsOverlay() })),
+                h.OnClick(InvokedUserCommand({ id: "app.settings" })),
               ],
               [settingsIconView(h)],
             ),
@@ -2401,7 +2704,7 @@ const homeTopButtons = (model: Model, h: HtmlBuilder<Message>): Html =>
           h.Class("home-info-button"),
           h.AriaLabel("open info"),
           h.Title("About & release log"),
-          h.OnClick(OpenedOverlay({ overlay: InfoOverlay() })),
+          h.OnClick(InvokedUserCommand({ id: "app.info" })),
         ],
         ["i"],
       ),
@@ -2425,7 +2728,7 @@ const loginCorner = (model: Model, h: HtmlBuilder<Message>): Html =>
                     h.Type("button"),
                     h.Class("login-link plain-button"),
                     h.Title("Sign out"),
-                    h.OnClick(RequestedSignOut()),
+                    h.OnClick(InvokedUserCommand({ id: "app.sign-out" })),
                   ],
                   ["sign out"],
                 ),
@@ -2438,7 +2741,7 @@ const loginCorner = (model: Model, h: HtmlBuilder<Message>): Html =>
                 h.Type("button"),
                 h.Class("login-signin"),
                 h.Title("Sign in"),
-                h.OnClick(OpenedOverlay({ overlay: LoginOverlay() })),
+                h.OnClick(InvokedUserCommand({ id: "app.sign-in" })),
               ],
               ["sign in"],
             ),
@@ -2514,67 +2817,63 @@ const clubListItems = (model: Model, h: HtmlBuilder<Message>): Html =>
     ),
   );
 
-const homeView = (model: Model, h: HtmlBuilder<Message>, overlay: Html[] = []): Html =>
-  homeCard(
-    h,
-    [
-      homeTopButtons(model, h),
-      loginCorner(model, h),
-      h.div(
-        [h.Class("home-main")],
-        [
-          h.h1([h.Class("home-title")], ["Bookclub"]),
-          ...(model.session._tag === "AuthenticatedSession"
-            ? model.creatingClub
-              ? [
-                  h.form(
-                    [h.Class("home-create"), h.OnSubmit(SubmittedNewGroup())],
-                    [
-                      h.input([
-                        h.Type("text"),
-                        h.AriaLabel("Club name"),
-                        h.Placeholder("club name"),
-                        h.Value(model.newGroupName),
-                        h.OnInput((name) => ChangedNewGroupName({ name })),
-                        h.OnKeyDownPreventDefault((key) =>
-                          key === "Escape" ? Option.some(CancelledCreatingClub()) : Option.none(),
-                        ),
-                      ]),
-                      h.button(
-                        [
-                          h.Type("submit"),
-                          h.Class("home-create-confirm"),
-                          h.AriaLabel("create"),
-                          h.Title("Create club"),
-                          h.Disabled(model.newGroupName === "" || model.newGroupPending),
-                        ],
-                        ["+"],
+const homeView = (model: Model, h: HtmlBuilder<Message>): Html =>
+  homeCard(h, [
+    homeTopButtons(model, h),
+    loginCorner(model, h),
+    h.div(
+      [h.Class("home-main")],
+      [
+        h.h1([h.Class("home-title")], ["Bookclub"]),
+        ...(model.session._tag === "AuthenticatedSession"
+          ? model.creatingClub
+            ? [
+                h.form(
+                  [h.Class("home-create"), h.OnSubmit(SubmittedNewGroup())],
+                  [
+                    h.input([
+                      h.Type("text"),
+                      h.AriaLabel("Club name"),
+                      h.Placeholder("club name"),
+                      h.Value(model.newGroupName),
+                      h.OnInput((name) => ChangedNewGroupName({ name })),
+                      h.OnKeyDownPreventDefault((key) =>
+                        key === "Escape" ? Option.some(CancelledCreatingClub()) : Option.none(),
                       ),
-                    ],
-                  ),
-                ]
-              : [
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Class("home-action"),
-                      h.Title("Create a new bookclub"),
-                      h.OnClick(StartedCreatingClub()),
-                    ],
-                    ["create a new bookclub"],
-                  ),
-                ]
-            : []),
-          ...(model.newGroupError === null
-            ? []
-            : [h.p([h.Class("login-error")], [model.newGroupError])]),
-          h.div([h.Class("home-clubs")], [clubList(model, h)]),
-        ],
-      ),
-      h.div([h.Class("home-corner home-corner--credit")], ["a project by Byron Li"]),
-    ],
-    overlay,
-  );
+                    ]),
+                    h.button(
+                      [
+                        h.Type("submit"),
+                        h.Class("home-create-confirm"),
+                        h.AriaLabel("create"),
+                        h.Title("Create club"),
+                        h.Disabled(model.newGroupName === "" || model.newGroupPending),
+                      ],
+                      ["+"],
+                    ),
+                  ],
+                ),
+              ]
+            : [
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("home-action"),
+                    h.Title("Create a new bookclub"),
+                    h.OnClick(InvokedUserCommand({ id: "app.create-club" })),
+                  ],
+                  ["create a new bookclub"],
+                ),
+              ]
+          : []),
+        ...(model.newGroupError === null
+          ? []
+          : [h.p([h.Class("login-error")], [model.newGroupError])]),
+        h.div([h.Class("home-clubs")], [clubList(model, h)]),
+      ],
+    ),
+    h.div([h.Class("home-corner home-corner--credit")], ["a project by Byron Li"]),
+  ]);
 
 /** Signing in is a modal over whatever page is showing, the way React presents
  *  it, rather than a page of its own. */
@@ -2834,29 +3133,25 @@ const clubMessageView = (h: HtmlBuilder<Message>, title: string, body: string): 
   ]);
 
 /** A club with no book yet: the one place a book gets added from. */
-const noBookView = (model: Model, group: GroupSummary, h: HtmlBuilder<Message>): Html =>
-  homeCard(
-    h,
-    [
-      backToClubs(h),
-      h.div(
-        [h.Class("home-main")],
-        [
-          h.h1([h.Class("home-title")], [group.displayName]),
-          h.button(
-            [
-              h.Type("button"),
-              h.Class("home-upload-link plain-button"),
-              h.Title("Upload a book or PDF"),
-              h.OnClick(OpenedOverlay({ overlay: UploadOverlay() })),
-            ],
-            ["upload the club's book or PDF"],
-          ),
-        ],
-      ),
-    ],
-    overlayView(model, h),
-  );
+const noBookView = (group: GroupSummary, h: HtmlBuilder<Message>): Html =>
+  homeCard(h, [
+    backToClubs(h),
+    h.div(
+      [h.Class("home-main")],
+      [
+        h.h1([h.Class("home-title")], [group.displayName]),
+        h.button(
+          [
+            h.Type("button"),
+            h.Class("home-upload-link plain-button"),
+            h.Title("Upload a book or PDF"),
+            h.OnClick(InvokedUserCommand({ id: "club.upload" })),
+          ],
+          ["upload the club's book or PDF"],
+        ),
+      ],
+    ),
+  ]);
 
 /** The chrome a club wears while it is still resolving, so the page does not
  *  jump when the book arrives. */
@@ -2931,17 +3226,13 @@ const workspaceLoadingView = (model: Model, h: HtmlBuilder<Message>): Html =>
  *  you, empty, or open on its book. */
 const clubPageView = (model: Model, groupRef: string, h: HtmlBuilder<Message>): Html => {
   if (model.session._tag === "AnonymousSession") {
-    return homeCard(
-      h,
-      [
-        loginCorner(model, h),
-        h.div(
-          [h.Class("home-main")],
-          [h.h1([h.Class("home-title")], ["Bookclub"]), h.p([], ["Sign in to open this club."])],
-        ),
-      ],
-      [loginModalView(model, h)],
-    );
+    return homeCard(h, [
+      loginCorner(model, h),
+      h.div(
+        [h.Class("home-main")],
+        [h.h1([h.Class("home-title")], ["Bookclub"]), h.p([], ["Sign in to open this club."])],
+      ),
+    ]);
   }
   // A club that cannot be opened says so. Without these the page spins forever
   // behind a toast, which is what a reader sees as the app being broken.
@@ -2962,19 +3253,19 @@ const clubPageView = (model: Model, groupRef: string, h: HtmlBuilder<Message>): 
   if (model.membership !== null && !model.membership.isMember) {
     return clubMessageView(h, "Members only", "You need an invite to join this club.");
   }
-  if (group.sources.length === 0) return noBookView(model, group, h);
+  if (group.sources.length === 0) return noBookView(group, h);
   return model.reader === null
     ? workspaceLoadingView(model, h)
     : workspaceView(model, model.reader, groupRef, h);
 };
 
-/** The page for a route, with whatever overlay is up over it. */
+/** Loading and error pages retain the same shell so global commands stay accessible. */
 const pageView = (model: Model, h: HtmlBuilder<Message>): Html => {
   switch (model.route._tag) {
     case "Club":
       return clubPageView(model, model.route.groupRef, h);
     default:
-      return homeView(model, h, overlayView(model, h));
+      return homeView(model, h);
   }
 };
 
@@ -3034,6 +3325,11 @@ export const shellView = (model: Model, h: HtmlBuilder<Message>): Html =>
     [
       ...(model.online ? [] : [offlineBannerView(h)]),
       pageView(model, h),
+      ...(model.session._tag === "AnonymousSession" &&
+      model.route._tag === "Club" &&
+      model.overlay._tag === "NoOverlay"
+        ? [loginModalView(model, h)]
+        : overlayView(model, h)),
       ...toastViewportView(model, h),
     ],
   );

@@ -14,13 +14,14 @@ export interface ModalChrome<Message> {
   readonly title: string;
   readonly className?: string;
   readonly ariaLabel?: string;
+  readonly ariaModal?: boolean;
   readonly onClose: Message;
 }
 
 const MODAL_TITLE_ID = "modal-title";
 
 export const modalView = <Message>(
-  { title, className, ariaLabel, onClose }: ModalChrome<Message>,
+  { title, className, ariaLabel, ariaModal, onClose }: ModalChrome<Message>,
   h: HtmlBuilder<Message>,
   children: readonly Html[],
 ): Html =>
@@ -30,6 +31,7 @@ export const modalView = <Message>(
       h.dialog(
         [
           h.Open(true),
+          ...(ariaModal === undefined ? [] : [h.AriaModal(ariaModal)]),
           h.Class(className === undefined ? "modal" : `modal ${className}`),
           // React names the dialog by its own heading unless the caller gives
           // it a label of its own, so the head stays the single source of the

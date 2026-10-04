@@ -43,6 +43,7 @@ import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { tagGuard } from "./messageGuard.ts";
 import { modalTabsView, modalView } from "./modal.ts";
 import { radioMenuView, type RadioMenuOption } from "./radioMenu.ts";
+import type { UserCommand } from "./userCommands.ts";
 
 /**
  * React reaches its hidden file inputs through refs, which a Foldkit view has
@@ -236,6 +237,68 @@ export const SettingsMessage = Schema.Union([
   FailedSettingsAction,
 ]);
 export type SettingsMessage = typeof SettingsMessage.Type;
+
+const THEME_IDS: readonly ThemeId[] = [
+  "default",
+  "dark",
+  "sepia",
+  "paper",
+  "low-contrast",
+  "custom",
+];
+
+export const settingsUserCommands = (
+  model: SettingsModel,
+): readonly UserCommand<SettingsMessage>[] => [
+  ...THEME_IDS.filter((themeId) => themeId !== model.prefs.appearance.themeId).map((themeId) => ({
+    id: `theme.${themeId}`,
+    title: `Use ${THEME_LABELS[themeId]} theme`,
+    category: "Appearance",
+    message: ChoseTheme({ themeId }),
+  })),
+  {
+    id: "settings.avatars",
+    title: model.prefs.notes.showAvatars ? "Hide profile pictures" : "Show profile pictures",
+    category: "Settings",
+    message: ToggledShowAvatars({ value: !model.prefs.notes.showAvatars }),
+  },
+  {
+    id: "settings.hashtags",
+    title: model.prefs.notes.showHashtags ? "Hide hashtags" : "Show hashtags",
+    category: "Settings",
+    message: ToggledShowHashtags({ value: !model.prefs.notes.showHashtags }),
+  },
+  {
+    id: "settings.hashtag-tags",
+    title: model.prefs.notes.hashtagsAddTags
+      ? "Stop adding tags from hashtags"
+      : "Add tags from hashtags",
+    category: "Settings",
+    message: ToggledHashtagsAddTags({ value: !model.prefs.notes.hashtagsAddTags }),
+  },
+  {
+    id: "settings.opening-position",
+    title:
+      model.prefs.reader.readingPositionOpenPolicy === "prefer-local"
+        ? "Sync position when opening a book"
+        : "Use local position when opening a book",
+    category: "Settings",
+    message: ChoseOpeningPosition({
+      value:
+        model.prefs.reader.readingPositionOpenPolicy === "prefer-local"
+          ? "prefer-sync"
+          : "prefer-local",
+    }),
+  },
+  ...(["off", "smooth", "instant"] as const)
+    .filter((value) => value !== model.prefs.reader.smartArrows)
+    .map((value) => ({
+      id: `settings.smart-arrows.${value}`,
+      title: `Smart arrow keys: ${value}`,
+      category: "Settings",
+      message: ChoseSmartArrows({ value }),
+    })),
+];
 
 export const isSettingsMessage = tagGuard(SettingsMessage);
 
@@ -960,14 +1023,6 @@ export const settingsView = <Message>(
       themeId === "custom"
         ? (model.prefs.appearance.customColors ?? resolveThemeTokens(model.prefs.appearance))
         : THEME_PRESETS[themeId];
-    const themeIds: readonly ThemeId[] = [
-      "default",
-      "dark",
-      "sepia",
-      "paper",
-      "low-contrast",
-      "custom",
-    ];
     return [
       h.section(
         [h.Class("settings-item settings-item--stacked")],
@@ -978,7 +1033,7 @@ export const settingsView = <Message>(
           ),
           h.div(
             [h.Class("theme-swatch-grid"), h.Role("radiogroup"), h.AriaLabel("Theme")],
-            themeIds.map((themeId) => {
+            THEME_IDS.map((themeId) => {
               const tokens = swatchTokens(themeId);
               const active = themeId === activeThemeId;
               return h.button(

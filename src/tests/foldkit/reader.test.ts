@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import { Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import {
@@ -25,7 +24,6 @@ import {
   SteppedReaderZoom,
   makeReaderSlice,
   openReader,
-  readerKeyMessage,
   stepChrome,
   type ReaderMessage,
   type ReaderWorkspace,
@@ -59,52 +57,7 @@ const highlight = {
   anchor: { kind: "epub-cfi" as const, value: "epubcfi(/6/2)" },
 };
 
-const key = (init: Partial<KeyboardEventInit> & { key: string }) =>
-  new KeyboardEvent("keydown", { cancelable: true, ...init });
-
-describe("reader keyboard contract", () => {
-  it("claims the reader's own keys and leaves the rest to the page", () => {
-    expect(readerKeyMessage(key({ key: "f", metaKey: true }), false)).toEqual(
-      Option.some({ _tag: "OpenedReaderSearch" }),
-    );
-    expect(readerKeyMessage(key({ key: "ArrowRight" }), false)).toEqual(
-      Option.some({ _tag: "TurnedReaderPage", direction: "next" }),
-    );
-    expect(readerKeyMessage(key({ key: "d" }), false)).toEqual(
-      Option.some({ _tag: "ToggledReaderLayout" }),
-    );
-    expect(readerKeyMessage(key({ key: "z" }), false)).toEqual(
-      Option.some({ _tag: "ToggledReaderChrome" }),
-    );
-    expect(readerKeyMessage(key({ key: "ArrowUp", shiftKey: true }), false)).toEqual(
-      Option.some({ _tag: "SteppedReaderChrome", direction: "hide" }),
-    );
-    expect(readerKeyMessage(key({ key: "s" }), false)).toEqual(
-      Option.some({ _tag: "ToggledBookMenu" }),
-    );
-    // React's Mod+S pushes the reading place to the server there and then.
-    expect(readerKeyMessage(key({ key: "s", metaKey: true }), false)).toEqual(
-      Option.some({ _tag: "RequestedPositionSync" }),
-    );
-    expect(readerKeyMessage(key({ key: "q" }), false)).toEqual(Option.none());
-  });
-
-  it("closes search on Escape only while search is open", () => {
-    expect(readerKeyMessage(key({ key: "Escape" }), true)).toEqual(
-      Option.some({ _tag: "ClosedReaderSearch" }),
-    );
-    expect(readerKeyMessage(key({ key: "Escape" }), false)).toEqual(Option.none());
-  });
-
-  it("leaves typing alone", () => {
-    const input = document.createElement("input");
-    document.body.appendChild(input);
-    const event = key({ key: "d" });
-    input.dispatchEvent(event);
-    expect(readerKeyMessage(event, false)).toEqual(Option.none());
-    input.remove();
-  });
-
+describe("reader chrome", () => {
   it("steps the chrome without leaving its two levels", () => {
     expect(stepChrome(0, "show")).toBe(0);
     expect(stepChrome(0, "hide")).toBe(1);

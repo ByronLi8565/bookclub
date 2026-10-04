@@ -1,0 +1,58 @@
+.command-palette {
+  width: min(640px, calc(100vw - 40px));
+
+  & .command-palette-input {
+    width: 100%;
+    border: 0;
+    border-bottom: var(--line-thin);
+    padding: 16px;
+    font: inherit;
+    background: var(--color-background);
+    color: var(--color-text);
+  }
+
+  & .command-palette-results {
+    max-height: min(420px, 55dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  & .command-palette-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: var(--control-min);
+    padding: 12px 16px;
+    border: 0;
+    text-align: left;
+
+    &[aria-selected="true"] {
+      background: var(--color-text);
+      color: var(--color-background);
+    }
+  }
+
+  & .command-palette-title {
+    flex: 1;
+    overflow-wrap: anywhere;
+  }
+
+  & .command-palette-category,
+  & kbd {
+    font-size: var(--font-xs);
+    opacity: var(--subtle-opacity);
+  }
+
+  & .command-palette-hint {
+    border-top: var(--line-thin);
+    padding: 10px 16px;
+    font-size: var(--font-xs);
+    color: var(--color-muted);
+  }
+
+  & .command-palette-empty {
+    padding: 16px;
+    color: var(--color-muted);
+  }
+}

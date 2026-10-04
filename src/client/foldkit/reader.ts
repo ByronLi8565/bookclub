@@ -26,6 +26,7 @@ import { bookclubClient } from "../logic/net/bookclubClient.ts";
 import { getRenderSnapshot } from "../logic/reader/renderSnapshot.ts";
 import { loadingView } from "./loading.ts";
 import { tagGuard } from "./messageGuard.ts";
+import type { UserCommand } from "./userCommands.ts";
 import {
   browserReaderPositions,
   noReaderPositions,
@@ -177,7 +178,6 @@ export const SearchedReader = m("SearchedReader", {
 export const FailedReaderSearch = m("FailedReaderSearch", { query: Schema.String });
 export const SelectedSearchMatch = m("SelectedSearchMatch", { index: Schema.Number });
 export const ChangedReaderLayout = m("ChangedReaderLayout", { layout: PdfPageLayout });
-export const ToggledReaderLayout = m("ToggledReaderLayout");
 export const SteppedReaderZoom = m("SteppedReaderZoom", {
   direction: Schema.Literals(["in", "out"]),
 });
@@ -267,7 +267,6 @@ export const ReaderMessage = Schema.Union([
   FailedReaderSearch,
   SelectedSearchMatch,
   ChangedReaderLayout,
-  ToggledReaderLayout,
   SteppedReaderZoom,
   TurnedReaderPage,
   ShowedReaderHighlights,
@@ -308,6 +307,120 @@ export const ReaderMessage = Schema.Union([
   PdfPositionChanged,
 ]);
 export type ReaderMessage = typeof ReaderMessage.Type;
+
+export const readerUserCommands = (
+  reader: ReaderWorkspace,
+  canAnnotate: boolean,
+): readonly UserCommand<ReaderMessage>[] => {
+  const commands: UserCommand<ReaderMessage>[] = [
+    {
+      id: "reader.chrome-hide",
+      title: "Hide a level of reader controls",
+      category: "Reader",
+      binding: { key: "ArrowUp", modifier: "shift" },
+      message: SteppedReaderChrome({ direction: "hide" }),
+    },
+    {
+      id: "reader.chrome-show",
+      title: "Show a level of reader controls",
+      category: "Reader",
+      binding: { key: "ArrowDown", modifier: "shift" },
+      message: SteppedReaderChrome({ direction: "show" }),
+    },
+    {
+      id: "reader.search",
+      title: "Search in book",
+      category: "Reader",
+      binding: { key: "f", modifier: "command", whileTyping: true },
+      message: OpenedReaderSearch(),
+    },
+    {
+      id: "reader.books",
+      title: reader.bookMenuOpen ? "Close book menu" : "Choose a book",
+      category: "Reader",
+      binding: { key: "s", modifier: "none" },
+      message: ToggledBookMenu(),
+    },
+    {
+      id: "reader.chrome",
+      title: reader.chromeLevel === 0 ? "Hide reader controls" : "Show reader controls",
+      category: "Reader",
+      binding: { key: "z", modifier: "none" },
+      message: ToggledReaderChrome(),
+    },
+  ];
+  if (reader.loading || reader.error !== null) return commands;
+  if (!reader.atEnd)
+    commands.push({
+      id: "reader.next",
+      title: "Next page",
+      category: "Reader",
+      binding: { key: "ArrowRight", modifier: "none" },
+      message: TurnedReaderPage({ direction: "next" }),
+    });
+  if (!reader.atStart)
+    commands.push({
+      id: "reader.previous",
+      title: "Previous page",
+      category: "Reader",
+      binding: { key: "ArrowLeft", modifier: "none" },
+      message: TurnedReaderPage({ direction: "previous" }),
+    });
+  commands.push(
+    {
+      id: "reader.zoom-in",
+      title: reader.kind === "epub" ? "Increase text size" : "Zoom in",
+      category: "Reader",
+      message: SteppedReaderZoom({ direction: "in" }),
+    },
+    {
+      id: "reader.zoom-out",
+      title: reader.kind === "epub" ? "Decrease text size" : "Zoom out",
+      category: "Reader",
+      message: SteppedReaderZoom({ direction: "out" }),
+    },
+    {
+      id: "reader.bookmark",
+      title: "Add or edit bookmark",
+      category: "Reader",
+      keywords: ["save place"],
+      message: PressedBookmarkButton(),
+    },
+  );
+  if (reader.userId !== null)
+    commands.push({
+      id: "reader.sync-position",
+      title: "Sync reading position",
+      category: "Reader",
+      binding: { key: "s", modifier: "command", whileTyping: true },
+      message: RequestedPositionSync(),
+    });
+  if (reader.kind === "pdf")
+    commands.push({
+      id: "reader.fit",
+      title: "Fit to text",
+      category: "Reader",
+      binding: { key: "f", modifier: "none" },
+      message: RequestedFitToText(),
+    });
+  if (canAnnotate && reader.selection !== null)
+    commands.push(
+      {
+        id: "reader.highlight",
+        title: "Highlight selected text",
+        category: "Reader",
+        message: CommittedReaderSelection({ intent: "highlight" }),
+      },
+      {
+        id: "reader.note",
+        title: "Annotate selected text",
+        category: "Notes",
+        keywords: ["new note"],
+        message: CommittedReaderSelection({ intent: "note" }),
+      },
+    );
+  return commands;
+};
 
 export const isReaderMessage = tagGuard(ReaderMessage);
 
@@ -373,6 +486,7 @@ export interface ReaderViewContext<Message> {
   readonly onSelectBook: (sourceId: string) => Message;
   readonly onRenameBook: ((sourceId: string, title: string) => Message) | null;
   readonly onAddBook: Message | null;
+  readonly onCommand: (id: string) => Message;
   readonly readerOnlyControl: { readonly expanded: boolean; readonly onToggle: Message } | null;
   /** Only an EPUB session needs this at mount time — its content lives in an
    *  iframe the app's `:root` custom properties can't reach. A later theme
@@ -445,7 +559,7 @@ const bookMenu = <Message>(
           h.AriaExpanded(reader.bookMenuOpen),
           h.AriaLabel("switch book"),
           h.Title("Switch book"),
-          h.OnClick(ToggledBookMenu()),
+          h.OnClick(context.onCommand("reader.books")),
         ],
         ["\u25BE"],
       ),
@@ -526,6 +640,7 @@ const readerZoom = <Message>(
   reader: ReaderWorkspace,
   h: HtmlBuilder<Message | ReaderMessage>,
   { value, unit, fitToText }: { value: number; unit: "%" | " pt"; fitToText: boolean },
+  onCommand: (id: string) => Message,
 ): Html[] => {
   return [
     ...(fitToText
@@ -537,7 +652,7 @@ const readerZoom = <Message>(
               h.Disabled(reader.loading),
               h.AriaLabel("Fit text to screen"),
               h.Title("Fit text to screen"),
-              h.OnClick(RequestedFitToText()),
+              h.OnClick(onCommand("reader.fit")),
             ],
             [
               h.svg(
@@ -562,7 +677,7 @@ const readerZoom = <Message>(
         h.Type("button"),
         h.Disabled(reader.loading),
         h.Title(unit === " pt" ? "Decrease text size" : "Zoom out"),
-        h.OnClick(SteppedReaderZoom({ direction: "out" })),
+        h.OnClick(onCommand("reader.zoom-out")),
       ],
       ["\u2212"],
     ),
@@ -572,7 +687,7 @@ const readerZoom = <Message>(
         h.Type("button"),
         h.Disabled(reader.loading),
         h.Title(unit === " pt" ? "Increase text size" : "Zoom in"),
-        h.OnClick(SteppedReaderZoom({ direction: "in" })),
+        h.OnClick(onCommand("reader.zoom-in")),
       ],
       ["+"],
     ),
@@ -679,54 +794,6 @@ function startedOnHorizontalScroller(target: EventTarget | null): boolean {
   return false;
 }
 
-const isTypingTarget = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement &&
-  (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-
-/** The reader's keyboard contract, previously owned by @tanstack/react-hotkeys.
- *  Returns the Message a key press means, or none when the reader does not
- *  claim that press. */
-export const readerKeyMessage = (
-  event: KeyboardEvent,
-  searchOpen: boolean,
-): Option.Option<ReaderMessage> => {
-  if (event.defaultPrevented) return Option.none();
-  const claim = <A>(message: A): Option.Option<A> => {
-    event.preventDefault();
-    return Option.some(message);
-  };
-  if (event.key === "Escape" && searchOpen) return Option.some(ClosedReaderSearch());
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-    return claim(OpenedReaderSearch());
-  }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-    return claim(RequestedPositionSync());
-  }
-  if (event.metaKey || event.ctrlKey || event.altKey) return Option.none();
-  if (isTypingTarget(event.target)) return Option.none();
-  if (event.shiftKey) {
-    if (event.key === "ArrowUp") return claim(SteppedReaderChrome({ direction: "hide" }));
-    if (event.key === "ArrowDown") return claim(SteppedReaderChrome({ direction: "show" }));
-    return Option.none();
-  }
-  switch (event.key) {
-    case "ArrowRight":
-      return claim(TurnedReaderPage({ direction: "next" }));
-    case "ArrowLeft":
-      return claim(TurnedReaderPage({ direction: "previous" }));
-    case "d":
-      return claim(ToggledReaderLayout());
-    case "f":
-      return claim(RequestedFitToText());
-    case "s":
-      return claim(ToggledBookMenu());
-    case "z":
-      return claim(ToggledReaderChrome());
-    default:
-      return Option.none();
-  }
-};
-
 const refocusOpenReaderSearch = (event: KeyboardEvent, searchOpen: boolean): boolean => {
   if (!searchOpen || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") {
     return false;
@@ -823,6 +890,7 @@ export const readerSwipeStream = (pane: ReaderPane): Stream.Stream<ReaderMessage
  */
 export const makeReaderSubscriptions = <Model>(
   modelToReader: (model: Model) => ReaderWorkspace | null,
+  canUseKeyboard: (model: Model) => boolean = () => true,
 ) =>
   Subscription.make<Model, ReaderMessage>()((entry) => ({
     readerKeyboard: entry(
@@ -830,17 +898,23 @@ export const makeReaderSubscriptions = <Model>(
       {
         modelToDependencies: (model) => {
           const reader = modelToReader(model);
-          return { open: reader !== null, searchOpen: reader?.searchOpen ?? false };
+          return {
+            open: reader !== null && canUseKeyboard(model),
+            searchOpen: reader?.searchOpen ?? false,
+          };
         },
         dependenciesToStream: ({ open, searchOpen }) =>
           Stream.when(
             Subscription.fromEventFilterMap<KeyboardEvent, ReaderMessage>({
               target: globalThis.document,
               type: "keydown",
+              options: { capture: true },
               toMessage: (event) =>
                 refocusOpenReaderSearch(event, searchOpen)
                   ? Option.none()
-                  : readerKeyMessage(event, searchOpen),
+                  : event.key === "Escape" && searchOpen
+                    ? Option.some(ClosedReaderSearch())
+                    : Option.none(),
             }),
             Effect.sync(() => open),
           ),
@@ -1666,9 +1740,6 @@ export const makeReaderSlice = ({
               [],
             ]
           : [reader, []];
-      // Page layout is a stored preference, so the host turns the key into a
-      // preference change and the reader hears the result as ChangedReaderLayout.
-      case "ToggledReaderLayout":
       case "CompletedReaderAction":
         return [reader, []];
     }
@@ -1855,7 +1926,7 @@ export const makeReaderSlice = ({
                   : `Edit ${currentBookmark.color} bookmark`
                 : "Loading bookmarks",
             ),
-            h.OnClick(PressedBookmarkButton()),
+            h.OnClick(context.onCommand("reader.bookmark")),
           ],
           [bookmarkMark(currentBookmark?.color ?? null)],
         ),
@@ -1946,7 +2017,7 @@ export const makeReaderSlice = ({
         bookMenu(reader, context, h),
         ...pageCount(reader, h),
         h.span([h.Class("spacer")], []),
-        ...readerZoom(reader, h, backendFor(reader.kind).zoom(reader)),
+        ...readerZoom(reader, h, backendFor(reader.kind).zoom(reader), context.onCommand),
         bookmarkControls,
         ...(context.readerOnlyControl === null
           ? []
@@ -2003,7 +2074,7 @@ export const makeReaderSlice = ({
       h.button([
         h.Type("button"),
         h.Class(`reader-page-turn reader-page-turn--${direction === "next" ? "next" : "prev"}`),
-        h.OnClick(TurnedReaderPage({ direction })),
+        h.OnClick(context.onCommand(direction === "next" ? "reader.next" : "reader.previous")),
         h.AriaLabel(direction === "next" ? "Next page" : "Previous page"),
         h.Title(direction === "next" ? "Next page" : "Previous page"),
       ]);
@@ -2045,7 +2116,7 @@ export const makeReaderSlice = ({
                     [
                       h.Type("button"),
                       h.Class("add-note label"),
-                      h.OnClick(CommittedReaderSelection({ intent: "highlight" })),
+                      h.OnClick(context.onCommand("reader.highlight")),
                       h.Title("Highlight this selection"),
                     ],
                     ["Highlight"],
@@ -2054,7 +2125,7 @@ export const makeReaderSlice = ({
                     [
                       h.Type("button"),
                       h.Class("add-note label"),
-                      h.OnClick(CommittedReaderSelection({ intent: "note" })),
+                      h.OnClick(context.onCommand("reader.note")),
                       h.Title("Add a note on this selection"),
                     ],
                     ["Add Note"],
