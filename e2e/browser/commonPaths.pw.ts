@@ -45,6 +45,7 @@ test("Smoke · common PDF and EPUB reading paths stay free of unexpected errors"
   const ref = `${group.slug}-${group.publicId}`;
 
   await page.goto(`/clubs/${ref}`);
+  await expect(page).toHaveTitle("Common Paths Club");
   await uploadThroughUi(page, "pdf", true);
   await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();
 
@@ -107,5 +108,7 @@ test("Smoke · common PDF and EPUB reading paths stay free of unexpected errors"
   await page.locator(".reader-bar").click({ position: { x: 2, y: 2 } });
   await expect(page.locator(".selection-actions")).toBeHidden();
 
+  await page.goto("/");
+  await expect(page).toHaveTitle("Bookclub");
   await assertNoUnexpectedFailures();
 });

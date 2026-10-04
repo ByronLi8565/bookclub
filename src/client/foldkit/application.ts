@@ -3059,7 +3059,10 @@ export const makeBookclubApplication = (container: HTMLElement) => {
     update,
     managedResources: noteAgentResources,
     subscriptions,
-    view: (model, h) => ({ title: "Bookclub", body: shellView(model, h) }),
+    view: (model, h) => ({
+      title: model.currentGroup?.displayName ?? "Bookclub",
+      body: shellView(model, h),
+    }),
     devTools: false,
   });
 };
