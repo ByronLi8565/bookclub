@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { strToU8, zipSync } from "fflate";
 import {
@@ -111,6 +112,55 @@ test("Group roles · an owner demotes a member and the live roster reflects it",
     await memberContext.close();
   }
 });
+
+for (const mobile of [false, true]) {
+  test(`Library · a long book menu scrolls and keeps book selection and upload reachable${mobile ? " @mobile" : ""}`, async ({
+    page,
+  }) => {
+    const { ref } = await seedWorkspace(page.context());
+    const pdf = await readFile(books.pdf.file);
+    for (let index = 1; index <= 14; index += 1) {
+      const title = `Library book ${index}`;
+      // A trailing PDF comment gives each copy its own content identity without changing the pages.
+      const uploaded = await page
+        .context()
+        .request.put(`/groups/${ref}/book`, {
+          multipart: uploadPart(
+            Buffer.concat([pdf, Buffer.from(`\n% ${title}\n`)]),
+            books.pdf.contentType,
+            `${title}.pdf`,
+          ),
+          headers: { "X-Source-Title": encodeURIComponent(title) },
+        });
+      expect(uploaded.ok(), "each book is added through the public upload endpoint").toBe(true);
+    }
+    await openWorkspace(page, ref);
+    await page.getByRole("button", { name: "switch book", exact: true }).click();
+    const menu = page.locator(".reader-bar").getByRole("menu");
+    await expect(menu).toBeVisible();
+    const bounds = await menu.boundingBox();
+    expect(bounds!.y + bounds!.height, "the dropdown fits within the viewport").toBeLessThanOrEqual(
+      page.viewportSize()!.height,
+    );
+    if (mobile) {
+      // Mobile WebKit has no wheel input in Playwright; scroll the visible menu directly.
+      await menu.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+    } else {
+      await menu.hover();
+      await page.mouse.wheel(0, 900);
+    }
+    const lastBook = menu.getByRole("menuitemradio", { name: "Library book 14", exact: true });
+    await expect(lastBook, "scrolling exposes the final book").toBeInViewport({ ratio: 1 });
+    await expect.poll(() => menu.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await lastBook.click();
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator(".reader-title")).toHaveText("Library book 14");
+    await expect(page.locator(books.pdf.ready).first()).toBeVisible();
+    await page.getByRole("button", { name: "switch book", exact: true }).click();
+    await menu.getByRole("menuitem", { name: "+ Add a book", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "add a book" })).toBeVisible();
+  });
+}
 
 test("Library · deleting the open book requires its title and opens the remaining book", async ({
   page,

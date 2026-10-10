@@ -224,6 +224,12 @@
   border: var(--line);
 }
 
+.reader-bar .book-menu-list {
+  max-height: min(360px, calc(100dvh - 160px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .book-menu-item {
   display: block;
   width: 100%;
