@@ -681,7 +681,7 @@ const readerZoom = <Message>(
       ],
       ["\u2212"],
     ),
-    h.span([h.Class("font-size")], [`${value}${unit}`]),
+    h.span([h.Class("font-size")], [`${Number(value.toPrecision(4))}${unit}`]),
     h.button(
       [
         h.Type("button"),
@@ -1457,18 +1457,14 @@ export const makeReaderSlice = ({
           : backendFor(reader.kind).changeLayout(reader, message.layout);
       case "SteppedReaderZoom": {
         const zoom = backendFor(reader.kind).zoom(reader);
-        const step =
-          message.direction === "in"
-            ? reader.kind === "epub"
-              ? 2
-              : 25
-            : reader.kind === "epub"
-              ? -2
-              : -25;
-        const next = Math.min(
-          reader.kind === "epub" ? 48 : 400,
-          Math.max(reader.kind === "epub" ? 8 : 50, zoom.value + step),
-        );
+        // Proportional PDF steps stay fine at every scale and can keep
+        // shrinking without crossing zero or hitting an arbitrary minimum.
+        const next =
+          reader.kind === "epub"
+            ? Math.min(48, Math.max(8, zoom.value + (message.direction === "in" ? 2 : -2)))
+            : message.direction === "in"
+              ? zoom.value * 1.05
+              : zoom.value / 1.05;
         return backendFor(reader.kind).stepZoom(reader, next);
       }
       case "TurnedReaderPage":

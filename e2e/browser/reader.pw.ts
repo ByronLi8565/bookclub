@@ -34,6 +34,21 @@ async function turnForward(page: Page): Promise<number | null> {
   return currentPage(page);
 }
 
+async function stepPdfZoom(page: Page, direction: "in" | "out"): Promise<number> {
+  const label = page.locator(".font-size");
+  const before = await label.textContent();
+  await page.getByTitle(`Zoom ${direction}`, { exact: true }).click();
+  await expect(label, "every zoom step changes the displayed size").not.toHaveText(before ?? "");
+  const displayed = Number((await label.textContent())?.replace("%", ""));
+  const scroller = page.locator(".pdf-scroller");
+  await expect
+    .poll(async () =>
+      Number(Number(await scroller.getAttribute("data-rendered-zoom")).toPrecision(4)),
+    )
+    .toBe(displayed);
+  return Number(await scroller.getAttribute("data-rendered-zoom"));
+}
+
 /** Every match the search overlay paints must sit on the matching words of the
  * PDF text layer, not merely somewhere on the page. */
 function searchHighlightsOnText(page: Page, query: string): Promise<boolean> {
@@ -393,7 +408,7 @@ test("Reader · PDF fit and zoom hold across page turns, and a turn starts at th
     })
     .toBeLessThanOrEqual(10);
 
-  for (let step = 0; step < 3; step++) {
+  for (let step = 0; step < 20; step++) {
     const previous = (await zoom.textContent()) ?? "";
     await page.getByTitle("Zoom in").click();
     await expect(zoom, "zooming in leaves fit mode").not.toHaveText(previous);
@@ -417,6 +432,74 @@ test("Reader · PDF fit and zoom hold across page turns, and a turn starts at th
       message: "the new page does not inherit the old page's horizontal pan",
     })
     .toBe(0);
+});
+
+test("Reader · PDF zoom takes small steps beyond the old limits and keeps the reading position", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openBook(page, books.pdf);
+  const scroller = page.locator(".pdf-scroller");
+  const canvas = page.locator(".pdf-pane canvas").first();
+  const firstPage = await currentPage(page);
+  let zoom = Number(await scroller.getAttribute("data-rendered-zoom"));
+  const initial = zoom;
+  zoom = await stepPdfZoom(page, "in");
+  expect(zoom - initial, "a click makes a fine adjustment instead of a 25-point jump").toBeLessThan(
+    10,
+  );
+
+  while (zoom >= 40) zoom = await stepPdfZoom(page, "out");
+  expect(await canvas.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(
+    await scroller.evaluate((element) => element.clientWidth / 2),
+  );
+  const smaller = await stepPdfZoom(page, "out");
+  expect(smaller, "zoom keeps shrinking below the former 50% floor").toBeLessThan(zoom);
+  zoom = smaller;
+
+  while (zoom <= 800) zoom = await stepPdfZoom(page, "in");
+  expect(await canvas.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(
+    await scroller.evaluate((element) => element.clientWidth * 8),
+  );
+  expect(
+    await canvas.evaluate((element: HTMLCanvasElement) => element.width),
+    "large pages retain a usable raster",
+  ).toBeGreaterThan(0);
+  expect(
+    await canvas.evaluate((element: HTMLCanvasElement) => {
+      const context = element.getContext("2d");
+      if (!context) return false;
+      const pixels = context.getImageData(0, 0, element.width, element.height).data;
+      for (let at = 4; at < pixels.length; at += 4) {
+        if (
+          pixels[at] !== pixels[0] ||
+          pixels[at + 1] !== pixels[1] ||
+          pixels[at + 2] !== pixels[2]
+        )
+          return true;
+      }
+      return false;
+    }),
+    "large zooms still paint the PDF content instead of a blank canvas",
+  ).toBe(true);
+
+  await scroller.evaluate((element) => element.scrollTo({ left: 300, top: 600 }));
+  const readingPoint = () =>
+    scroller.evaluate((element) => {
+      const spread = element.querySelector<HTMLElement>(".pdf-page");
+      return {
+        x: element.scrollLeft / (spread?.getBoundingClientRect().width ?? 1),
+        y: element.scrollTop / (spread?.getBoundingClientRect().height ?? 1),
+      };
+    });
+  const before = await readingPoint();
+  expect(before.x).toBeGreaterThan(0);
+  expect(before.y).toBeGreaterThan(0);
+  await stepPdfZoom(page, "in");
+  const after = await readingPoint();
+  expect(after.x, "horizontal panning stays on the same part of the page").toBeCloseTo(before.x, 3);
+  expect(after.y, "vertical scrolling stays on the same passage").toBeCloseTo(before.y, 3);
+  expect(await currentPage(page), "zooming does not turn the page").toBe(firstPage);
 });
 
 test("Reader · reopening a PDF shows the last rendered page while the book downloads", async ({
@@ -504,7 +587,7 @@ test("Reader · on a phone, swipes step the chrome and switch panes, but a zoome
   );
 
   const scroller = page.locator(".pdf-scroller");
-  for (let step = 0; step < 4; step++) await page.getByTitle("Zoom in").click();
+  for (let step = 0; step < 20; step++) await stepPdfZoom(page, "in");
   await expect
     .poll(() => scroller.evaluate((element) => element.scrollWidth - element.clientWidth), {
       timeout: 30_000,

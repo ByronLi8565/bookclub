@@ -114,7 +114,7 @@ describe("reader annotations", () => {
 
   it("zooms a PDF through the Model the Mount key is built from", () => {
     const [zoomed] = update(pdfReader, SteppedReaderZoom({ direction: "in" }));
-    expect(zoomed.zoomPercent).toBe(pdfReader.zoomPercent + 25);
+    expect(zoomed.zoomPercent).toBe(pdfReader.zoomPercent * 1.05);
 
     const [sized, commands] = update(epubReader, SteppedReaderZoom({ direction: "in" }));
     expect(sized.fontSizePoints).toBe(epubReader.fontSizePoints + 2);
@@ -122,6 +122,19 @@ describe("reader annotations", () => {
       commandNames(commands),
       "the relayout itself recounts the pages, so zoom asks for nothing else",
     ).toEqual(["SetEpubFontSize"]);
+  });
+
+  it("keeps PDF zoom reversible below 50% and above 400%", () => {
+    for (const zoomPercent of [0.1, 40, 500, 10_000]) {
+      const reader = { ...pdfReader, zoomPercent };
+      const [smaller] = update(reader, SteppedReaderZoom({ direction: "out" }));
+      expect(smaller.zoomPercent).toBeGreaterThan(0);
+      expect(smaller.zoomPercent).toBeLessThan(zoomPercent);
+      const [restored] = update(smaller, SteppedReaderZoom({ direction: "in" }));
+      expect(restored.zoomPercent).toBeCloseTo(zoomPercent, 8);
+      const [larger] = update(reader, SteppedReaderZoom({ direction: "in" }));
+      expect(larger.zoomPercent).toBeGreaterThan(zoomPercent);
+    }
   });
 });
 

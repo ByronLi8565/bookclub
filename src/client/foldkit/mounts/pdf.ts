@@ -46,14 +46,14 @@ import {
 } from "../../logic/reader/renderCache.ts";
 import { putRenderSnapshot } from "../../logic/reader/renderSnapshot.ts";
 import { makeLiveSlot, onForegroundResume } from "../../logic/mountSupport.ts";
+import { makeLayoutQueue } from "../../logic/reader/layoutQueue.ts";
 
 const MAX_RENDER_DPR = 2;
+const MAX_RASTER_DIMENSION = 4096;
 const SPREAD_CROP_PAD_PX = 16;
 const PDF_RECT_Y_NUDGE_PX = 4;
 const TEXT_TOP_MARGIN_PX = 24;
 const SCROLL_EDGE_EPSILON_PX = 20;
-const MIN_ZOOM = 50;
-const MAX_ZOOM = 400;
 
 const Point = Schema.Struct({ x: Schema.Number, y: Schema.Number });
 
@@ -196,8 +196,15 @@ const canvasRasterizer = ({
   deferReveal = false,
 }: PdfRasterizeRequest): PdfRenderTask => {
   const themed = !isDefaultPdfColors(colors);
-  canvas.width = Math.floor(viewport.width * dpr);
-  canvas.height = Math.floor(viewport.height * dpr);
+  // The display size stays unrestricted; only the backing pixels are bounded
+  // so large zooms do not exceed the browser's canvas allocation limits.
+  const rasterScale = Math.min(
+    1,
+    MAX_RASTER_DIMENSION / (Math.max(viewport.width, viewport.height) * dpr),
+  );
+  const rasterViewport = page.getViewport({ scale: viewport.scale * rasterScale });
+  canvas.width = Math.max(1, Math.floor(rasterViewport.width * dpr));
+  canvas.height = Math.max(1, Math.floor(rasterViewport.height * dpr));
   canvas.style.cssText = `width:${viewport.width}px;height:${viewport.height}px;`;
   // PDF.js paints progressively in the document's original colors. Keep that
   // intermediate frame out of view until its pixels have been remapped, or a
@@ -209,7 +216,7 @@ const canvasRasterizer = ({
     return { promise: Promise.resolve(), cancel: () => {} };
   }
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const task = page.render({ canvas, canvasContext: context, viewport });
+  const task = page.render({ canvas, canvasContext: context, viewport: rasterViewport });
   const promise = task.promise.then(() => {
     recolorPdfCanvas(context, canvas.width, canvas.height, colors);
     if (!deferReveal) canvas.style.visibility = "visible";
@@ -253,6 +260,7 @@ interface Session {
   readonly groupRef: string;
   readonly layout: PdfPageLayout;
   zoom: number;
+  zoomAnchor: { page: number; x: number; y: number } | null;
   smartArrows: SmartArrows;
   colors: PdfColors;
   readonly scroller: HTMLDivElement;
@@ -545,10 +553,8 @@ async function computeFitZoomAt(
     ((unionMaxY - unionMinY) * maxBaseHeight);
   // Floor rather than round: a zoom above the computed scale leaves a sliver of
   // scroll range, so a fit would immediately be followed by a scroll.
-  return Math.min(
-    MAX_ZOOM,
-    Math.max(MIN_ZOOM, Math.floor((Math.min(widthScale, heightScale) / fit) * 100)),
-  );
+  const zoom = (Math.min(widthScale, heightScale) / fit) * 100;
+  return zoom >= 1 ? Math.floor(zoom) : zoom;
 }
 
 const computeFitZoom = (session: Session): Promise<number | null> =>
@@ -589,6 +595,7 @@ function openSession(
     groupRef: args.groupRef,
     layout: args.layout,
     zoom: args.zoom,
+    zoomAnchor: null,
     colors: args.colors,
     smartArrows: args.smartArrows,
     scroller,
@@ -1040,7 +1047,8 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
   const doc = session.document;
   if (!doc || session.released) return;
   const seq = ++session.renderSeq;
-  const stale = () => seq !== session.renderSeq || session.released;
+  const zoom = session.zoom;
+  const stale = () => seq !== session.renderSeq || session.released || zoom !== session.zoom;
 
   const spread = spreadFits(session.layout, doc.numPages, session.scroller.clientWidth);
   session.spread = spread;
@@ -1061,7 +1069,7 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
   if (stale()) return;
   const base = firstPage.getViewport({ scale: 1 });
   const available = session.wrap.parentElement?.clientWidth || base.width;
-  const scale = fitScale(available, base.width, pages.length) * (session.zoom / 100);
+  const scale = fitScale(available, base.width, pages.length) * (zoom / 100);
   session.wrap.style.setProperty("--pdf-spread-gutter", `${gutter}px`);
   session.wrap.style.setProperty("--total-scale-factor", String(scale));
   session.wrap.style.setProperty("--scale-factor", String(scale));
@@ -1130,12 +1138,18 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
 
   session.wrap.style.width = `${totalWidth + gutter}px`;
   session.wrap.style.height = `${maxHeight}px`;
+  const anchor = session.zoomAnchor;
+  if (anchor?.page === session.page) {
+    session.scroller.scrollLeft = anchor.x * (totalWidth + gutter);
+    session.scroller.scrollTop = anchor.y * maxHeight;
+  }
+  session.zoomAnchor = null;
   if (themed) {
     for (const pane of panes) pane.canvas.style.visibility = "visible";
   }
 
   const lastPage = pages.at(-1) ?? left;
-  session.scroller.dataset.renderedZoom = String(session.zoom);
+  session.scroller.dataset.renderedZoom = String(zoom);
   session.emit(
     PdfSpreadRendered({
       sourceId: session.sourceId,
@@ -1145,7 +1159,7 @@ async function renderSpread(session: Session, environment: PdfMountEnvironment):
       atStart: left <= 1,
       atEnd: lastPage >= doc.numPages,
       percentage: doc.numPages > 0 ? left / doc.numPages : 0,
-      zoom: session.zoom,
+      zoom,
     }),
   );
   paintAnnotations(session);
@@ -1250,6 +1264,10 @@ async function fitSession(
  */
 export const makePdfMount = (environment: PdfMountEnvironment) => {
   const live = makeLiveSlot<Session>();
+  const renderZoom = makeLayoutQueue(async () => {
+    const session = live.get();
+    if (session !== null && !session.released) await renderSpread(session, environment);
+  });
 
   // The reader's Commands have no failure to report: a render that fails is
   // logged, and the next page turn or resize renders again.
@@ -1398,9 +1416,16 @@ export const makePdfMount = (environment: PdfMountEnvironment) => {
       onLiveSession((session) => {
         session.fitToPage = false;
         if (session.zoom === zoom) return;
+        // Held keys may request several scales before a render completes.
+        // Keep the anchor from the last committed layout until the new one lands.
+        session.zoomAnchor ??= {
+          page: session.page,
+          x: session.scroller.scrollLeft / (session.wrap.getBoundingClientRect().width || 1),
+          y: session.scroller.scrollTop / (session.wrap.getBoundingClientRect().height || 1),
+        };
         discardRasters(session);
         session.zoom = zoom;
-        return renderSpread(session, environment);
+        return renderZoom();
       }),
     setSmartArrows: (smartArrows: SmartArrows) =>
       Effect.sync(() => {
