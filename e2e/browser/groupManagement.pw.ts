@@ -232,6 +232,137 @@ test("Library · selecting an EPUB inspects, uploads, and opens it", async ({ pa
   ).toHaveLength(2);
 });
 
+test("Library · an open reader can add a PDF after inspection assets retire", async ({ page }) => {
+  const { ref } = await seedWorkspace(page.context(), books.epub);
+  await openWorkspace(page, ref, books.epub.ready);
+  // A deployment removes the old inspector chunk while the reader stays open.
+  await page.route("**/assets/checkHealth-*.js", (route) => route.fulfill({ status: 404 }));
+
+  await page.getByTitle("switch book").click();
+  await page.getByTitle("Add a book").click();
+  const dialog = page.getByRole("dialog", { name: "add a book" });
+  await dialog.locator('input[type="file"]').setInputFiles(fileURLToPath(books.pdf.file));
+  const upload = dialog.getByTitle("Upload book");
+  await expect(upload, "an already-open app can inspect a PDF after a deployment").toBeEnabled({
+    timeout: 30_000,
+  });
+  await upload.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(books.pdf.ready), "the accepted PDF opens in the reader").toBeVisible({
+    timeout: 30_000,
+  });
+});
+
+for (const asset of ["parser", "viewer", "worker"] as const) {
+  test(`Library · a failed PDF ${asset} download recovers with the selected file`, async ({
+    page,
+  }) => {
+    const { ref } = await seedWorkspace(page.context(), books.epub);
+    await openWorkspace(page, ref, books.epub.ready);
+    let assetRequests = 0;
+    await page.route(`**/assets/pdf-${asset}-*.js?*`, (route) => {
+      assetRequests++;
+      // PDF.js can attempt a main-thread fallback for the same worker URL.
+      return route.request().url().endsWith("?attempt=0")
+        ? route.fulfill({ status: 404 })
+        : route.continue();
+    });
+
+    await page.getByTitle("switch book").click();
+    await page.getByTitle("Add a book").click();
+    const dialog = page.getByRole("dialog", { name: "add a book" });
+    await dialog.locator('input[type="file"]').setInputFiles(fileURLToPath(books.pdf.file));
+    const upload = dialog.getByTitle("Upload book");
+    await expect(
+      upload,
+      "the app recovers without reloading or choosing the file again",
+    ).toBeEnabled({ timeout: 30_000 });
+    expect(
+      assetRequests,
+      "a fresh module request retries the failed download",
+    ).toBeGreaterThanOrEqual(2);
+    await expect(dialog.locator(".upload-error")).toHaveCount(0);
+    await upload.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(books.pdf.ready)).toBeVisible({ timeout: 30_000 });
+  });
+}
+
+test("Library · a deployment during PDF startup recovers without losing the file", async ({
+  page,
+}) => {
+  const { ref } = await seedWorkspace(page.context(), books.epub);
+  await openWorkspace(page, ref, books.epub.ready);
+  let lookups = 0;
+  await page.route("**/assets/pdf-runtime.json", (route) => {
+    lookups++;
+    return lookups === 1
+      ? route.fulfill({
+          json: {
+            parser: "/assets/retired-pdf-parser.js",
+            viewer: "/assets/retired-pdf-viewer.js",
+            worker: "/assets/retired-pdf-worker.js",
+          },
+        })
+      : route.continue();
+  });
+
+  await page.getByTitle("switch book").click();
+  await page.getByTitle("Add a book").click();
+  const dialog = page.getByRole("dialog", { name: "add a book" });
+  await dialog.locator('input[type="file"]').setInputFiles(fileURLToPath(books.pdf.file));
+  await expect(
+    dialog.getByTitle("Upload book"),
+    "a fresh deployment lookup automatically resumes inspection",
+  ).toBeEnabled({ timeout: 30_000 });
+  expect(lookups, "recovery discovers the currently deployed assets").toBe(2);
+  await dialog.getByTitle("Upload book").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(books.pdf.ready)).toBeVisible({ timeout: 30_000 });
+});
+
+test("Library · unavailable PDF assets stop retrying and show a concise error", async ({
+  page,
+}) => {
+  const { ref } = await seedWorkspace(page.context(), books.epub);
+  await openWorkspace(page, ref, books.epub.ready);
+  let lookups = 0;
+  await page.route("**/assets/pdf-runtime.json", (route) => {
+    lookups++;
+    return route.fulfill({ status: 503 });
+  });
+
+  await page.getByTitle("switch book").click();
+  await page.getByTitle("Add a book").click();
+  const dialog = page.getByRole("dialog", { name: "add a book" });
+  await dialog.locator('input[type="file"]').setInputFiles(fileURLToPath(books.pdf.file));
+  await expect(dialog.locator(".upload-error")).toHaveText(
+    "Couldn't inspect “moby-dick.pdf”. The PDF reader is temporarily unavailable.",
+  );
+  expect(lookups, "a continuing outage cannot cause a retry or reload loop").toBe(2);
+  await expect(dialog.getByTitle("Upload book")).toBeDisabled();
+});
+
+test("Library · a damaged PDF reports its parser error before upload", async ({ page }) => {
+  const { ref } = await seedWorkspace(page.context(), books.epub);
+  await openWorkspace(page, ref, books.epub.ready);
+  await page.getByTitle("switch book").click();
+  await page.getByTitle("Add a book").click();
+  const dialog = page.getByRole("dialog", { name: "add a book" });
+  await dialog
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: "damaged.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.6\ntruncated document"),
+    });
+  await expect(
+    dialog.getByText(/This PDF could not be opened\. Invalid PDF structure/u),
+    "the parser explains why the PDF cannot open",
+  ).toBeVisible();
+  await expect(dialog.getByTitle("Upload book")).toBeDisabled();
+});
+
 test("Reader · an EPUB starts and advances in linear spine order", async ({ page }) => {
   const { ref } = await seedWorkspace(page.context());
   await openWorkspace(page, ref);

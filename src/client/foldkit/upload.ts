@@ -7,7 +7,7 @@ import { formatBytes } from "../../shared/format.ts";
 import { groupUrlName, type GroupUrlParts } from "../../shared/groupUrls.ts";
 import { UPLOAD_FILE_FIELD } from "../../shared/http/uploads.ts";
 import type { SourceHealth } from "../../shared/types/sourceHealth.ts";
-import type { SourceInspection } from "../logic/sources/checkHealth.ts";
+import { inspectSource } from "../logic/sources/checkHealth.ts";
 // The reader and the presence modal both import this outright, so it is in the
 // bundle either way; loading it lazily here only split the graph on paper.
 import { putCachedSource } from "../logic/groups/sourceCache.ts";
@@ -97,6 +97,7 @@ export const SelectedBookFile = m("SelectedBookFile", { file: FoldkitFile.File }
 export const CompletedBookInspection = m("CompletedBookInspection", { book: InspectedBook });
 export const FailedBookInspection = m("FailedBookInspection", {
   reason: Schema.Literals(["unsupported_type", "read_failed"]),
+  message: Schema.String,
 });
 export const StartedBookFieldEdit = m("StartedBookFieldEdit", {
   field: Schema.Literals(["title", "author"]),
@@ -145,22 +146,15 @@ const bookHealth = (health: SourceHealth): BookHealth =>
         issues: health.status === "warn" ? health.warnings.map(healthIssue) : [],
       };
 
-/**
- * The inspectors pull in the EPUB and PDF readers, so they are imported when a
- * book is actually chosen rather than when the modal's module is loaded.
- */
+// An open reader can outlive a deployment's hashed assets. Keep inspection in
+// the application graph so choosing a book cannot fetch a retired inspector chunk.
 export const InspectBook = Command.define("InspectBook", {
   args: { token: Schema.String, file: FoldkitFile.File },
   messages: [CompletedBookInspection, FailedBookInspection],
   execute: ({ token, file }) =>
-    Effect.promise(async (): Promise<SourceInspection> => {
+    Effect.promise(() => {
       rememberSelectedFile(token, file);
-      try {
-        const { inspectSource } = await import("../logic/sources/checkHealth.ts");
-        return await inspectSource(file);
-      } catch {
-        return { ok: false, reason: "read_failed" };
-      }
+      return inspectSource(file);
     }).pipe(
       Effect.map((inspection) =>
         inspection.ok
@@ -178,7 +172,7 @@ export const InspectBook = Command.define("InspectBook", {
                 health: bookHealth(inspection.health),
               },
             })
-          : FailedBookInspection({ reason: inspection.reason }),
+          : FailedBookInspection({ reason: inspection.reason, message: inspection.message }),
       ),
     ),
 });
@@ -288,18 +282,7 @@ export const updateUpload = (
     case "CompletedBookInspection":
       return [{ ...model, status: "ready", inspected: message.book, error: null }, []];
     case "FailedBookInspection":
-      return [
-        {
-          ...model,
-          status: "idle",
-          inspected: null,
-          error:
-            message.reason === "unsupported_type"
-              ? "Unsupported file — choose an EPUB or PDF."
-              : "That file couldn't be read.",
-        },
-        [],
-      ];
+      return [{ ...model, status: "idle", inspected: null, error: message.message }, []];
     case "StartedBookFieldEdit":
       return [
         {

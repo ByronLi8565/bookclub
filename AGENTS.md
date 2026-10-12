@@ -21,6 +21,9 @@ Bookclub: a collaborative book-reading app. One Cloudflare Worker + a Foldkit SP
   (worker scenarios), `bun run test:browser` (Playwright journeys). Testing philosophy lives in
   `e2e/AGENTS.md`: prefer a real-user journey over a test that pins implementation.
 - Version control is **Jujutsu (jj)**, colocated with git: use `jj`, not `git`.
+- When the user says **deploy**, they mean **`just publish`**. Use that workflow after the
+  validation gate passes; it describes and pushes the change, backs up and deploys, and syncs
+  the remote development checkout.
 - Match the surrounding comment style: say _why_, not _what_.
 - The server HTTP architecture is Effect v4 HttpApi as specified in
   `docs/plans/effect-httpapi-migration.md`; read it before changing routes, authentication, or

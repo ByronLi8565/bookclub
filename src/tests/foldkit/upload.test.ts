@@ -68,11 +68,32 @@ describe("Foldkit upload stories", () => {
       updateUpload,
       Story.given(initialUploadModel()),
       Story.message(SelectedBookFile({ file: chosenFile() })),
-      Story.Command.resolve(InspectBook, FailedBookInspection({ reason: "unsupported_type" })),
+      Story.Command.resolve(
+        InspectBook,
+        FailedBookInspection({
+          reason: "unsupported_type",
+          message: "Unsupported file — choose an EPUB or PDF.",
+        }),
+      ),
       Story.model((model) => {
         expect(model.status).toBe("idle");
         expect(model.inspected).toBeNull();
         expect(model.error).toBe("Unsupported file — choose an EPUB or PDF.");
+      }),
+    );
+  });
+
+  it("preserves a concise inspection reason in the modal", () => {
+    const message =
+      "Couldn't inspect “book.pdf”. Text inspection failed on PDF page 17: invalid font.";
+    Story.story(
+      updateUpload,
+      Story.given(initialUploadModel()),
+      Story.message(SelectedBookFile({ file: chosenFile() })),
+      Story.Command.resolve(InspectBook, FailedBookInspection({ reason: "read_failed", message })),
+      Story.model((model) => {
+        expect(model.error).toBe(message);
+        expect(canUploadBook(model)).toBe(false);
       }),
     );
   });

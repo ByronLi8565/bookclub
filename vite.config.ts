@@ -46,6 +46,54 @@ function pdfjsWasm(): Plugin {
   };
 }
 
+function pdfjsRuntime(command: "build" | "serve"): Plugin {
+  const modules = {
+    parser: "pdfjs-dist/legacy/build/pdf.mjs",
+    viewer: "pdfjs-dist/legacy/web/pdf_viewer.mjs",
+    worker: "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+  } as const;
+  const entries = new Map<string, string>();
+  return {
+    name: "bookclub:pdfjs-runtime",
+    applyToEnvironment: (environment) => environment.name === "client",
+    configureServer(server) {
+      server.middlewares.use("/assets/pdf-runtime.json", (_request, response) => {
+        response.setHeader("Content-Type", "application/json");
+        response.setHeader("Cache-Control", "no-store");
+        response.end(
+          JSON.stringify(
+            Object.fromEntries(
+              Object.entries(modules).map(([key, id]) => [key, `/node_modules/${id}`]),
+            ),
+          ),
+        );
+      });
+    },
+    buildStart() {
+      if (command !== "build") return;
+      for (const [key, id] of Object.entries(modules)) {
+        entries.set(
+          key,
+          this.emitFile({ type: "chunk", id, name: `pdf-${key}`, preserveSignature: "strict" }),
+        );
+      }
+    },
+    generateBundle() {
+      // The stable lookup is replaced atomically with the assets it names.
+      // An old tab can discover the current modules without restarting its UI.
+      this.emitFile({
+        type: "asset",
+        fileName: "assets/pdf-runtime.json",
+        source: JSON.stringify(
+          Object.fromEntries(
+            Array.from(entries, ([key, ref]) => [key, `/${this.getFileName(ref)}`]),
+          ),
+        ),
+      });
+    },
+  };
+}
+
 // workerd cannot parse the standard decorators used by @callable; esbuild can lower them.
 function lowerDecorators(): Plugin {
   return {
@@ -68,6 +116,7 @@ export default defineConfig(({ command }) => ({
   plugins: [
     lowerDecorators(),
     pdfjsWasm(),
+    pdfjsRuntime(command),
     // Foldkit's HMR model preservation is worth ~9 kB gzip, so it stays in dev.
     ...(command === "serve" ? [foldkit()] : []),
     // Local development inherits the declarative SQLite DO exports from wrangler.jsonc.

@@ -1,6 +1,4 @@
-import type * as PdfjsModule from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import type * as PdfViewerModule from "pdfjs-dist/web/pdf_viewer.mjs";
 import { needsBoundarySpace } from "../text.ts";
 import type { TextLayerBuilder } from "pdfjs-dist/web/pdf_viewer.mjs";
 import {
@@ -11,14 +9,11 @@ import {
   type SourceHealthIssue,
 } from "../../../shared/types/sourceHealth.ts";
 import type { InspectionProgress, SourceInspectionResult, SourceMetadata } from "./checkHealth.ts";
+import { inspectionErrorDetail } from "./inspectionError.ts";
 
-// oxlint-disable-next-line import/default
-import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker&url";
+import { loadPdfRuntime } from "./pdfRuntime.ts";
 
 export type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-
-let pdfjsPromise: Promise<typeof PdfjsModule> | null = null;
-let viewerPromise: Promise<typeof PdfViewerModule> | null = null;
 
 const EMPTY_METADATA: SourceMetadata = { title: null, author: null, wordCount: null, cover: null };
 
@@ -39,26 +34,13 @@ interface PdfInfo {
   Author?: string;
 }
 
-function pdfjsLib(): Promise<typeof PdfjsModule> {
-  pdfjsPromise ??= import("pdfjs-dist/legacy/build/pdf.mjs").then((lib) => {
-    lib.GlobalWorkerOptions.workerSrc = workerUrl;
-    return lib;
-  });
-  return pdfjsPromise;
-}
-
-/** Start fetching the parser chunk while the source bytes are still loading. */
+/** Start fetching the parser while the source bytes are still loading. */
 export async function preparePdfRuntime(): Promise<void> {
-  await pdfjsLib();
+  await loadPdfRuntime();
 }
 
-// TextLayerBuilder reads pdfjsLib from globalThis at import time.
 export async function loadTextLayerBuilderCtor(): Promise<typeof TextLayerBuilder> {
-  const lib = await pdfjsLib();
-  // SAFETY: pdf.js looks up this documented global using the same module shape imported above.
-  (globalThis as { pdfjsLib?: typeof PdfjsModule }).pdfjsLib = lib;
-  viewerPromise ??= import("pdfjs-dist/legacy/web/pdf_viewer.mjs");
-  return (await viewerPromise).TextLayerBuilder;
+  return (await loadPdfRuntime()).viewer.TextLayerBuilder;
 }
 
 function isPasswordException(error: unknown): boolean {
@@ -78,8 +60,8 @@ export interface PdfTextItem {
 }
 
 export async function loadPdf(data: ArrayBuffer): Promise<PDFDocumentProxy> {
-  const pdfjs = await pdfjsLib();
-  return pdfjs.getDocument({ data, wasmUrl: PDFJS_WASM_URL }).promise;
+  const { lib, worker } = await loadPdfRuntime();
+  return lib.getDocument({ data, worker, wasmUrl: PDFJS_WASM_URL }).promise;
 }
 
 export async function destroyPdf(doc: PDFDocumentProxy): Promise<void> {
@@ -194,9 +176,11 @@ export async function inspectPdf(
   file: File,
   onProgress?: InspectionProgress,
 ): Promise<SourceInspectionResult> {
+  const data = await file.arrayBuffer();
+  await preparePdfRuntime();
   let doc;
   try {
-    doc = await loadPdf(await file.arrayBuffer());
+    doc = await loadPdf(data);
   } catch (error) {
     if (isPasswordException(error)) {
       return {
@@ -205,7 +189,12 @@ export async function inspectPdf(
       };
     }
     return {
-      health: healthError([{ code: "parse_failed", message: "This PDF could not be opened." }]),
+      health: healthError([
+        {
+          code: "parse_failed",
+          message: `This PDF could not be opened. ${inspectionErrorDetail(error) || "It may be damaged or incomplete."}`,
+        },
+      ]),
       metadata: EMPTY_METADATA,
     };
   }
@@ -229,8 +218,9 @@ export async function inspectPdf(
     let inspectedPages = 0;
     const pageStats = await Promise.all(
       Array.from({ length: numPages }, async (_, index) => {
-        const page = await doc.getPage(index + 1);
+        let page: PDFPageProxy | undefined;
         try {
+          page = await doc.getPage(index + 1);
           const items = await pageTextItems(page);
           const text = items.map((i) => i.str).join(" ");
           const trimmed = text.trim();
@@ -243,8 +233,13 @@ export async function inspectPdf(
             words: trimmed === "" ? 0 : trimmed.split(/\s+/u).length,
             replacementChars: (text.match(/\uFFFD/gu) ?? []).length,
           };
+        } catch (error) {
+          throw new Error(
+            `Text inspection failed on PDF page ${index + 1}: ${inspectionErrorDetail(error) || "unknown reader error"}`,
+            { cause: error },
+          );
         } finally {
-          page.cleanup();
+          page?.cleanup();
           inspectedPages++;
           onProgress?.(inspectedPages / numPages);
         }

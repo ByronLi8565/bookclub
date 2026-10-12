@@ -2,6 +2,7 @@ import { contentTypeFor, sourceKindFor, type SourceKind } from "../../../shared/
 import type { SourceHealth } from "../../../shared/types/sourceHealth.ts";
 import { inspectEpub } from "./epub.ts";
 import { inspectPdf } from "./pdf.ts";
+import { inspectionErrorDetail } from "./inspectionError.ts";
 
 export type InspectionProgress = (fraction: number) => void;
 
@@ -25,19 +26,30 @@ export type SourceInspection =
       health: SourceHealth;
       metadata: SourceMetadata;
     }
-  | { ok: false; reason: "unsupported_type" | "read_failed" };
+  | { ok: false; reason: "unsupported_type" | "read_failed"; message: string };
 
 export async function inspectSource(
   file: File,
   onProgress?: InspectionProgress,
 ): Promise<SourceInspection> {
   const kind = sourceKindFor(file.type, file.name);
-  if (!kind) return { ok: false, reason: "unsupported_type" };
+  if (!kind) {
+    return {
+      ok: false,
+      reason: "unsupported_type",
+      message: "Unsupported file — choose an EPUB or PDF.",
+    };
+  }
   try {
     const { health, metadata } =
       kind === "epub" ? await inspectEpub(file, onProgress) : await inspectPdf(file, onProgress);
     return { ok: true, kind, contentType: contentTypeFor(kind), health, metadata };
-  } catch {
-    return { ok: false, reason: "read_failed" };
+  } catch (error) {
+    const detail = inspectionErrorDetail(error);
+    return {
+      ok: false,
+      reason: "read_failed",
+      message: `Couldn't inspect “${file.name}”. ${detail || "The browser could not read or inspect this file."}`,
+    };
   }
 }
