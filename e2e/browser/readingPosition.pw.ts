@@ -106,6 +106,10 @@ test("Reading position · Local policy opens immediately without waiting for the
     page.locator(books.pdf.ready),
     "Local policy mounts the reader while the sync lookup is still blocked",
   ).toBeVisible({ timeout: 30_000 });
-  expect(await currentPage(page), "Local policy restores this browser's own page").toBe(localPage);
+  await expect
+    .poll(() => currentPage(page), {
+      message: "Local policy restores this browser's own page while the server is still blocked",
+    })
+    .toBe(localPage);
   releasePositionRequest();
 });

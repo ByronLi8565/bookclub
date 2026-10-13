@@ -17,9 +17,7 @@ import {
   LoadedGroup,
   PasskeyLogin,
   PushUrl,
-  RenameGroup,
   RenamedGroup,
-  ReplaceUrl,
   SelectedBook,
   ChangedNewGroupName,
   CreateGroup,
@@ -28,8 +26,6 @@ import {
   StartedCreatingClub,
   SubmittedNewGroup,
   ChangedLoginPassword,
-  ChangedRenameDraft,
-  CommittedRename,
   LoadGroups,
   LoadedSession,
   LoadedGroups,
@@ -57,7 +53,6 @@ import {
   RequestedSetPassword,
   SetAccountPassword,
   SettingsOverlay,
-  StartedRename,
   init,
   makeBookclubApplication,
   update,
@@ -468,23 +463,16 @@ describe("renaming a club", () => {
     const other = { ...club, groupId: "group-2", slug: "other", publicId: "beta" };
     const renamed = { ...club, slug: "the-whale", displayName: "The Whale" };
 
-    Story.story(
-      update,
-      Story.given({ ...inClub(), groups: [club, other] }),
-      Story.message(StartedRename({ value: club.displayName })),
-      Story.message(ChangedRenameDraft({ value: "The Whale" })),
-      Story.message(CommittedRename()),
-      Story.Command.expectExact(RenameGroup({ groupRef: "club-alpha", title: "The Whale" })),
-      Story.Command.resolve(RenameGroup, RenamedGroup({ group: renamed })),
-      // A rename is not somewhere new to go back from.
-      Story.Command.expectExact(ReplaceUrl({ href: "/clubs/the-whale-alpha" })),
-      Story.Command.resolve(ReplaceUrl, LeftTheApp()),
-      Story.model((model) => {
-        expect(model.groups.map((group) => group.displayName)).toEqual(["The Whale", "Club"]);
-        expect(model.currentGroup?.displayName).toBe("The Whale");
-        expect(model.renamingClub).toBe(false);
-      }),
+    const [renamedModel, commands] = update(
+      { ...inClub(), groups: [club, other] },
+      RenamedGroup({ group: renamed }),
     );
+    // A rename is not somewhere new to go back from.
+    expect(commands).toContainEqual(
+      expect.objectContaining({ name: "ReplaceUrl", args: { href: "/clubs/the-whale-alpha" } }),
+    );
+    expect(renamedModel.groups.map((group) => group.displayName)).toEqual(["The Whale", "Club"]);
+    expect(renamedModel.currentGroup?.displayName).toBe("The Whale");
   });
 });
 

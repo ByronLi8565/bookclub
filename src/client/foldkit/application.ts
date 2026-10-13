@@ -340,6 +340,7 @@ export const LoadedGroups = m("LoadedGroups", {
 /** The club list could not be refreshed. Whatever is already on screen — the
  *  copy this device cached — stays there. */
 export const FailedGroups = m("FailedGroups", { userId: Schema.String });
+export const RememberedGroups = m("RememberedGroups");
 export const StartedCreatingClub = m("StartedCreatingClub");
 export const CancelledCreatingClub = m("CancelledCreatingClub");
 export const FailedCreateGroup = m("FailedCreateGroup", { error: Schema.String });
@@ -442,6 +443,7 @@ export type Message =
   | typeof FailedLogin.Type
   | typeof DismissedLogin.Type
   | typeof LoadedGroups.Type
+  | typeof RememberedGroups.Type
   | typeof FailedGroups.Type
   | typeof StartedCreatingClub.Type
   | typeof CancelledCreatingClub.Type
@@ -546,6 +548,17 @@ export const LoadGroups = Command.define("LoadGroups", {
         return LoadedGroups({ userId, groups });
       }),
       Effect.catch(() => Effect.succeed(FailedGroups({ userId }))),
+    ),
+});
+
+const RememberGroups = Command.define("RememberGroups", {
+  args: { userId: Schema.String, groups: Schema.Array(GroupSummary) },
+  messages: [RememberedGroups],
+  execute: ({ userId, groups }) =>
+    Effect.try(() => rememberGroups(userId, groups)).pipe(
+      // Cache writes are optional when device storage is full or unavailable.
+      Effect.catch(() => Effect.succeed(null)),
+      Effect.as(RememberedGroups()),
     ),
 });
 
@@ -952,13 +965,6 @@ const applicationUserCommands = (model: Model): readonly UserCommand<Message>[] 
       keywords: ["members", "manage books", "roster"],
       message: OpenedOverlay({ overlay: PresenceOverlay() }),
     },
-    ...books(group).map((book) => ({
-      id: `book.${group.groupId}.${book.id}`,
-      title: `Switch to book: ${book.title ?? "Untitled book"}`,
-      category: "Books",
-      keywords: [book.title ?? "", book.kind],
-      message: SelectedBook({ sourceId: book.id }),
-    })),
   );
   if (signedIn && permits(role, GroupAction.UploadBook))
     commands.push({
@@ -1073,8 +1079,30 @@ const applicationUserCommands = (model: Model): readonly UserCommand<Message>[] 
   return commands;
 };
 
+const bookUserCommands = (model: Model): readonly UserCommand<Message>[] => {
+  if (model.session._tag !== "AuthenticatedSession") return [];
+  const current = model.currentGroup;
+  return model.groups.flatMap((group) =>
+    current?.groupId === group.groupId && model.membership?.isMember === false
+      ? []
+      : books(group).map((book) => ({
+          id: `book.${group.groupId}.${book.id}`,
+          title: `Switch to book: ${book.title ?? "Untitled book"}`,
+          category: `Books · ${group.displayName}`,
+          keywords: [book.title ?? "", book.kind, group.displayName],
+          message:
+            current?.groupId === group.groupId
+              ? SelectedBook({ sourceId: book.id })
+              : RequestedUrl({
+                  href: hrefFor(Club({ groupRef: groupUrlName(group), book: book.id })),
+                }),
+        })),
+  );
+};
+
 export const discoverUserCommands = commandRegistry<Model, Message>(
   applicationUserCommands,
+  bookUserCommands,
   (model) =>
     model.reader === null
       ? []
@@ -1508,7 +1536,30 @@ const updateInviteSlice = (model: Model, message: InviteMessage): Update => {
 };
 
 export const update = (model: Model, message: Message): Update =>
-  reconcilePendingJump(reconcileReaderIdentity(reconcileReaderPrefs(updateSlices(model, message))));
+  reconcilePendingJump(
+    reconcileReaderIdentity(
+      reconcileReaderPrefs(reconcileGroupCatalog(model, updateSlices(model, message))),
+    ),
+  );
+
+/** A loaded or changed club updates the shared catalog before leaving its workspace. */
+const reconcileGroupCatalog = (previous: Model, [model, commands]: Update): Update => {
+  const group = model.currentGroup;
+  if (
+    group === null ||
+    group === previous.currentGroup ||
+    model.session._tag !== "AuthenticatedSession" ||
+    model.membership?.isMember !== true
+  )
+    return [model, commands];
+  const groups = model.groups.some((entry) => entry.groupId === group.groupId)
+    ? model.groups.map((entry) => (entry.groupId === group.groupId ? group : entry))
+    : [...model.groups, group];
+  return [
+    { ...model, groups },
+    [...commands, RememberGroups({ userId: model.session.user.id, groups })],
+  ];
+};
 
 /**
  * Replays a jump that was waiting on its book. A reader still loading cannot
@@ -1543,8 +1594,12 @@ const updateSlices = (model: Model, message: Message): Update => {
               overlay: CommandPaletteOverlay(),
               palettePreviousOverlay: model.overlay,
               palette: { ...model.palette, query: "", selected: 0 },
+              groupsStatus:
+                model.session._tag === "AuthenticatedSession" ? "loading" : model.groupsStatus,
             },
-            [],
+            model.session._tag === "AuthenticatedSession" && model.groupsStatus !== "loading"
+              ? [LoadGroups({ userId: model.session.user.id })]
+              : [],
           ];
     case "ChangedCommandQuery":
       return [
@@ -2013,6 +2068,7 @@ const updateSlices = (model: Model, message: Message): Update => {
         : openBook(model, group, stored);
     }
     case "RememberedSelectedSource":
+    case "RememberedGroups":
       return [model, []];
     case "SelectedBook":
       return model.currentGroup === null
@@ -2508,7 +2564,19 @@ const workspaceLayoutView = (
 export const overlayView = (model: Model, h: HtmlBuilder<Message>): Html[] => {
   switch (model.overlay._tag) {
     case "CommandPaletteOverlay":
-      return [paletteView(model.palette, paletteCommands(model), ClosedOverlay(), h)];
+      return [
+        paletteView(
+          model.palette,
+          paletteCommands(model),
+          ClosedOverlay(),
+          model.groupsStatus === "loading"
+            ? "Updating clubs and books…"
+            : model.groupsStatus === "failed"
+              ? "Couldn't refresh clubs and books. Showing saved commands."
+              : null,
+          h,
+        ),
+      ];
     case "LoginOverlay":
       return [loginModalView(model, h)];
     case "InfoOverlay":

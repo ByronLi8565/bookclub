@@ -141,6 +141,7 @@ export const paletteView = <Message>(
   model: PaletteModel,
   commands: readonly UserCommand<Message>[],
   onClose: Message,
+  libraryNotice: string | null,
   h: HtmlBuilder<Message | PaletteMessage>,
 ): Html => {
   const selected = Math.min(model.selected, Math.max(0, commands.length - 1));
@@ -188,6 +189,7 @@ export const paletteView = <Message>(
               h.Tabindex(-1),
               h.AriaSelected(index === selected),
               h.AriaLabel(command.title),
+              h.AriaDescription(command.category),
               h.OnClick(InvokedUserCommand({ id: command.id })),
             ],
             [
@@ -200,8 +202,13 @@ export const paletteView = <Message>(
           ),
         ),
       ),
-      ...(commands.length === 0
-        ? [h.p([h.Class("command-palette-empty"), h.Role("status")], ["No matching commands"])]
+      ...(commands.length === 0 || libraryNotice !== null
+        ? [
+            h.p(
+              [h.Class("command-palette-empty"), h.Role("status")],
+              [libraryNotice ?? "No matching commands"],
+            ),
+          ]
         : []),
       h.div([h.Class("command-palette-hint")], ["↑ ↓ navigate · Enter run · Esc close"]),
     ],

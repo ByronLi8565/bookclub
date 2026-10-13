@@ -6,6 +6,7 @@ import {
   seedWorkspace,
   uploadBook,
   watchForUnexpectedBrowserFailures,
+  type GroupSummary,
 } from "./browserSupport.ts";
 
 const palette = (page: Page) => page.getByRole("dialog", { name: "Command palette" });
@@ -19,6 +20,119 @@ async function runCommand(page: Page, query: string, title: string): Promise<voi
   await search(page).press("Enter");
   await expect(palette(page)).toHaveCount(0);
 }
+
+async function createClub(page: Page, displayName: string): Promise<string> {
+  const created = await page.context().request.post("/groups", { data: { displayName } });
+  expect(created.status()).toBe(201);
+  // SAFETY: the public creation response supplies the club's URL identity.
+  const { group } = (await created.json()) as { group: GroupSummary };
+  return `${group.slug}-${group.publicId}`;
+}
+
+test("Commands · books from every accessible club are searchable from home and switch clubs", async ({
+  page,
+  browser,
+}) => {
+  const { ref } = await seedWorkspace(page.context());
+  const otherRef = await createClub(page, "Astronomy Readers");
+  await uploadBook(page.context(), otherRef, books.pdf);
+  await uploadBook(page.context(), otherRef, books.epub);
+  const outsider = await browser.newContext();
+  try {
+    await seedWorkspace(outsider, books.epub);
+  } finally {
+    await outsider.close();
+  }
+  const assertHealthy = watchForUnexpectedBrowserFailures(page);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Bookclub", exact: true })).toBeVisible();
+  await page.keyboard.press("Meta+k");
+  await search(page).fill("astronomy dorian");
+  const target = palette(page).getByRole("option").first();
+  await expect(target).toHaveAccessibleName(`Switch to book: ${books.epub.title}`);
+  await expect(target).toHaveAccessibleDescription("Books · Astronomy Readers");
+  await expect(target, "each book identifies its club").toContainText("Books · Astronomy Readers");
+  await search(page).press("Enter");
+  await expect(page).toHaveURL(`/clubs/${otherRef}`);
+  await expect(page.locator(books.epub.ready)).toBeVisible();
+  await expect(page.locator(".reader-title")).toHaveText(books.epub.title);
+
+  await page.keyboard.press("Meta+k");
+  await search(page).fill("moby dick");
+  const copies = palette(page).getByRole("option");
+  await expect(copies, "the same book in two clubs has two distinct destinations").toHaveCount(2);
+  await copies.filter({ hasText: "Workspace Regression Club" }).click();
+  await expect(page).toHaveURL(`/clubs/${ref}`);
+  await expect(page.locator(books.pdf.ready).first()).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(`/clubs/${otherRef}`);
+  await expect(page.locator(books.epub.ready)).toBeVisible();
+  await page.keyboard.press("Meta+k");
+  await search(page).fill("dorian");
+  await expect(
+    palette(page).getByRole("option"),
+    "another user's private club contributes no book commands",
+  ).toHaveCount(1);
+  await assertHealthy();
+});
+
+test("Commands · cached books remain available while the catalog refreshes and after a failed reload", async ({
+  page,
+}) => {
+  const { ref } = await seedWorkspace(page.context());
+  const otherRef = await createClub(page, "Astronomy Readers");
+  const sourceId = await uploadBook(page.context(), otherRef, books.epub);
+  const catalog = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/groups",
+  );
+  await openWorkspace(page, ref);
+  await catalog;
+  const renamed = await page
+    .context()
+    .request.put(`/groups/${otherRef}/book/title`, {
+      data: { sourceId, title: "A newly renamed book" },
+    });
+  expect(renamed.status()).toBe(200);
+
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  await page.route("**/groups", async (route) => {
+    await refreshGate;
+    await route.continue();
+  });
+  try {
+    await page.keyboard.press("Meta+k");
+    await expect(search(page)).toBeFocused();
+    await search(page).fill("astronomy dorian");
+    await expect(palette(page).getByRole("option").first()).toHaveAccessibleName(
+      `Switch to book: ${books.epub.title}`,
+    );
+    await expect(palette(page).getByRole("status")).toHaveText("Updating clubs and books…");
+  } finally {
+    releaseRefresh();
+  }
+  await search(page).fill("newly renamed astronomy");
+  await expect(palette(page).getByRole("option").first()).toHaveAccessibleName(
+    "Switch to book: A newly renamed book",
+  );
+  await page.keyboard.press("Escape");
+  await page.unroute("**/groups");
+  await page.route("**/groups", (route) => route.abort());
+  await page.reload();
+  await expect(page.locator(books.pdf.ready).first()).toBeVisible();
+  await page.keyboard.press("Meta+k");
+  await search(page).fill("newly renamed astronomy");
+  await expect(palette(page).getByRole("option").first()).toHaveAccessibleName(
+    "Switch to book: A newly renamed book",
+  );
+  await expect(palette(page).getByRole("status")).toContainText("Showing saved commands");
+  await search(page).press("Enter");
+  await expect(page).toHaveURL(`/clubs/${otherRef}`);
+  await expect(page.locator(books.epub.ready)).toBeVisible();
+  await expect(page.locator(".reader-title")).toHaveText("A newly renamed book");
+});
 
 test("Commands · keyboard navigation, empty search, dismissal, and focus preserve the workspace", async ({
   page,
